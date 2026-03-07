@@ -2,6 +2,7 @@
 
 #include "AudioProcessingStage.h"
 #include "AudioPipeline.h"
+#include <juce_audio_basics/juce_audio_basics.h>
 #include <memory>
 
 namespace dsp_core::audio_pipeline {
@@ -52,10 +53,10 @@ class DryWetMixStage : public AudioProcessingStage {
     void setMixAmount(double mix);
 
     /**
-     * Get current mix amount.
+     * Get current mix amount (target value, not the smoothed current value).
      */
     double getMixAmount() const {
-        return mixAmount_;
+        return mixSmoothed_.getTargetValue();
     }
 
     /**
@@ -72,7 +73,7 @@ class DryWetMixStage : public AudioProcessingStage {
     juce::AudioBuffer<double> dryBuffer_;   // Current dry signal
     juce::AudioBuffer<double> delayBuffer_; // Circular buffer for latency compensation
     int delayBufferWritePos_ = 0;           // Write position in delay buffer
-    double mixAmount_ = 1.0;                // 100% wet by default
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> mixSmoothed_; // 100% wet by default
 };
 
 } // namespace dsp_core::audio_pipeline

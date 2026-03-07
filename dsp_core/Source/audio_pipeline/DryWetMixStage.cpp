@@ -5,6 +5,7 @@ namespace dsp_core::audio_pipeline {
 
 namespace {
 constexpr int kMaxChannels = 8; // Support stereo, 5.1, 7.1
+constexpr double kMixRampTimeSeconds = 0.01; // 10ms ramp, matches GainStage
 } // namespace
 
 DryWetMixStage::DryWetMixStage(std::unique_ptr<AudioPipeline> effectsPipeline)
@@ -15,6 +16,9 @@ DryWetMixStage::DryWetMixStage(std::unique_ptr<AudioPipeline> effectsPipeline)
 void DryWetMixStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
     dryBuffer_.setSize(kMaxChannels, samplesPerBlock, false, true, true);
     effectsPipeline_->prepareToPlay(sampleRate, samplesPerBlock);
+
+    mixSmoothed_.reset(sampleRate, kMixRampTimeSeconds);
+    mixSmoothed_.setCurrentAndTargetValue(1.0); // 100% wet by default
 
     const int latencySamples = effectsPipeline_->getLatencySamples();
     if (latencySamples > 0) {
@@ -81,7 +85,7 @@ AudioPipeline* DryWetMixStage::getEffectsPipeline() {
 }
 
 void DryWetMixStage::setMixAmount(double mix) {
-    mixAmount_ = juce::jlimit(0.0, 1.0, mix);
+    mixSmoothed_.setTargetValue(juce::jlimit(0.0, 1.0, mix));
 }
 
 void DryWetMixStage::captureDrySignal(const juce::AudioBuffer<double>& buffer) {
@@ -100,15 +104,15 @@ void DryWetMixStage::applyMix(juce::AudioBuffer<double>& wetBuffer) {
     const int numChannels = wetBuffer.getNumChannels();
     const int numSamples = wetBuffer.getNumSamples();
 
-    const double dryGain = 1.0 - mixAmount_;
-    const double wetGain = mixAmount_;
+    for (int i = 0; i < numSamples; ++i) {
+        const double wetGain = mixSmoothed_.getNextValue();
+        const double dryGain = 1.0 - wetGain;
 
-    for (int ch = 0; ch < numChannels; ++ch) {
-        double* wetData = wetBuffer.getWritePointer(ch);
-        const double* dryData = dryBuffer_.getReadPointer(ch);
-
-        juce::FloatVectorOperations::multiply(wetData, wetGain, numSamples);
-        juce::FloatVectorOperations::addWithMultiply(wetData, dryData, dryGain, numSamples);
+        for (int ch = 0; ch < numChannels; ++ch) {
+            double* wetData = wetBuffer.getWritePointer(ch);
+            const double* dryData = dryBuffer_.getReadPointer(ch);
+            wetData[i] = wetGain * wetData[i] + dryGain * dryData[i];
+        }
     }
 }
 
