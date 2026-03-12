@@ -10,7 +10,6 @@
 #include "dsp_core.h"
 #include "Source/AudioHistoryBuffer.cpp"
 #include "Source/StereoHistoryBuffer.cpp"
-#include "Source/ExpressionEvaluator.cpp"
 #include "Source/HarmonicLayer.cpp"
 #include "Source/LayeredTransferFunction.cpp"
 #include "Source/SeamlessTransferFunction.cpp"

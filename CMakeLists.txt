@@ -9,14 +9,9 @@ juce_add_module(dsp_core
             juce::juce_dsp
 )
 
-# Add exprtk include path (header-only library managed by CPM in root CMakeLists.txt)
-target_include_directories(dsp_core INTERFACE "${CMAKE_SOURCE_DIR}/libs/exprtk")
-
 target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/dsp_core.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/dsp_core.h"
-    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/ExpressionEvaluator.h"
-    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/ExpressionEvaluator.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/HarmonicLayer.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/HarmonicLayer.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/LayeredTransferFunction.h"
