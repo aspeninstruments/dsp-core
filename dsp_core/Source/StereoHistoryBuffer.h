@@ -62,6 +62,14 @@ class StereoHistoryBuffer {
     }
 
     /**
+     * @brief Get the total number of samples written since construction or last clear().
+     * @note Thread-safe. Useful for checking if enough data has accumulated for analysis.
+     */
+    int64_t getTotalSamplesWritten() const {
+        return totalSamplesWritten_.load(std::memory_order_acquire);
+    }
+
+    /**
      * @brief Clear both buffers to zero.
      * @note Should only be called when audio is stopped.
      */
@@ -74,6 +82,7 @@ class StereoHistoryBuffer {
     std::vector<double> yBuffer_;
     std::atomic<uint64_t> sequence_{0};  // Seqlock: odd = write in progress, even = stable
     std::atomic<int> writePos_{0};
+    std::atomic<int64_t> totalSamplesWritten_{0};
     int size_;
 
     // Cached last-good read for fallback when write is in progress

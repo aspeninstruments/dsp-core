@@ -26,6 +26,9 @@ void StereoHistoryBuffer::pushSample(double xSample, double ySample) {
     int nextPos = (pos + 1) % size_;
     writePos_.store(nextPos, std::memory_order_relaxed);
 
+    // Track total samples for readiness checks
+    totalSamplesWritten_.fetch_add(1, std::memory_order_relaxed);
+
     // End write: increment sequence to even (signals write complete)
     sequence_.store(seq + 2, std::memory_order_release);
 }
@@ -47,6 +50,9 @@ void StereoHistoryBuffer::pushSamples(const double* xSamples, const double* ySam
 
     // Update write position
     writePos_.store(pos, std::memory_order_relaxed);
+
+    // Track total samples for readiness checks
+    totalSamplesWritten_.fetch_add(static_cast<int64_t>(numSamples), std::memory_order_relaxed);
 
     // End write: increment sequence to even
     sequence_.store(seq + 2, std::memory_order_release);
@@ -139,6 +145,7 @@ void StereoHistoryBuffer::clear() {
     std::fill(xBuffer_.begin(), xBuffer_.end(), 0.0);
     std::fill(yBuffer_.begin(), yBuffer_.end(), 0.0);
     writePos_.store(0, std::memory_order_relaxed);
+    totalSamplesWritten_.store(0, std::memory_order_relaxed);
 
     // Clear cache too
     std::fill(cachedX_.begin(), cachedX_.end(), 0.0);
