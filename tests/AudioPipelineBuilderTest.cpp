@@ -163,6 +163,19 @@ TEST_F(AudioPipelineBuilderTest, PipelineProcessesAudio) {
 
     pipeline->prepareToPlay(44100.0, 512);
 
+    // JUCE Gain defaults to 0.0 linear (silence), set to unity for passthrough
+    auto* inputGain = stages.get<GainStage>(StageTag::InputGain);
+    auto* outputGain = stages.get<GainStage>(StageTag::OutputGain);
+    ASSERT_NE(inputGain, nullptr);
+    ASSERT_NE(outputGain, nullptr);
+    inputGain->setGainDB(0.0);
+    outputGain->setGainDB(0.0);
+
+    // Process a settle block so gain smoothers reach unity
+    juce::AudioBuffer<double> settle(2, 512);
+    settle.clear();
+    pipeline->process(settle);
+
     juce::AudioBuffer<double> buffer(2, 512);
     buffer.clear();
 
