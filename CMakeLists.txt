@@ -25,6 +25,8 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/SplineTypes.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/StereoHistoryBuffer.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/StereoHistoryBuffer.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/ExpressionEvaluator.h"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/ExpressionEvaluator.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/TransferFunction.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/TransferFunction.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/Services/AdaptiveToleranceCalculator.h"
@@ -62,6 +64,9 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AudioPipelineBuilder.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AudioPipelineBuilder.cpp"
 )
+
+# exprtk header-only library (used by ExpressionEvaluator)
+target_include_directories(dsp_core INTERFACE "${CMAKE_CURRENT_LIST_DIR}/../../libs/exprtk")
 
 # Add tests subdirectory if testing is enabled
 if(BUILD_TESTING)

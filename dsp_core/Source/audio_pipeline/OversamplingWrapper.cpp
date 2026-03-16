@@ -17,7 +17,9 @@ OversamplingWrapper::OversamplingWrapper(std::unique_ptr<AudioProcessingStage> w
         oversamplers_[i] = std::make_unique<juce::dsp::Oversampling<double>>(
             2, // 2 channels (stereo)
             i, // Oversampling order
-            juce::dsp::Oversampling<double>::filterHalfBandPolyphaseIIR);
+            juce::dsp::Oversampling<double>::filterHalfBandPolyphaseIIR,
+            true,  // isMaxQuality
+            false); // useIntegerLatency — not needed, oversampling wraps both dry and wet paths
     }
 }
 

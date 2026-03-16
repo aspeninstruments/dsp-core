@@ -3,31 +3,12 @@
 #include "AudioPipeline.h"
 #include "StageHandles.h"
 #include "DryWetMixStage.h"
+#include "OversamplingWrapper.h"
 #include <memory>
 #include <tuple>
 
 namespace dsp_core::audio_pipeline {
 
-/**
- * Fluent builder for constructing AudioPipeline instances.
- *
- * Eliminates boilerplate around:
- * - Pointer caching before std::move
- * - Nested wrapper stages (OversamplingWrapper containing WaveshapingStage)
- * - Post-construction stage retrieval
- *
- * Usage:
- *   auto [pipeline, stages] = AudioPipelineBuilder()
- *       .withDryWetMix()
- *       .addStage<GainStage>(StageTag::InputGain)
- *       .addWrapped<OversamplingWrapper, WaveshapingStage>(
- *           StageTag::Waveshaper, transferFunction)
- *       .addStage<DCBlockingFilter>(StageTag::DCBlock)
- *       .addStage<GainStage>(StageTag::OutputGain)
- *       .build();
- *
- *   inputGainStage = stages.get<GainStage>(StageTag::InputGain);
- */
 class AudioPipelineBuilder {
   public:
     /**
@@ -43,6 +24,8 @@ class AudioPipelineBuilder {
      * @return Reference to this builder for chaining
      */
     AudioPipelineBuilder& withDryWetMix();
+
+    AudioPipelineBuilder& withOversampling(int initialOrder);
 
     /**
      * Add a stage to the pipeline.
@@ -146,6 +129,8 @@ class AudioPipelineBuilder {
     std::unique_ptr<AudioPipeline> pipeline_;
     StageHandles handles_;
     bool useDryWetMix_ = false;
+    bool useOversampling_ = false;
+    int oversamplingOrder_ = 0;
     bool built_ = false;
 };
 

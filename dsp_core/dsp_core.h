@@ -37,6 +37,7 @@
 #include "Source/SeamlessTransferFunctionImpl.h"
 #include "Source/SplineLayer.h"
 #include "Source/SplineTypes.h"
+#include "Source/ExpressionEvaluator.h"
 #include "Source/TransferFunction.h"
 #include "Source/Services/AdaptiveToleranceCalculator.h"
 #include "Source/Services/CoordinateSnapper.h"

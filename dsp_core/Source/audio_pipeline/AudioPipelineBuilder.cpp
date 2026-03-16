@@ -13,25 +13,39 @@ AudioPipelineBuilder& AudioPipelineBuilder::withDryWetMix() {
     return *this;
 }
 
+AudioPipelineBuilder& AudioPipelineBuilder::withOversampling(int initialOrder) {
+    jassert(!built_ && "Cannot modify builder after build()");
+    useOversampling_ = true;
+    oversamplingOrder_ = initialOrder;
+    return *this;
+}
+
 AudioPipelineBuilder::BuildResult AudioPipelineBuilder::build() {
     jassert(!built_ && "Builder already consumed");
     built_ = true;
 
+    std::unique_ptr<AudioProcessingStage> result;
+
     if (useDryWetMix_) {
-        // Cache the inner pipeline pointer before wrapping
         auto* innerPipeline = pipeline_.get();
         handles_.setEffectsPipeline(innerPipeline);
 
-        // Wrap in DryWetMixStage
         auto dryWet = std::make_unique<DryWetMixStage>(std::move(pipeline_));
         handles_.setDryWetMix(dryWet.get());
 
-        return {std::move(dryWet), std::move(handles_)};
+        result = std::move(dryWet);
+    } else {
+        handles_.setEffectsPipeline(pipeline_.get());
+        result = std::move(pipeline_);
     }
 
-    // No dry/wet wrapper - pipeline is the effects pipeline
-    handles_.setEffectsPipeline(pipeline_.get());
-    return {std::move(pipeline_), std::move(handles_)};
+    if (useOversampling_) {
+        auto oversampling = std::make_unique<OversamplingWrapper>(std::move(result), oversamplingOrder_);
+        handles_.setOversampling(oversampling.get());
+        return {std::move(oversampling), std::move(handles_)};
+    }
+
+    return {std::move(result), std::move(handles_)};
 }
 
 } // namespace dsp_core::audio_pipeline

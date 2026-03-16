@@ -8,6 +8,7 @@ namespace dsp_core::audio_pipeline {
 
 // Forward declarations
 class DryWetMixStage;
+class OversamplingWrapper;
 class AudioPipelineBuilder;
 
 /**
@@ -56,13 +57,12 @@ class StageHandles {
         return dryWetMix_;
     }
 
-    /**
-     * Get the inner effects pipeline (inside DryWetMix wrapper).
-     * If withDryWetMix() was not used, returns the main pipeline.
-     * @return Pointer to the effects pipeline
-     */
     AudioPipeline* getEffectsPipeline() const {
         return effectsPipeline_;
+    }
+
+    OversamplingWrapper* getOversampling() const {
+        return oversampling_;
     }
 
   private:
@@ -70,6 +70,7 @@ class StageHandles {
 
     std::unordered_map<std::string, AudioProcessingStage*> handles_;
     DryWetMixStage* dryWetMix_ = nullptr;
+    OversamplingWrapper* oversampling_ = nullptr;
     AudioPipeline* effectsPipeline_ = nullptr;
 
     void addHandle(StageTag tag, AudioProcessingStage* stage) {
@@ -78,6 +79,10 @@ class StageHandles {
 
     void setDryWetMix(DryWetMixStage* stage) {
         dryWetMix_ = stage;
+    }
+
+    void setOversampling(OversamplingWrapper* stage) {
+        oversampling_ = stage;
     }
 
     void setEffectsPipeline(AudioPipeline* pipeline) {

@@ -2,7 +2,6 @@
 #include "../dsp_core/Source/audio_pipeline/DryWetMixStage.h"
 #include "../dsp_core/Source/audio_pipeline/AudioPipeline.h"
 #include "../dsp_core/Source/audio_pipeline/GainStage.h"
-#include "../dsp_core/Source/audio_pipeline/OversamplingWrapper.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
 
@@ -19,6 +18,14 @@ class DryWetMixStageTest : public ::testing::Test {
 
         dryWetMix_ = std::make_unique<DryWetMixStage>(std::move(pipeline));
         dryWetMix_->prepareToPlay(44100.0, 1024); // Larger buffer for edge case tests
+
+        // JUCE Gain defaults to 0.0 linear (silence), set to unity for passthrough
+        gainStage_->setGainDB(0.0);
+
+        // Process a settle block so the gain smoother reaches unity (10ms ramp @ 44100Hz = 441 samples)
+        juce::AudioBuffer<double> settle(2, 1024);
+        settle.clear();
+        dryWetMix_->process(settle);
     }
 
     std::unique_ptr<DryWetMixStage> dryWetMix_;
@@ -265,171 +272,6 @@ TEST_F(DryWetMixStageTest, MultiChannel_8Channels) {
 }
 
 // =============================================================================
-// Latency Compensation Tests (with Oversampling)
-// =============================================================================
-
-class DryWetMixWithLatencyTest : public ::testing::Test {
-  protected:
-    void SetUp() override {
-        // Will be set up in individual tests with different oversampling factors
-    }
-
-    void createDryWetMixWithOversampling(int oversamplingOrder) {
-        // Create pipeline with gain wrapped in oversampling
-        auto pipeline = std::make_unique<AudioPipeline>();
-        auto gainStage = std::make_unique<GainStage>();
-        gainStage_ = gainStage.get();
-
-        // Wrap gain in oversampling (introduces latency)
-        auto oversamplingWrapper = std::make_unique<OversamplingWrapper>(std::move(gainStage), oversamplingOrder);
-        oversamplingWrapper_ = oversamplingWrapper.get();
-        pipeline->addStage(std::move(oversamplingWrapper), "oversampled_gain");
-
-        dryWetMix_ = std::make_unique<DryWetMixStage>(std::move(pipeline));
-        dryWetMix_->prepareToPlay(44100.0, 512);
-    }
-
-    std::unique_ptr<DryWetMixStage> dryWetMix_;
-    GainStage* gainStage_ = nullptr;
-    OversamplingWrapper* oversamplingWrapper_ = nullptr;
-};
-
-TEST_F(DryWetMixWithLatencyTest, LatencyCompensation_2xOversampling) {
-    createDryWetMixWithOversampling(1); // 2x oversampling
-
-    const int latency = dryWetMix_->getLatencySamples();
-    EXPECT_GT(latency, 0) << "Oversampling should introduce latency";
-
-    // Set to 50/50 mix
-    dryWetMix_->setMixAmount(0.5);
-
-    // Create impulse signal
-    juce::AudioBuffer<double> buffer(2, 512);
-    buffer.clear();
-    buffer.setSample(0, 100, 1.0); // Impulse at sample 100
-    buffer.setSample(1, 100, 1.0);
-
-    // Process multiple blocks to fill the delay buffer
-    for (int block = 0; block < 3; ++block) {
-        dryWetMix_->process(buffer);
-    }
-
-    // After latency compensation, dry and wet should be aligned
-    // The mix should not create comb filtering artifacts
-    // Check that the impulse response is coherent (not split between dry/wet)
-    bool hasCoherentPeak = false;
-    for (int i = 0; i < 512; ++i) {
-        if (std::abs(buffer.getSample(0, i)) > 0.4) {
-            hasCoherentPeak = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(hasCoherentPeak) << "Should have coherent peak after latency compensation";
-}
-
-TEST_F(DryWetMixWithLatencyTest, LatencyCompensation_4xOversampling) {
-    createDryWetMixWithOversampling(2); // 4x oversampling
-
-    const int latency = dryWetMix_->getLatencySamples();
-    EXPECT_GT(latency, 0) << "Oversampling should introduce latency";
-
-    // Test that dry and wet paths are aligned by comparing 100% dry vs 100% wet vs 50/50 mix
-    // Without latency compensation, 50/50 mix would show comb filtering artifacts
-
-    // Create impulse signal
-    juce::AudioBuffer<double> impulse(2, 512);
-    impulse.clear();
-    impulse.setSample(0, 250, 1.0);
-    impulse.setSample(1, 250, 1.0);
-
-    // Test 100% wet to see wet path response
-    dryWetMix_->setMixAmount(1.0);
-    juce::AudioBuffer<double> wetResponse(2, 512);
-    wetResponse.copyFrom(0, 0, impulse, 0, 0, 512);
-    wetResponse.copyFrom(1, 0, impulse, 1, 0, 512);
-    for (int block = 0; block < 5; ++block) {
-        dryWetMix_->process(wetResponse);
-    }
-
-    // Reset and test 50/50 mix
-    dryWetMix_->reset();
-    dryWetMix_->setMixAmount(0.5);
-    juce::AudioBuffer<double> mixedResponse(2, 512);
-    mixedResponse.copyFrom(0, 0, impulse, 0, 0, 512);
-    mixedResponse.copyFrom(1, 0, impulse, 1, 0, 512);
-    for (int block = 0; block < 5; ++block) {
-        dryWetMix_->process(mixedResponse);
-    }
-
-    // With proper latency compensation, 50/50 mix should have similar peak magnitude to 100% wet
-    // (not split/attenuated due to misalignment)
-    double wetPeakEnergy = 0.0;
-    double mixedPeakEnergy = 0.0;
-    for (int ch = 0; ch < 2; ++ch) {
-        for (int i = 0; i < 512; ++i) {
-            wetPeakEnergy = std::max(wetPeakEnergy, std::abs(wetResponse.getSample(ch, i)));
-            mixedPeakEnergy = std::max(mixedPeakEnergy, std::abs(mixedResponse.getSample(ch, i)));
-        }
-    }
-
-    // Mixed response should be close to wet response (both around 0.5-1.0 depending on filter response)
-    // If misaligned, mixed would be much smaller due to cancellation
-    EXPECT_GT(mixedPeakEnergy, 0.3 * wetPeakEnergy)
-        << "50/50 mix should not show severe cancellation (indicates proper latency compensation)";
-}
-
-TEST_F(DryWetMixWithLatencyTest, LatencyCompensation_8xOversampling) {
-    createDryWetMixWithOversampling(3); // 8x oversampling
-
-    const int latency = dryWetMix_->getLatencySamples();
-    EXPECT_GT(latency, 0) << "Oversampling should introduce latency";
-
-    // Set to 100% dry (should bypass with compensation)
-    dryWetMix_->setMixAmount(0.0);
-
-    // Create sine wave
-    juce::AudioBuffer<double> buffer(2, 512);
-    const double freq = 1000.0;
-    const double sampleRate = 44100.0;
-    for (int ch = 0; ch < 2; ++ch) {
-        for (int i = 0; i < 512; ++i) {
-            buffer.setSample(ch, i, std::sin(2.0 * M_PI * freq * i / sampleRate));
-        }
-    }
-
-    // Store expected output (delayed by latency)
-    juce::AudioBuffer<double> expected(2, 512);
-    for (int ch = 0; ch < 2; ++ch) {
-        expected.copyFrom(ch, 0, buffer, ch, 0, 512);
-    }
-
-    // Process multiple blocks to fill delay buffer
-    for (int block = 0; block < 5; ++block) {
-        dryWetMix_->process(buffer);
-    }
-
-    // At 100% dry, output should equal delayed input
-    // (We can't compare exact values due to the delay, but signal should be clean)
-    double totalEnergy = 0.0;
-    for (int ch = 0; ch < 2; ++ch) {
-        for (int i = 0; i < 512; ++i) {
-            totalEnergy += buffer.getSample(ch, i) * buffer.getSample(ch, i);
-        }
-    }
-    EXPECT_GT(totalEnergy, 100.0) << "100% dry should preserve signal energy";
-}
-
-TEST_F(DryWetMixWithLatencyTest, LatencyReporting_MatchesPipeline) {
-    createDryWetMixWithOversampling(2); // 4x oversampling
-
-    // DryWetMixStage should report the same latency as its internal pipeline
-    const int dryWetLatency = dryWetMix_->getLatencySamples();
-    const int pipelineLatency = dryWetMix_->getEffectsPipeline()->getLatencySamples();
-
-    EXPECT_EQ(dryWetLatency, pipelineLatency) << "DryWetMixStage should report pipeline latency for DAW compensation";
-}
-
-// =============================================================================
 // Parameter Smoothing Tests
 // =============================================================================
 
@@ -478,19 +320,13 @@ TEST_F(DryWetMixStageTest, MixChange_NoInstantJump) {
         << "Mix change must ramp smoothly — no discontinuous jump at block boundary";
 }
 
-TEST_F(DryWetMixWithLatencyTest, NoLatency_BypassesDelayBuffer) {
-    // Create DryWetMix without oversampling (zero latency)
-    auto pipeline = std::make_unique<AudioPipeline>();
-    pipeline->addStage(std::make_unique<GainStage>(), "gain");
-    dryWetMix_ = std::make_unique<DryWetMixStage>(std::move(pipeline));
-    dryWetMix_->prepareToPlay(44100.0, 512);
+TEST_F(DryWetMixStageTest, ZeroLatency_NoDelayNeeded) {
+    // DryWetMixStage with no oversampling in pipeline should have zero latency
+    EXPECT_EQ(dryWetMix_->getLatencySamples(), 0);
 
-    EXPECT_EQ(dryWetMix_->getLatencySamples(), 0) << "No oversampling should have zero latency";
-
-    // Set to 50/50 mix
+    // 50/50 mix should produce immediate output (no delay)
     dryWetMix_->setMixAmount(0.5);
 
-    // Create test signal
     juce::AudioBuffer<double> buffer(2, 512);
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 512; ++i) {
@@ -498,21 +334,12 @@ TEST_F(DryWetMixWithLatencyTest, NoLatency_BypassesDelayBuffer) {
         }
     }
 
-    // Store expected (immediate processing, no delay)
-    juce::AudioBuffer<double> expected(2, 512);
+    dryWetMix_->process(buffer);
+
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 512; ++i) {
             double const input = static_cast<double>(i) / 512.0;
-            expected.setSample(ch, i, 0.5 * input + 0.5 * input); // 50/50 mix
-        }
-    }
-
-    dryWetMix_->process(buffer);
-
-    // With zero latency, output should match immediately (no delay)
-    for (int ch = 0; ch < 2; ++ch) {
-        for (int i = 0; i < 512; ++i) {
-            EXPECT_NEAR(buffer.getSample(ch, i), expected.getSample(ch, i), 1e-10)
+            EXPECT_NEAR(buffer.getSample(ch, i), input, 1e-10)
                 << "Zero latency should process immediately at ch=" << ch << " sample=" << i;
         }
     }

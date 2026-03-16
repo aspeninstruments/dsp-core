@@ -15,6 +15,7 @@
 #include "Source/SeamlessTransferFunction.cpp"
 #include "Source/SeamlessTransferFunctionImpl.cpp"
 #include "Source/SplineLayer.cpp"
+#include "Source/ExpressionEvaluator.cpp"
 #include "Source/TransferFunction.cpp"
 #include "Source/Services/AdaptiveToleranceCalculator.cpp"
 #include "Source/Services/CoordinateSnapper.cpp"
