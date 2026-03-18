@@ -24,6 +24,7 @@
 #include "Source/Services/SplineEvaluator.cpp"
 #include "Source/Services/SymmetryAnalyzer.cpp"
 #include "Source/Services/TransferFunctionOperations.cpp"
+#include "Source/HysteresisProcessor.cpp"
 #include "Source/audio_pipeline/AudioPipeline.cpp"
 #include "Source/audio_pipeline/GainStage.cpp"
 #include "Source/audio_pipeline/DryWetMixStage.cpp"
@@ -31,4 +32,5 @@
 #include "Source/audio_pipeline/OversamplingWrapper.cpp"
 #include "Source/audio_pipeline/DCBlockingFilter.cpp"
 #include "Source/audio_pipeline/SoftClippingStage.cpp"
+#include "Source/audio_pipeline/HysteresisStage.cpp"
 #include "Source/audio_pipeline/AudioPipelineBuilder.cpp"

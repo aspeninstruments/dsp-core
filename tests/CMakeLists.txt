@@ -664,3 +664,53 @@ endif()
 
 add_test(NAME SoftClippingComparisonTests COMMAND soft_clipping_comparison_tests)
 
+# HysteresisProcessor tests
+add_executable(hysteresis_processor_tests
+    HysteresisProcessorTest.cpp
+)
+
+target_include_directories(hysteresis_processor_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(hysteresis_processor_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(hysteresis_processor_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(hysteresis_processor_tests)
+endif()
+
+add_test(NAME HysteresisProcessorTests COMMAND hysteresis_processor_tests)
+
+# HysteresisStage tests
+add_executable(hysteresis_stage_tests
+    HysteresisStageTest.cpp
+)
+
+target_include_directories(hysteresis_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(hysteresis_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(hysteresis_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(hysteresis_stage_tests)
+endif()
+
+add_test(NAME HysteresisStageTests COMMAND hysteresis_stage_tests)
+

@@ -23,6 +23,7 @@ enum class StageTag {
     DCBlock,
     OutputGain,
     DryWetMix,
+    Hysteresis,
 };
 
 /**
@@ -46,6 +47,8 @@ inline std::string stageTagToString(StageTag tag) {
             return "outputGain";
         case StageTag::DryWetMix:
             return "dryWetMix";
+        case StageTag::Hysteresis:
+            return "hysteresis";
     }
     return "unknown";
 }
