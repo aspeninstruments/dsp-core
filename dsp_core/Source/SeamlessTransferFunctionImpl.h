@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LayeredTransferFunction.h"
+#include "LaneMixer.h"
 #include <array>
 #include <atomic>
 #include <functional>
@@ -253,28 +254,14 @@ class AudioEngine {
  *   - Intentional simplicity trade-off vs distinguishing "shape" vs "lookup" changes
  */
 struct RenderJob {
-    // Full base layer data (self-contained, no hash/lookup needed)
-    std::array<double, TABLE_SIZE> baseLayerData;
+    // Pre-computed sum from LaneMixer (or legacy LTF evaluation)
+    // This is the final transfer function curve, ready to be copied into the audio LUT.
+    // Normalization has already been applied by LaneMixer::computeSum().
+    std::array<double, TABLE_SIZE> sumData;
 
-    // Coefficients (WT mix + 40 harmonics = 41 total)
-    std::array<double, 41> coefficients;
-
-    // Spline anchors (copied, not referenced)
-    std::vector<SplineAnchor> splineAnchors;
-
-    // Mode flags
-    bool normalizationEnabled{false};
-    bool paintStrokeActive{false}; // CRITICAL: Distinguishes frozen vs computed scalar
-
-    // Frozen normalization scalar (used when paintStrokeActive = true)
-    double frozenNormalizationScalar{1.0};
-
-    // Extrapolation mode
+    // Extrapolation mode (affects LUT boundary behavior in AudioEngine)
     LayeredTransferFunction::ExtrapolationMode extrapolationMode{
         LayeredTransferFunction::ExtrapolationMode::Clamp};
-
-    // Rendering mode (determines evaluation path: Paint/Harmonic/Spline)
-    RenderingMode renderingMode{RenderingMode::Paint};
 
     // Version stamp
     uint64_t version{0};
@@ -354,23 +341,14 @@ class LUTRendererThread : public juce::Thread {
     void processJobs();
 
     /**
-     * Render DSP LUT from self-contained RenderJob
+     * Write pre-computed sum data to audio LUT buffer
      *
-     * Renders 16K samples for audio processing (~16ms).
-     * Writes to lutBuffers[workerTargetIndex].
+     * The RenderJob already contains the final transfer function curve
+     * (computed by LaneMixer::computeSum on the message thread).
+     * The worker just copies it into the triple-buffered LUT and signals
+     * the audio thread.
      *
-     * Workflow:
-     *   1. Restore base layer from job.baseLayerData
-     *   2. Set coefficients from job.coefficients
-     *   3. Set spline anchors from job.splineAnchors
-     *   4. Set interpolation/extrapolation modes
-     *   5. Set rendering mode from job.renderingMode (Paint/Harmonic/Spline)
-     *   6. Compute normalization scalar (Harmonic mode only)
-     *   7. Render LUT via evaluateForRendering()
-     *   8. Copy LUT to output buffer
-     *   9. Signal audio thread (newLUTReady = true)
-     *
-     * @param job RenderJob containing full state snapshot
+     * @param job RenderJob containing pre-computed sum
      * @param outputBuffer LUT buffer to write into (lutBuffers[workerTargetIndex])
      */
     void renderDSPLUT(const RenderJob& job, LUTBuffer* outputBuffer);
@@ -379,9 +357,6 @@ class LUTRendererThread : public juce::Thread {
     juce::WaitableEvent wakeEvent;
     juce::AbstractFifo jobQueue{4};
     RenderJob jobSlots[4];
-
-    // Worker-owned LayeredTransferFunction for rendering
-    std::unique_ptr<LayeredTransferFunction> tempLTF;
 
     // Reference to AudioEngine (for checking crossfade state)
     AudioEngine& audioEngine;
@@ -429,9 +404,10 @@ class LUTRenderTimer : public juce::Timer {
      * Starts timer at 20Hz automatically.
      *
      * @param ltf LayeredTransferFunction to poll (editing model)
+     * @param mixer LaneMixer to sync and render from
      * @param renderer LUTRendererThread to enqueue jobs to
      */
-    LUTRenderTimer(LayeredTransferFunction& ltf, LUTRendererThread& renderer);
+    LUTRenderTimer(LayeredTransferFunction& ltf, LaneMixer& mixer, LUTRendererThread& renderer);
 
     /**
      * Destructor - stops timer
@@ -479,9 +455,18 @@ class LUTRenderTimer : public juce::Timer {
     RenderJob captureRenderJob();
 
     LayeredTransferFunction& ltf;
+    LaneMixer& laneMixer;
     LUTRendererThread& renderer;
     uint64_t lastSeenVersion{0};
     uint64_t lastRenderedVersion{0};  // For guaranteed final delivery
+
+    /**
+     * Sync LTF editing model state into LaneMixer lanes.
+     *
+     * Mirrors coefficients[0..40] → lane amplitudes, base layer → lane 0 curve.
+     * Called before computeSum() to ensure LaneMixer reflects the latest LTF state.
+     */
+    void syncLaneMixerFromLTF();
 };
 
 /**

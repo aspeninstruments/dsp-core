@@ -249,7 +249,6 @@ LUTRendererThread::LUTRendererThread(AudioEngine& audioEngine_,
     , audioEngine(audioEngine_)
     , workerTargetIndex(workerTargetIdx)
     , newLUTReady(readyFlag) {
-    tempLTF = std::make_unique<LayeredTransferFunction>(TABLE_SIZE, MIN_VALUE, MAX_VALUE);
 }
 
 void LUTRendererThread::run() {
@@ -306,62 +305,10 @@ void LUTRendererThread::processJobs() {
     }
 }
 
-namespace {
-    double computeNormalizationScalar(
-        const std::array<double, TABLE_SIZE>& baseLayer,
-        const std::array<double, 41>& coefficients,
-        const HarmonicLayer& harmonicLayer, // Changed to const reference
-        bool normalizationEnabled,
-        bool paintStrokeActive,
-        double frozenScalar
-    ) {
-        if (!normalizationEnabled) {
-            return 1.0;
-        }
-
-        if (paintStrokeActive) {
-            return frozenScalar;
-        }
-
-        const std::vector<double> coeffsVec(coefficients.begin(), coefficients.end());
-        double maxAbsValue = 0.0;
-
-        for (int i = 0; i < TABLE_SIZE; ++i) {
-            const double x = MIN_VALUE + (i / static_cast<double>(TABLE_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-            const double baseValue = baseLayer[i];
-            const double harmonicValue = harmonicLayer.evaluate(x, coeffsVec, TABLE_SIZE);
-            const double unnormalized = coefficients[0] * baseValue + harmonicValue;
-            maxAbsValue = std::max(maxAbsValue, std::abs(unnormalized));
-        }
-
-        constexpr double epsilon = 1e-12;
-        return (maxAbsValue > epsilon) ? (1.0 / maxAbsValue) : 1.0;
-    }
-} // namespace
-
 void LUTRendererThread::renderDSPLUT(const RenderJob& job, LUTBuffer* outputBuffer) {
-    for (int i = 0; i < TABLE_SIZE; ++i) {
-        tempLTF->setBaseLayerValue(i, job.baseLayerData[i]);
-    }
-    tempLTF->setHarmonicCoefficients(job.coefficients);
-    tempLTF->setSplineAnchors(job.splineAnchors);
-    tempLTF->setExtrapolationMode(job.extrapolationMode);
-    tempLTF->setRenderingMode(job.renderingMode);
-
-    // Compute normalization scalar (used by Harmonic mode, ignored by Paint/Spline modes)
-    const double normScalar = computeNormalizationScalar(
-        job.baseLayerData,
-        job.coefficients,
-        static_cast<const HarmonicLayer&>(tempLTF->getHarmonicLayer()), // Cast to const
-        job.normalizationEnabled,
-        job.paintStrokeActive,
-        job.frozenNormalizationScalar
-    );
-
-    for (int i = 0; i < TABLE_SIZE; ++i) {
-        const double x = MIN_VALUE + (i / static_cast<double>(TABLE_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-        outputBuffer->data[i] = tempLTF->evaluateForRendering(x, normScalar);
-    }
+    // The RenderJob now carries a pre-computed sum from LaneMixer.
+    // Just copy it into the audio LUT buffer.
+    std::copy(job.sumData.begin(), job.sumData.end(), outputBuffer->data.begin());
 
     outputBuffer->version = job.version;
     outputBuffer->extrapolationMode = job.extrapolationMode;
@@ -376,8 +323,10 @@ void LUTRendererThread::setLUTBuffersPointer(LUTBuffer* buffers) {
 // LUTRenderTimer Implementation (20Hz, DSP LUT only, guaranteed delivery)
 
 LUTRenderTimer::LUTRenderTimer(LayeredTransferFunction& ltf_,
+                               LaneMixer& mixer_,
                                LUTRendererThread& renderer_)
     : ltf(ltf_)
+    , laneMixer(mixer_)
     , renderer(renderer_) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     startTimerHz(SeamlessConfig::DSP_TIMER_HZ);  // 50ms interval, matches crossfade timing
@@ -419,28 +368,53 @@ void LUTRenderTimer::forceRender() {
 }
 
 RenderJob LUTRenderTimer::captureRenderJob() {
+    // Sync LTF editing model state into LaneMixer lanes
+    syncLaneMixerFromLTF();
+
     RenderJob job;
 
-    for (int i = 0; i < TABLE_SIZE; ++i) {
-        job.baseLayerData[i] = ltf.getBaseLayerValue(i);
-    }
-
-    job.coefficients = ltf.getHarmonicCoefficients();
-    job.splineAnchors = ltf.getSplineLayer().getAnchors();
-    job.normalizationEnabled = ltf.isNormalizationEnabled();
-    job.paintStrokeActive = ltf.isPaintStrokeActive();
-    job.renderingMode = ltf.getRenderingMode();
-
-    if (job.renderingMode == dsp_core::RenderingMode::Harmonic) {
-        job.frozenNormalizationScalar = ltf.getNormalizationScalar();
-    } else {
-        job.frozenNormalizationScalar = 1.0;
-    }
+    // Compute the mixed sum (normalization applied by LaneMixer)
+    laneMixer.computeSum(job.sumData.data(), TABLE_SIZE);
 
     job.extrapolationMode = ltf.getExtrapolationMode();
     job.version = ltf.getVersion();
 
     return job;
+}
+
+void LUTRenderTimer::syncLaneMixerFromLTF() {
+    // Mirror LTF coefficients[0..40] → lane amplitudes
+    const auto coeffs = ltf.getHarmonicCoefficients();
+    for (int i = 0; i < LaneMixer::NUM_LANES; ++i) {
+        laneMixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
+    }
+
+    // Copy LTF base layer → lane 0 curve data
+    // (Lanes 1-40 are Chebyshev harmonics, already initialized and static)
+    auto& lane0 = const_cast<Lane&>(laneMixer.getLane(0));
+    for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+        lane0.curveData[static_cast<size_t>(i)] = ltf.getBaseLayerValue(i);
+    }
+
+    // Always-on mixer: normalization enabled when LTF says so (regardless of mode)
+    laneMixer.setNormalizationEnabled(ltf.isNormalizationEnabled());
+
+    // Spline mode is the only exception: it overrides the mixer entirely
+    // (spline replaces base+harmonics — will be converted to lane edit in Phase 6)
+    if (ltf.getRenderingMode() == RenderingMode::Spline) {
+        const auto& splineLayer = ltf.getSplineLayer();
+        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+            const double x = laneMixer.normalizeIndex(i);
+            lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
+        }
+        laneMixer.setLaneAmplitude(0, 1.0);
+        for (int i = 1; i < LaneMixer::NUM_LANES; ++i) {
+            laneMixer.setLaneAmplitude(i, 0.0);
+        }
+        laneMixer.setNormalizationEnabled(false);
+    }
+    // Paint, Harmonic, and Equation modes: all lanes active with their coefficients
+    // (synced from LTF coefficients above — mixer always drives audio)
 }
 
 // VisualizerUpdateTimer Implementation (120Hz, direct model reads)

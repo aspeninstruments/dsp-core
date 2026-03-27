@@ -33,6 +33,7 @@ class SeamlessTransferFunction::Impl {
     Impl()
         : editingModel(TABLE_SIZE, MIN_VALUE, MAX_VALUE) {
         // editingModel initialized to identity
+        // laneMixer initialized to defaults (H1=1.0 → y=x)
         // audioEngine initialized to identity LUTs (in AudioEngine constructor)
         // renderer and timers are null (created in startSeamlessUpdates)
 
@@ -43,8 +44,11 @@ class SeamlessTransferFunction::Impl {
         }
     }
 
-    // Editing model (message thread only)
+    // Editing model (message thread only — controller/modes still write here)
     LayeredTransferFunction editingModel;
+
+    // Lane mixer (message thread only — render pipeline reads from here)
+    LaneMixer laneMixer;
 
     // Audio engine (audio thread)
     AudioEngine audioEngine;
@@ -96,6 +100,14 @@ LayeredTransferFunction& SeamlessTransferFunction::getEditingModel() {
 
 const LayeredTransferFunction& SeamlessTransferFunction::getEditingModel() const {
     return pimpl->editingModel;
+}
+
+LaneMixer& SeamlessTransferFunction::getLaneMixer() {
+    return pimpl->laneMixer;
+}
+
+const LaneMixer& SeamlessTransferFunction::getLaneMixer() const {
+    return pimpl->laneMixer;
 }
 
 double SeamlessTransferFunction::applyTransferFunction(double x) const {
@@ -150,7 +162,7 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     pimpl->renderer->startThread(juce::Thread::Priority::normal);
 
     // Create LUT render timer (20Hz, guaranteed delivery via two-version tracking)
-    pimpl->lutRenderTimer = std::make_unique<LUTRenderTimer>(pimpl->editingModel, *pimpl->renderer);
+    pimpl->lutRenderTimer = std::make_unique<LUTRenderTimer>(pimpl->editingModel, pimpl->laneMixer, *pimpl->renderer);
     // Timer starts automatically in constructor at 20Hz
 
     // Create visualizer timer (60Hz, direct model reads)
@@ -213,58 +225,49 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     // VERIFY: Called on message thread
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    // Create temporary LayeredTransferFunction for rendering (matches worker thread pattern)
-    LayeredTransferFunction tempLTF(TABLE_SIZE, MIN_VALUE, MAX_VALUE);
-
-    // Copy current editing model state to temporary LTF
     const auto& model = pimpl->editingModel;
+    auto& mixer = pimpl->laneMixer;
 
-    // Copy base layer
-    for (int i = 0; i < TABLE_SIZE; ++i) {
-        tempLTF.setBaseLayerValue(i, model.getBaseLayerValue(i));
+    // Sync LTF editing model state into LaneMixer lanes
+    // (Same logic as LUTRenderTimer::syncLaneMixerFromLTF)
+    const auto coeffs = model.getHarmonicCoefficients();
+    for (int i = 0; i < LaneMixer::NUM_LANES; ++i) {
+        mixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
     }
 
-    // Copy harmonic coefficients
-    tempLTF.setHarmonicCoefficients(model.getHarmonicCoefficients());
+    auto& lane0 = const_cast<Lane&>(mixer.getLane(0));
+    for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+        lane0.curveData[static_cast<size_t>(i)] = model.getBaseLayerValue(i);
+    }
 
-    // Copy spline anchors
-    tempLTF.setSplineAnchors(model.getSplineLayer().getAnchors());
+    // Always-on mixer: normalization enabled when LTF says so
+    mixer.setNormalizationEnabled(model.isNormalizationEnabled());
 
-    // Copy modes and settings
-    tempLTF.setExtrapolationMode(model.getExtrapolationMode());
-    tempLTF.setRenderingMode(model.getRenderingMode());
-
-    // Compute normalization scalar based on rendering mode
-    // Paint and Spline modes: scalar = 1.0 (no normalization needed)
-    // Harmonic mode: compute from composite curve
-    double normScalar = 1.0;
-    if (model.getRenderingMode() == RenderingMode::Harmonic && model.isNormalizationEnabled()) {
-        // Compute normalization scalar by scanning composite values
-        const auto& coeffs = model.getHarmonicCoefficients();
-        double maxAbsValue = 0.0;
-
-        for (int i = 0; i < TABLE_SIZE; ++i) {
-            const double x = MIN_VALUE + (i / static_cast<double>(TABLE_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-            const double baseValue = model.getBaseLayerValue(i);
-            const std::vector<double> coeffsVec(coeffs.begin(), coeffs.end());
-            const double harmonicValue = model.getHarmonicLayer().evaluate(x, coeffsVec, TABLE_SIZE);
-            const double unnormalized = coeffs[0] * baseValue + harmonicValue;
-            maxAbsValue = std::max(maxAbsValue, std::abs(unnormalized));
+    // Spline mode overrides the mixer (will be converted to lane edit in Phase 6)
+    if (model.getRenderingMode() == RenderingMode::Spline) {
+        const auto& splineLayer = model.getSplineLayer();
+        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+            const double x = mixer.normalizeIndex(i);
+            lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
         }
-
-        constexpr double epsilon = 1e-12;
-        normScalar = (maxAbsValue > epsilon) ? (1.0 / maxAbsValue) : 1.0;
+        mixer.setLaneAmplitude(0, 1.0);
+        for (int i = 1; i < LaneMixer::NUM_LANES; ++i) {
+            mixer.setLaneAmplitude(i, 0.0);
+        }
+        mixer.setNormalizationEnabled(false);
     }
+    // Paint, Harmonic, Equation: all lanes active (mixer always drives audio)
+
+    // Compute the mixed sum
+    std::array<double, TABLE_SIZE> sumBuffer{};
+    mixer.computeSum(sumBuffer.data(), TABLE_SIZE);
 
     // Get the worker target buffer (where we'll write the LUT)
     const int targetIdx = pimpl->audioEngine.getWorkerTargetIndexReference().load(std::memory_order_relaxed);
     LUTBuffer* outputBuffer = &pimpl->audioEngine.getLUTBuffers()[targetIdx];
 
-    // Render 16K samples to the output buffer
-    for (int i = 0; i < TABLE_SIZE; ++i) {
-        const double x = MIN_VALUE + (i / static_cast<double>(TABLE_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-        outputBuffer->data[i] = tempLTF.evaluateForRendering(x, normScalar);
-    }
+    // Copy sum to output buffer
+    std::copy(sumBuffer.begin(), sumBuffer.end(), outputBuffer->data.begin());
 
     // Set metadata
     outputBuffer->version = model.getVersion();
@@ -274,9 +277,16 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     pimpl->audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);
 
     // Also update the visualizer LUT to match (so UI is consistent)
+    // Downsample from TABLE_SIZE to VISUALIZER_LUT_SIZE
     for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-        const double x = MIN_VALUE + (i / static_cast<double>(VISUALIZER_LUT_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-        pimpl->visualizerLUT[i] = tempLTF.evaluateForRendering(x, normScalar);
+        const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+        const double srcIdx = frac * (TABLE_SIZE - 1);
+        const int idx = static_cast<int>(srcIdx);
+        const int nextIdx = std::min(idx + 1, TABLE_SIZE - 1);
+        const double t = srcIdx - idx;
+        pimpl->visualizerLUT[static_cast<size_t>(i)] =
+            sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
+            sumBuffer[static_cast<size_t>(nextIdx)] * t;
     }
 
     // Invoke visualizer callback if set (so UI updates)

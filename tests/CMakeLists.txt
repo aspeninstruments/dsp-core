@@ -38,6 +38,31 @@ endif()
 # Also add a simple test that can always be run
 add_test(NAME LayeredTransferFunctionTests COMMAND layered_transfer_function_tests)
 
+# LaneMixer tests
+add_executable(lane_mixer_tests
+    LaneMixerTest.cpp
+)
+
+target_include_directories(lane_mixer_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(lane_mixer_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(lane_mixer_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(lane_mixer_tests)
+endif()
+
+add_test(NAME LaneMixerTests COMMAND lane_mixer_tests)
+
 # DryWetMixStage tests
 add_executable(dry_wet_mix_stage_tests
     DryWetMixStageTest.cpp
@@ -513,6 +538,31 @@ else()
 endif()
 
 add_test(NAME TransferFunctionOperationsTests COMMAND transfer_function_operations_tests)
+
+# SeamlessTransferFunction characterization tests
+add_executable(seamless_characterization_tests
+    SeamlessTransferFunctionCharacterizationTest.cpp
+)
+
+target_include_directories(seamless_characterization_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(seamless_characterization_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(seamless_characterization_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(seamless_characterization_tests)
+endif()
+
+add_test(NAME SeamlessCharacterizationTests COMMAND seamless_characterization_tests)
 
 # AudioEngine tests
 add_executable(audio_engine_tests

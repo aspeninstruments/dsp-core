@@ -11,6 +11,7 @@
 #include "Source/AudioHistoryBuffer.cpp"
 #include "Source/StereoHistoryBuffer.cpp"
 #include "Source/HarmonicLayer.cpp"
+#include "Source/LaneMixer.cpp"
 #include "Source/LayeredTransferFunction.cpp"
 #include "Source/SeamlessTransferFunction.cpp"
 #include "Source/SeamlessTransferFunctionImpl.cpp"

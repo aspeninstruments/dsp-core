@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LayeredTransferFunction.h"
+#include "LaneMixer.h"
 #include <array>
 #include <functional>
 #include <memory>
@@ -104,6 +105,17 @@ class SeamlessTransferFunction {
      */
     LayeredTransferFunction& getEditingModel();
     const LayeredTransferFunction& getEditingModel() const;
+
+    /**
+     * Access lane mixer (for future lane-aware controller, message thread only)
+     *
+     * The lane mixer holds the 41-lane model that drives the audio render pipeline.
+     * During the bridge period, it is synced from the editing model (LTF) automatically.
+     *
+     * @return Reference to lane mixer
+     */
+    LaneMixer& getLaneMixer();
+    const LaneMixer& getLaneMixer() const;
 
     /**
      * Apply transfer function to single sample (audio thread)
