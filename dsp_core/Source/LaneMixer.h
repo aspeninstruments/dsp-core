@@ -56,6 +56,7 @@ class LaneMixer {
     // ========================================================================
 
     const Lane& getLane(int index) const;
+    Lane& getMutableLane(int index);
     int getNumLanes() const { return NUM_LANES; }
 
     // ========================================================================
@@ -77,6 +78,20 @@ class LaneMixer {
      */
     void setLaneCurveData(int index, const std::vector<double>& data);
     void setLaneCurveData(int index, const double* data, int size);
+
+    /**
+     * Set a single sample in a lane's curve data.
+     * Used by paint mode for per-sample writes during brush strokes.
+     * Does NOT increment version — caller should use beginBatchUpdate()/endBatchUpdate()
+     * or call incrementVersion() after a series of writes.
+     */
+    void setLaneCurveValue(int laneIndex, int sampleIndex, double value);
+
+    /**
+     * Explicitly increment the version counter.
+     * Used after a batch of setLaneCurveValue() calls outside of BatchUpdateGuard.
+     */
+    void incrementVersion();
 
     /**
      * Fill a lane's curve with the Chebyshev polynomial T_n(x).

@@ -491,9 +491,10 @@ class VisualizerUpdateTimer : public juce::Timer {
     /**
      * Construct visualizer timer (message thread only)
      *
-     * @param model Reference to editing model for sampling
+     * @param model Reference to editing model (for version tracking and legacy paths)
+     * @param mixer Reference to lane mixer (primary data source for sum visualization)
      */
-    explicit VisualizerUpdateTimer(LayeredTransferFunction& model);
+    VisualizerUpdateTimer(LayeredTransferFunction& model, LaneMixer& mixer);
 
     /**
      * Destructor - stops timer
@@ -521,6 +522,7 @@ class VisualizerUpdateTimer : public juce::Timer {
 
   private:
     LayeredTransferFunction& editingModel;
+    LaneMixer& laneMixer;
     std::array<double, VISUALIZER_LUT_SIZE>* visualizerLUTPtr{nullptr};
     std::function<void()> onVisualizerUpdate;
     uint64_t lastSeenVersion{0};

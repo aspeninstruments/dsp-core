@@ -339,7 +339,9 @@ LUTRenderTimer::~LUTRenderTimer() {
 void LUTRenderTimer::timerCallback() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    const uint64_t currentVersion = ltf.getVersion();
+    // Check both LTF and LaneMixer versions — lane-scoped edits (Phase 5)
+    // increment LaneMixer version directly without touching LTF.
+    const uint64_t currentVersion = ltf.getVersion() + laneMixer.getVersion();
 
     // Track version changes
     if (currentVersion != lastSeenVersion) {
@@ -351,7 +353,10 @@ void LUTRenderTimer::timerCallback() {
     if (lastRenderedVersion != lastSeenVersion) {
         const RenderJob job = captureRenderJob();
         renderer.enqueueJob(job);
-        lastRenderedVersion = lastSeenVersion;
+        // Snapshot version AFTER captureRenderJob (which runs syncLaneMixerFromLTF,
+        // potentially incrementing mixer version). This prevents infinite re-render loops.
+        lastRenderedVersion = ltf.getVersion() + laneMixer.getVersion();
+        lastSeenVersion = lastRenderedVersion;
     }
 }
 
@@ -362,7 +367,7 @@ void LUTRenderTimer::forceRender() {
     renderer.enqueueJob(job);
 
     // Update both versions to prevent duplicate render on next tick
-    const uint64_t currentVersion = ltf.getVersion();
+    const uint64_t currentVersion = ltf.getVersion() + laneMixer.getVersion();
     lastSeenVersion = currentVersion;
     lastRenderedVersion = currentVersion;
 }
@@ -389,23 +394,31 @@ void LUTRenderTimer::syncLaneMixerFromLTF() {
         laneMixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
     }
 
-    // Copy LTF base layer → lane 0 curve data
-    // (Lanes 1-40 are Chebyshev harmonics, already initialized and static)
-    auto& lane0 = const_cast<Lane&>(laneMixer.getLane(0));
-    for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-        lane0.curveData[static_cast<size_t>(i)] = ltf.getBaseLayerValue(i);
+    // Copy LTF base layer → lane 0 curve data, BUT only if lane 0 hasn't been
+    // directly edited (Phase 5 guard). Directly-edited lanes (Paint/Spline/Equation/Preset)
+    // own their curveData — the bridge must not overwrite it.
+    const auto& lane0Content = laneMixer.getLane(0).contentType;
+    if (lane0Content == LaneContentType::Harmonic) {
+        auto& lane0 = laneMixer.getMutableLane(0);
+        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+            lane0.curveData[static_cast<size_t>(i)] = ltf.getBaseLayerValue(i);
+        }
     }
 
     // Always-on mixer: normalization enabled when LTF says so (regardless of mode)
     laneMixer.setNormalizationEnabled(ltf.isNormalizationEnabled());
 
     // Spline mode is the only exception: it overrides the mixer entirely
-    // (spline replaces base+harmonics — will be converted to lane edit in Phase 6)
+    // (spline replaces base+harmonics — will be converted to lane edit in Phase 5c)
     if (ltf.getRenderingMode() == RenderingMode::Spline) {
-        const auto& splineLayer = ltf.getSplineLayer();
-        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-            const double x = laneMixer.normalizeIndex(i);
-            lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
+        // Spline override only applies when lane 0 is still in harmonic/default state
+        if (lane0Content == LaneContentType::Harmonic) {
+            const auto& splineLayer = ltf.getSplineLayer();
+            auto& lane0 = laneMixer.getMutableLane(0);
+            for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+                const double x = laneMixer.normalizeIndex(i);
+                lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
+            }
         }
         laneMixer.setLaneAmplitude(0, 1.0);
         for (int i = 1; i < LaneMixer::NUM_LANES; ++i) {
@@ -419,8 +432,8 @@ void LUTRenderTimer::syncLaneMixerFromLTF() {
 
 // VisualizerUpdateTimer Implementation (120Hz, direct model reads)
 
-VisualizerUpdateTimer::VisualizerUpdateTimer(LayeredTransferFunction& model)
-    : editingModel(model) {
+VisualizerUpdateTimer::VisualizerUpdateTimer(LayeredTransferFunction& model, LaneMixer& mixer)
+    : editingModel(model), laneMixer(mixer) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     startTimerHz(SeamlessConfig::VISUALIZER_TIMER_HZ);  // 120Hz for smooth UI updates during drag
 }
@@ -438,30 +451,44 @@ void VisualizerUpdateTimer::setVisualizerTarget(std::array<double, VISUALIZER_LU
 void VisualizerUpdateTimer::timerCallback() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    const uint64_t currentVersion = editingModel.getVersion();
+    // Check both LTF and LaneMixer versions — lane-scoped edits (Phase 5)
+    // only increment LaneMixer version, harmonic slider changes increment LTF version.
+    const uint64_t currentVersion = editingModel.getVersion() + laneMixer.getVersion();
 
     // Path 1: Conditionally update transfer function curve (only when version changes)
     if (currentVersion != lastSeenVersion) {
         lastSeenVersion = currentVersion;
 
         if (visualizerLUTPtr) {
-            // Update normalization scalar for Harmonic mode (must be computed fresh when harmonics change)
-            // Paint mode: uses frozen scalar during strokes (controller manages this)
-            // Spline mode: doesn't use normalization scalar
-            if (editingModel.getRenderingMode() == RenderingMode::Harmonic &&
-                editingModel.isNormalizationEnabled() &&
-                !editingModel.isPaintStrokeActive()) {
-                editingModel.updateNormalizationScalar();
+            // Sync LTF state into LaneMixer before sampling (mirrors what the audio path does).
+            // This ensures harmonic slider changes are reflected in the mixer sum.
+            const auto coeffs = editingModel.getHarmonicCoefficients();
+            for (int i = 0; i < LaneMixer::NUM_LANES; ++i) {
+                laneMixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
             }
+            // Sync base layer to lane 0 (only if not directly edited)
+            if (laneMixer.getLane(0).contentType == LaneContentType::Harmonic) {
+                auto& lane0 = laneMixer.getMutableLane(0);
+                for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+                    lane0.curveData[static_cast<size_t>(i)] = editingModel.getBaseLayerValue(i);
+                }
+            }
+            laneMixer.setNormalizationEnabled(editingModel.isNormalizationEnabled());
 
-            // Get normalization scalar for rendering
-            const double normScalar = editingModel.getNormalizationScalar();
+            // Compute the mixer sum into a temporary buffer, then downsample to visualizer resolution
+            std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
+            laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
 
-            // Direct model sampling - ~0.5ms for 1024 points
+            // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
             for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-                const double x = MIN_VALUE + (i / static_cast<double>(VISUALIZER_LUT_SIZE - 1))
-                                           * (MAX_VALUE - MIN_VALUE);
-                (*visualizerLUTPtr)[i] = editingModel.evaluateForRendering(x, normScalar);
+                const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+                const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
+                const int idx = static_cast<int>(srcIdx);
+                const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
+                const double t = srcIdx - idx;
+                (*visualizerLUTPtr)[static_cast<size_t>(i)] =
+                    sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
+                    sumBuffer[static_cast<size_t>(nextIdx)] * t;
             }
         }
     }
@@ -477,20 +504,19 @@ void VisualizerUpdateTimer::forceUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     if (visualizerLUTPtr) {
-        // Update normalization scalar for Harmonic mode (must be computed fresh when harmonics change)
-        if (editingModel.getRenderingMode() == RenderingMode::Harmonic &&
-            editingModel.isNormalizationEnabled() &&
-            !editingModel.isPaintStrokeActive()) {
-            editingModel.updateNormalizationScalar();
-        }
-
-        // Get normalization scalar for rendering
-        const double normScalar = editingModel.getNormalizationScalar();
+        // Compute mixer sum and downsample (same as timerCallback path)
+        std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
+        laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
 
         for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-            const double x = MIN_VALUE + (i / static_cast<double>(VISUALIZER_LUT_SIZE - 1))
-                                       * (MAX_VALUE - MIN_VALUE);
-            (*visualizerLUTPtr)[i] = editingModel.evaluateForRendering(x, normScalar);
+            const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+            const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
+            const int idx = static_cast<int>(srcIdx);
+            const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
+            const double t = srcIdx - idx;
+            (*visualizerLUTPtr)[static_cast<size_t>(i)] =
+                sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
+                sumBuffer[static_cast<size_t>(nextIdx)] * t;
         }
 
         if (onVisualizerUpdate) {
@@ -498,7 +524,7 @@ void VisualizerUpdateTimer::forceUpdate() {
         }
     }
 
-    lastSeenVersion = editingModel.getVersion();
+    lastSeenVersion = editingModel.getVersion() + laneMixer.getVersion();
 }
 
 } // namespace dsp_core

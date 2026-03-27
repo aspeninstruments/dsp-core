@@ -23,6 +23,11 @@ const Lane& LaneMixer::getLane(int index) const {
     return lanes_[static_cast<size_t>(index)];
 }
 
+Lane& LaneMixer::getMutableLane(int index) {
+    jassert(isValidIndex(index));
+    return lanes_[static_cast<size_t>(index)];
+}
+
 // ============================================================================
 // Lane Mutations
 // ============================================================================
@@ -82,6 +87,18 @@ void LaneMixer::setLaneCurveData(int index, const double* data, int size) {
     lane.curveData.assign(data, data + std::min(size, TABLE_SIZE));
     lane.curveData.resize(TABLE_SIZE, 0.0);
     incrementVersionIfNotBatching();
+}
+
+void LaneMixer::setLaneCurveValue(int laneIndex, int sampleIndex, double value) {
+    if (!isValidIndex(laneIndex) || sampleIndex < 0 || sampleIndex >= TABLE_SIZE)
+        return;
+    lanes_[static_cast<size_t>(laneIndex)].curveData[static_cast<size_t>(sampleIndex)] = value;
+    // NOTE: Does not increment version — caller is responsible for version management
+    // (e.g., via BatchUpdateGuard or explicit incrementVersion() call)
+}
+
+void LaneMixer::incrementVersion() {
+    versionCounter_.fetch_add(1, std::memory_order_release);
 }
 
 void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber) {

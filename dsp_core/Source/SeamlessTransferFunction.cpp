@@ -166,7 +166,7 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     // Timer starts automatically in constructor at 20Hz
 
     // Create visualizer timer (60Hz, direct model reads)
-    pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->editingModel);
+    pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->editingModel, pimpl->laneMixer);
     pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
     // Timer starts automatically in constructor at 60Hz
 
@@ -235,20 +235,28 @@ void SeamlessTransferFunction::renderLUTImmediate() {
         mixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
     }
 
-    auto& lane0 = const_cast<Lane&>(mixer.getLane(0));
-    for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-        lane0.curveData[static_cast<size_t>(i)] = model.getBaseLayerValue(i);
+    // Copy LTF base layer → lane 0 curve data, only if lane 0 hasn't been
+    // directly edited (Phase 5 guard)
+    const auto& lane0Content = mixer.getLane(0).contentType;
+    if (lane0Content == LaneContentType::Harmonic) {
+        auto& lane0 = mixer.getMutableLane(0);
+        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+            lane0.curveData[static_cast<size_t>(i)] = model.getBaseLayerValue(i);
+        }
     }
 
     // Always-on mixer: normalization enabled when LTF says so
     mixer.setNormalizationEnabled(model.isNormalizationEnabled());
 
-    // Spline mode overrides the mixer (will be converted to lane edit in Phase 6)
+    // Spline mode overrides the mixer (will be converted to lane edit in Phase 5c)
     if (model.getRenderingMode() == RenderingMode::Spline) {
-        const auto& splineLayer = model.getSplineLayer();
-        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-            const double x = mixer.normalizeIndex(i);
-            lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
+        if (lane0Content == LaneContentType::Harmonic) {
+            const auto& splineLayer = model.getSplineLayer();
+            auto& lane0 = mixer.getMutableLane(0);
+            for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
+                const double x = mixer.normalizeIndex(i);
+                lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
+            }
         }
         mixer.setLaneAmplitude(0, 1.0);
         for (int i = 1; i < LaneMixer::NUM_LANES; ++i) {
