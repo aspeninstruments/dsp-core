@@ -493,6 +493,24 @@ void VisualizerUpdateTimer::timerCallback() {
         }
     }
 
+    // Compute selected lane's raw curve for secondary visualizer overlay
+    if (laneLUTPtr_ && selectedLanePtr_) {
+        const int laneIdx = *selectedLanePtr_;
+        if (laneIdx >= 0 && laneIdx < LaneMixer::NUM_LANES) {
+            const auto& lane = laneMixer.getLane(laneIdx);
+            for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
+                const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+                const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
+                const int idx = static_cast<int>(srcIdx);
+                const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
+                const double t = srcIdx - idx;
+                (*laneLUTPtr_)[static_cast<size_t>(i)] =
+                    lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
+                    lane.curveData[static_cast<size_t>(nextIdx)] * t;
+            }
+        }
+    }
+
     // Path 2: Unconditionally invoke callback (for amplitude trace updates)
     // The callback handles both curve updates (when LUT changed) and amplitude trace (every frame)
     if (onVisualizerUpdate) {
@@ -519,12 +537,36 @@ void VisualizerUpdateTimer::forceUpdate() {
                 sumBuffer[static_cast<size_t>(nextIdx)] * t;
         }
 
+        // Compute selected lane's raw curve for secondary visualizer overlay
+        if (laneLUTPtr_ && selectedLanePtr_) {
+            const int laneIdx = *selectedLanePtr_;
+            if (laneIdx >= 0 && laneIdx < LaneMixer::NUM_LANES) {
+                const auto& lane = laneMixer.getLane(laneIdx);
+                for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
+                    const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+                    const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
+                    const int idx = static_cast<int>(srcIdx);
+                    const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
+                    const double t = srcIdx - idx;
+                    (*laneLUTPtr_)[static_cast<size_t>(i)] =
+                        lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
+                        lane.curveData[static_cast<size_t>(nextIdx)] * t;
+                }
+            }
+        }
+
         if (onVisualizerUpdate) {
             onVisualizerUpdate();
         }
     }
 
     lastSeenVersion = editingModel.getVersion() + laneMixer.getVersion();
+}
+
+void VisualizerUpdateTimer::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
+                                              int* selectedLanePtr) {
+    laneLUTPtr_ = lutPtr;
+    selectedLanePtr_ = selectedLanePtr;
 }
 
 } // namespace dsp_core

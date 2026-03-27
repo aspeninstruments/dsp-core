@@ -239,6 +239,21 @@ class SeamlessTransferFunction {
      */
     void setVisualizerCallback(std::function<void()> callback);
 
+    /**
+     * Get lane LUT for secondary visualizer overlay (message thread only)
+     *
+     * Returns the selected lane's raw curve data (NOT amplitude-scaled),
+     * downsampled to VISUALIZER_LUT_SIZE for UI rendering.
+     */
+    const std::array<double, VISUALIZER_LUT_SIZE>& getLaneLUT() const;
+
+    /**
+     * Get/set which lane the visualizer timer should sample for the lane LUT.
+     * -1 = no lane selected (lane LUT not computed).
+     */
+    int getSelectedVisualizerLane() const;
+    void setSelectedVisualizerLane(int laneIndex);
+
   private:
     class Impl;
     std::unique_ptr<Impl> pimpl;

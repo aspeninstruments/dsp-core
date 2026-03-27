@@ -520,12 +520,23 @@ class VisualizerUpdateTimer : public juce::Timer {
      */
     void forceUpdate();
 
+    /**
+     * Set lane LUT target buffer and selected lane pointer
+     *
+     * @param lutPtr Pointer to lane LUT buffer (1024 samples)
+     * @param selectedLanePtr Pointer to selected lane index (-1 = none)
+     */
+    void setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, int* selectedLanePtr);
+
   private:
     LayeredTransferFunction& editingModel;
     LaneMixer& laneMixer;
     std::array<double, VISUALIZER_LUT_SIZE>* visualizerLUTPtr{nullptr};
     std::function<void()> onVisualizerUpdate;
     uint64_t lastSeenVersion{0};
+
+    std::array<double, VISUALIZER_LUT_SIZE>* laneLUTPtr_{nullptr};
+    int* selectedLanePtr_{nullptr};
 };
 
 } // namespace dsp_core

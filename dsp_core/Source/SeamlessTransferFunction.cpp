@@ -66,6 +66,10 @@ class SeamlessTransferFunction::Impl {
     // VISUALIZER_LUT_SIZE = 1024 samples
     std::array<double, VISUALIZER_LUT_SIZE> visualizerLUT;
     std::function<void()> visualizerCallback;
+
+    // Lane LUT for secondary visualizer overlay (selected lane's raw curve)
+    std::array<double, VISUALIZER_LUT_SIZE> laneLUT{};
+    int selectedVisualizerLane = -1;  // -1 = no lane selected
 };
 
 SeamlessTransferFunction::SeamlessTransferFunction()
@@ -168,6 +172,7 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     // Create visualizer timer (60Hz, direct model reads)
     pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->editingModel, pimpl->laneMixer);
     pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
+    pimpl->visualizerTimer->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
     // Timer starts automatically in constructor at 60Hz
 
     // Trigger initial render for both (ensures correct state immediately)
@@ -218,7 +223,21 @@ void SeamlessTransferFunction::setVisualizerCallback(std::function<void()> callb
     // Route callback to visualizer timer if it exists
     if (pimpl->visualizerTimer) {
         pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, std::move(callback));
+        pimpl->visualizerTimer->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
     }
+}
+
+const std::array<double, VISUALIZER_LUT_SIZE>&
+SeamlessTransferFunction::getLaneLUT() const {
+    return pimpl->laneLUT;
+}
+
+int SeamlessTransferFunction::getSelectedVisualizerLane() const {
+    return pimpl->selectedVisualizerLane;
+}
+
+void SeamlessTransferFunction::setSelectedVisualizerLane(int laneIndex) {
+    pimpl->selectedVisualizerLane = laneIndex;
 }
 
 void SeamlessTransferFunction::renderLUTImmediate() {
@@ -295,6 +314,22 @@ void SeamlessTransferFunction::renderLUTImmediate() {
         pimpl->visualizerLUT[static_cast<size_t>(i)] =
             sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
             sumBuffer[static_cast<size_t>(nextIdx)] * t;
+    }
+
+    // Also update the lane LUT if a lane is selected
+    const int laneIdx = pimpl->selectedVisualizerLane;
+    if (laneIdx >= 0 && laneIdx < LaneMixer::NUM_LANES) {
+        const auto& lane = mixer.getLane(laneIdx);
+        for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
+            const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+            const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
+            const int idx = static_cast<int>(srcIdx);
+            const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
+            const double t = srcIdx - idx;
+            pimpl->laneLUT[static_cast<size_t>(i)] =
+                lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
+                lane.curveData[static_cast<size_t>(nextIdx)] * t;
+        }
     }
 
     // Invoke visualizer callback if set (so UI updates)
