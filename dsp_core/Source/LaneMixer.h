@@ -163,6 +163,16 @@ class LaneMixer {
     juce::ValueTree toValueTree() const;
     void fromValueTree(const juce::ValueTree& vt);
 
+    /**
+     * Migrate from legacy LayeredTransferFunction ValueTree format.
+     *
+     * Maps: coefficients[0..40] → lane amplitudes, BaseLayer → lane 0 curve data,
+     * lanes 1-40 filled with Chebyshev harmonics, normalization flag preserved.
+     *
+     * Does NOT handle editingMode/presetPath/equationText (plugin-level metadata).
+     */
+    void fromLegacyLTFValueTree(const juce::ValueTree& ltfVT);
+
     // ========================================================================
     // Utilities
     // ========================================================================

@@ -408,8 +408,9 @@ void LUTRenderTimer::syncLaneMixerFromLTF() {
     // Always-on mixer: normalization enabled when LTF says so (regardless of mode)
     laneMixer.setNormalizationEnabled(ltf.isNormalizationEnabled());
 
-    // Spline mode is the only exception: it overrides the mixer entirely
-    // (spline replaces base+harmonics — will be converted to lane edit in Phase 5c)
+    // LEGACY: Spline override only reachable when no lane mixer is present.
+    // Lane-scoped spline editing writes directly to lane curveData and never sets
+    // RenderingMode::Spline, so this block is dead code in production.
     if (ltf.getRenderingMode() == RenderingMode::Spline) {
         // Spline override only applies when lane 0 is still in harmonic/default state
         if (lane0Content == LaneContentType::Harmonic) {

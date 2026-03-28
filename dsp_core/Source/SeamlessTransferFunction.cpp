@@ -267,7 +267,9 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     // Always-on mixer: normalization enabled when LTF says so
     mixer.setNormalizationEnabled(model.isNormalizationEnabled());
 
-    // Spline mode overrides the mixer (will be converted to lane edit in Phase 5c)
+    // LEGACY: Spline override only reachable when no lane mixer is present.
+    // Lane-scoped spline editing writes directly to lane curveData and never sets
+    // RenderingMode::Spline, so this block is dead code in production.
     if (model.getRenderingMode() == RenderingMode::Spline) {
         if (lane0Content == LaneContentType::Harmonic) {
             const auto& splineLayer = model.getSplineLayer();

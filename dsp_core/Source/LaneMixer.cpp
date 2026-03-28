@@ -436,6 +436,73 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
 }
 
 // ============================================================================
+// Legacy Migration
+// ============================================================================
+
+void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT) {
+    if (!ltfVT.isValid() || ltfVT.getType().toString() != "LayeredTransferFunction") {
+        return;
+    }
+
+    // Start with clean defaults (tanh(2x) on lane 0, Chebyshev on lanes 1-40)
+    resetToDefaults();
+
+    // Parse coefficients → lane amplitudes
+    if (ltfVT.hasProperty("coefficients")) {
+        const juce::Array<juce::var>* coeffArray = ltfVT.getProperty("coefficients").getArray();
+        if (coeffArray != nullptr) {
+            const int numToLoad = std::min(coeffArray->size(), NUM_LANES);
+            for (int i = 0; i < numToLoad; ++i) {
+                lanes_[static_cast<size_t>(i)].amplitude =
+                    static_cast<double>((*coeffArray)[i]);
+            }
+        }
+    }
+
+    // Parse BaseLayer → lane 0 curve data
+    const auto baseVT = ltfVT.getChildWithName("BaseLayer");
+    if (baseVT.isValid() && baseVT.hasProperty("tableData")) {
+        const juce::MemoryBlock baseBlob = *baseVT.getProperty("tableData").getBinaryData();
+        const auto* data = static_cast<const double*>(baseBlob.getData());
+        const int numValues = static_cast<int>(baseBlob.getSize() / sizeof(double));
+        const int copyCount = std::min(numValues, TABLE_SIZE);
+
+        auto& lane0 = lanes_[0];
+        lane0.curveData.resize(TABLE_SIZE, 0.0);
+        std::copy(data, data + copyCount, lane0.curveData.begin());
+    }
+
+    // Parse normalization flag
+    if (ltfVT.hasProperty("normalizationEnabled")) {
+        normalizationEnabled_ = static_cast<bool>(ltfVT.getProperty("normalizationEnabled"));
+    } else {
+        normalizationEnabled_ = true; // Safe default for old presets
+    }
+
+    // Spline anchors on lane 0 (if SplineLayer child is present)
+    // SplineLayer format: <SplineLayer><Anchors><Anchor x= y= tangent= hasCustomTangent=/></Anchors></SplineLayer>
+    const auto splineVT = ltfVT.getChildWithName("SplineLayer");
+    if (splineVT.isValid()) {
+        auto& lane0 = lanes_[0];
+        lane0.splineAnchors.clear();
+        const auto anchorsVT = splineVT.getChildWithName("Anchors");
+        if (anchorsVT.isValid()) {
+            for (int a = 0; a < anchorsVT.getNumChildren(); ++a) {
+                const auto anchorVT = anchorsVT.getChild(a);
+                SplineAnchor anchor;
+                anchor.x = static_cast<double>(anchorVT.getProperty("x", 0.0));
+                anchor.y = static_cast<double>(anchorVT.getProperty("y", 0.0));
+                anchor.tangent = static_cast<double>(anchorVT.getProperty("tangent", 0.0));
+                anchor.hasCustomTangent = static_cast<bool>(anchorVT.getProperty("hasCustomTangent", false));
+                lane0.splineAnchors.push_back(anchor);
+            }
+        }
+    }
+
+    incrementVersionIfNotBatching();
+}
+
+// ============================================================================
 // Utilities
 // ============================================================================
 
