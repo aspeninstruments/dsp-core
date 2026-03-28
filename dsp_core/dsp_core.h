@@ -31,7 +31,6 @@
 #include "Source/AudioHistoryBuffer.h"
 #include "Source/StereoHistoryBuffer.h"
 #include "Source/HarmonicLayer.h"
-#include "Source/HarmonicScaling.h"
 #include "Source/Lane.h"
 #include "Source/LaneMixer.h"
 #include "Source/LayeredTransferFunction.h"
