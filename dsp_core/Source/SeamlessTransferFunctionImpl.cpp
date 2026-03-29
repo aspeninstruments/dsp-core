@@ -322,11 +322,9 @@ void LUTRendererThread::setLUTBuffersPointer(LUTBuffer* buffers) {
 
 // LUTRenderTimer Implementation (20Hz, DSP LUT only, guaranteed delivery)
 
-LUTRenderTimer::LUTRenderTimer(LayeredTransferFunction& ltf_,
-                               LaneMixer& mixer_,
+LUTRenderTimer::LUTRenderTimer(LaneMixer& mixer_,
                                LUTRendererThread& renderer_)
-    : ltf(ltf_)
-    , laneMixer(mixer_)
+    : laneMixer(mixer_)
     , renderer(renderer_) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     startTimerHz(SeamlessConfig::DSP_TIMER_HZ);  // 50ms interval, matches crossfade timing
@@ -339,9 +337,7 @@ LUTRenderTimer::~LUTRenderTimer() {
 void LUTRenderTimer::timerCallback() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    // Check both LTF and LaneMixer versions — lane-scoped edits (Phase 5)
-    // increment LaneMixer version directly without touching LTF.
-    const uint64_t currentVersion = ltf.getVersion() + laneMixer.getVersion();
+    const uint64_t currentVersion = laneMixer.getVersion();
 
     // Track version changes
     if (currentVersion != lastSeenVersion) {
@@ -353,9 +349,7 @@ void LUTRenderTimer::timerCallback() {
     if (lastRenderedVersion != lastSeenVersion) {
         const RenderJob job = captureRenderJob();
         renderer.enqueueJob(job);
-        // Snapshot version AFTER captureRenderJob (which runs syncLaneMixerFromLTF,
-        // potentially incrementing mixer version). This prevents infinite re-render loops.
-        lastRenderedVersion = ltf.getVersion() + laneMixer.getVersion();
+        lastRenderedVersion = laneMixer.getVersion();
         lastSeenVersion = lastRenderedVersion;
     }
 }
@@ -366,41 +360,28 @@ void LUTRenderTimer::forceRender() {
     const RenderJob job = captureRenderJob();
     renderer.enqueueJob(job);
 
-    // Update both versions to prevent duplicate render on next tick
-    const uint64_t currentVersion = ltf.getVersion() + laneMixer.getVersion();
+    const uint64_t currentVersion = laneMixer.getVersion();
     lastSeenVersion = currentVersion;
     lastRenderedVersion = currentVersion;
 }
 
 RenderJob LUTRenderTimer::captureRenderJob() {
-    // Sync LTF editing model state into LaneMixer lanes
-    syncLaneMixerFromLTF();
-
     RenderJob job;
 
     // Compute the mixed sum (normalization applied by LaneMixer)
     laneMixer.computeSum(job.sumData.data(), TABLE_SIZE);
 
-    job.extrapolationMode = ltf.getExtrapolationMode();
-    job.version = ltf.getVersion();
+    job.extrapolationMode = static_cast<LayeredTransferFunction::ExtrapolationMode>(
+        laneMixer.getExtrapolationMode());
+    job.version = laneMixer.getVersion();
 
     return job;
 }
 
-void LUTRenderTimer::syncLaneMixerFromLTF() {
-    // Phase 10: Bridge sync fully DISABLED.
-    // The controller now dual-writes ALL state to both LaneMixer and LTF.
-    // LaneMixer is authoritative — the bridge must not overwrite it.
-    // Any sync here causes version inflation and spurious snapshot diffs.
-    //
-    // Remaining consumers: captureRenderJob() calls computeSum() which reads
-    // only from LaneMixer. The LTF is no longer consulted for rendering.
-}
-
 // VisualizerUpdateTimer Implementation (120Hz, direct model reads)
 
-VisualizerUpdateTimer::VisualizerUpdateTimer(LayeredTransferFunction& model, LaneMixer& mixer)
-    : editingModel(model), laneMixer(mixer) {
+VisualizerUpdateTimer::VisualizerUpdateTimer(LaneMixer& mixer)
+    : laneMixer(mixer) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     startTimerHz(SeamlessConfig::VISUALIZER_TIMER_HZ);  // 120Hz for smooth UI updates during drag
 }
@@ -418,17 +399,13 @@ void VisualizerUpdateTimer::setVisualizerTarget(std::array<double, VISUALIZER_LU
 void VisualizerUpdateTimer::timerCallback() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    // Check both LTF and LaneMixer versions — lane-scoped edits (Phase 5)
-    // only increment LaneMixer version, harmonic slider changes increment LTF version.
-    const uint64_t currentVersion = editingModel.getVersion() + laneMixer.getVersion();
+    const uint64_t currentVersion = laneMixer.getVersion();
 
     // Path 1: Conditionally update transfer function curve (only when version changes)
     if (currentVersion != lastSeenVersion) {
         lastSeenVersion = currentVersion;
 
         if (visualizerLUTPtr) {
-            // Phase 10: Bridge sync fully DISABLED — LaneMixer is authoritative.
-
             // Compute the mixer sum into a temporary buffer, then downsample to visualizer resolution
             std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
             laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
@@ -514,7 +491,7 @@ void VisualizerUpdateTimer::forceUpdate() {
         }
     }
 
-    lastSeenVersion = editingModel.getVersion() + laneMixer.getVersion();
+    lastSeenVersion = laneMixer.getVersion();
 }
 
 void VisualizerUpdateTimer::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,

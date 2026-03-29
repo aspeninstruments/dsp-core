@@ -71,6 +71,19 @@ int LaneMixer::getLaneHarmonicNumber(int index) const {
     return lanes_[static_cast<size_t>(index)].harmonicNumber;
 }
 
+void LaneMixer::setLaneOddSymmetryEnabled(int index, bool enabled) {
+    if (!isValidIndex(index))
+        return;
+    lanes_[static_cast<size_t>(index)].oddSymmetryEnabled = enabled;
+    // No version increment — symmetry is a UI/editing constraint, not an audio change
+}
+
+bool LaneMixer::isLaneOddSymmetryEnabled(int index) const {
+    if (!isValidIndex(index))
+        return false;
+    return lanes_[static_cast<size_t>(index)].oddSymmetryEnabled;
+}
+
 void LaneMixer::setLaneCurveData(int index, const std::vector<double>& data) {
     if (!isValidIndex(index))
         return;
@@ -117,16 +130,17 @@ void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber) {
         return;
     }
 
-    // Use precomputed basis functions from HarmonicLayer
-    // Create a temporary coefficient array with only this harmonic active
-    std::vector<double> coefficients(static_cast<size_t>(kLaneMixerNumHarmonics + 1), 0.0);
-    if (harmonicNumber >= 1 && harmonicNumber <= kLaneMixerNumHarmonics) {
-        coefficients[static_cast<size_t>(harmonicNumber)] = 1.0;
-    }
-
+    // Direct Chebyshev trig computation — works for any harmonic number.
+    // Odd harmonics: sin(n * asin(x)), Even harmonics: cos(n * acos(x))
     for (int i = 0; i < TABLE_SIZE; ++i) {
-        const double x = normalizeIndex(i);
-        lane.curveData[static_cast<size_t>(i)] = harmonicLayer_->evaluate(x, coefficients, TABLE_SIZE);
+        const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
+        if (harmonicNumber == 1) {
+            lane.curveData[static_cast<size_t>(i)] = x;
+        } else if (harmonicNumber % 2 == 0) {
+            lane.curveData[static_cast<size_t>(i)] = std::cos(harmonicNumber * std::acos(x));
+        } else {
+            lane.curveData[static_cast<size_t>(i)] = std::sin(harmonicNumber * std::asin(x));
+        }
     }
 
     incrementVersionIfNotBatching();
@@ -328,7 +342,7 @@ void LaneMixer::initializeDefaults() {
 
 juce::ValueTree LaneMixer::toValueTree() const {
     juce::ValueTree vt("LaneMixer");
-    vt.setProperty("formatVersion", 1, nullptr);
+    vt.setProperty("formatVersion", 2, nullptr);
     vt.setProperty("numLanes", NUM_LANES, nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
     vt.setProperty("normalizationEnabled", normalizationEnabled_, nullptr);
@@ -350,6 +364,10 @@ juce::ValueTree LaneMixer::toValueTree() const {
             laneVT.setProperty("presetSourcePath", lane.presetSourcePath, nullptr);
         }
 
+        if (lane.oddSymmetryEnabled) {
+            laneVT.setProperty("oddSymmetryEnabled", true, nullptr);
+        }
+
         // Serialize spline anchors if present
         if (!lane.splineAnchors.empty()) {
             juce::ValueTree anchorsVT("SplineAnchors");
@@ -365,8 +383,9 @@ juce::ValueTree LaneMixer::toValueTree() const {
             laneVT.appendChild(anchorsVT, nullptr);
         }
 
-        // Compress curve data with zlib
-        if (!lane.curveData.empty()) {
+        // Skip curveData for Harmonic lanes — regenerated from harmonicNumber on load
+        const bool canRegenerate = (lane.contentType == LaneContentType::Harmonic);
+        if (!canRegenerate && !lane.curveData.empty()) {
             juce::MemoryBlock rawData(lane.curveData.data(),
                                       lane.curveData.size() * sizeof(double));
             juce::MemoryOutputStream compressedStream;
@@ -408,6 +427,7 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
         lane.harmonicNumber = laneVT.getProperty("harmonicNumber", 0);
         lane.equationText = laneVT.getProperty("equationText", juce::String()).toString();
         lane.presetSourcePath = laneVT.getProperty("presetSourcePath", juce::String()).toString();
+        lane.oddSymmetryEnabled = static_cast<bool>(laneVT.getProperty("oddSymmetryEnabled", false));
 
         // Deserialize spline anchors
         lane.splineAnchors.clear();

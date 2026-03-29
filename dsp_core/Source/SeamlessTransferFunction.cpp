@@ -166,11 +166,11 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     pimpl->renderer->startThread(juce::Thread::Priority::normal);
 
     // Create LUT render timer (20Hz, guaranteed delivery via two-version tracking)
-    pimpl->lutRenderTimer = std::make_unique<LUTRenderTimer>(pimpl->editingModel, pimpl->laneMixer, *pimpl->renderer);
+    pimpl->lutRenderTimer = std::make_unique<LUTRenderTimer>(pimpl->laneMixer, *pimpl->renderer);
     // Timer starts automatically in constructor at 20Hz
 
-    // Create visualizer timer (60Hz, direct model reads)
-    pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->editingModel, pimpl->laneMixer);
+    // Create visualizer timer (60Hz, direct LaneMixer reads)
+    pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->laneMixer);
     pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
     pimpl->visualizerTimer->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
     // Timer starts automatically in constructor at 60Hz
@@ -201,15 +201,6 @@ void SeamlessTransferFunction::stopSeamlessUpdates() {
     }
 }
 
-void SeamlessTransferFunction::notifyEditingModelChanged() {
-    // DEPRECATED: This method is no longer needed.
-    // The LUTRenderTimer (20Hz) and VisualizerUpdateTimer (60Hz) now run
-    // independently and detect version changes automatically.
-    //
-    // This method is kept as a no-op for backwards compatibility.
-    // It can be removed once all callers are updated.
-    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-}
 
 const std::array<double, VISUALIZER_LUT_SIZE>&
 SeamlessTransferFunction::getVisualizerLUT() const {
@@ -244,11 +235,7 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     // VERIFY: Called on message thread
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    const auto& model = pimpl->editingModel;
     auto& mixer = pimpl->laneMixer;
-
-    // Phase 10: Bridge sync fully DISABLED — LaneMixer is authoritative.
-    // The controller dual-writes all state to both LaneMixer and LTF.
 
     // Compute the mixed sum
     std::array<double, TABLE_SIZE> sumBuffer{};
@@ -262,8 +249,9 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     std::copy(sumBuffer.begin(), sumBuffer.end(), outputBuffer->data.begin());
 
     // Set metadata
-    outputBuffer->version = model.getVersion();
-    outputBuffer->extrapolationMode = model.getExtrapolationMode();
+    outputBuffer->version = mixer.getVersion();
+    outputBuffer->extrapolationMode = static_cast<LayeredTransferFunction::ExtrapolationMode>(
+        mixer.getExtrapolationMode());
 
     // Signal audio thread that new LUT is ready (using release to ensure LUT writes are visible)
     pimpl->audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);

@@ -403,11 +403,10 @@ class LUTRenderTimer : public juce::Timer {
      * CRITICAL: Asserts that construction happens on message thread.
      * Starts timer at 20Hz automatically.
      *
-     * @param ltf LayeredTransferFunction to poll (editing model)
-     * @param mixer LaneMixer to sync and render from
+     * @param mixer LaneMixer to render from (authoritative source)
      * @param renderer LUTRendererThread to enqueue jobs to
      */
-    LUTRenderTimer(LayeredTransferFunction& ltf, LaneMixer& mixer, LUTRendererThread& renderer);
+    LUTRenderTimer(LaneMixer& mixer, LUTRendererThread& renderer);
 
     /**
      * Destructor - stops timer
@@ -454,19 +453,10 @@ class LUTRenderTimer : public juce::Timer {
      */
     RenderJob captureRenderJob();
 
-    LayeredTransferFunction& ltf;
     LaneMixer& laneMixer;
     LUTRendererThread& renderer;
     uint64_t lastSeenVersion{0};
     uint64_t lastRenderedVersion{0};  // For guaranteed final delivery
-
-    /**
-     * Sync LTF editing model state into LaneMixer lanes.
-     *
-     * Mirrors coefficients[0..40] → lane amplitudes, base layer → lane 0 curve.
-     * Called before computeSum() to ensure LaneMixer reflects the latest LTF state.
-     */
-    void syncLaneMixerFromLTF();
 };
 
 /**
@@ -491,10 +481,9 @@ class VisualizerUpdateTimer : public juce::Timer {
     /**
      * Construct visualizer timer (message thread only)
      *
-     * @param model Reference to editing model (for version tracking and legacy paths)
      * @param mixer Reference to lane mixer (primary data source for sum visualization)
      */
-    VisualizerUpdateTimer(LayeredTransferFunction& model, LaneMixer& mixer);
+    explicit VisualizerUpdateTimer(LaneMixer& mixer);
 
     /**
      * Destructor - stops timer
@@ -529,7 +518,6 @@ class VisualizerUpdateTimer : public juce::Timer {
     void setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, int* selectedLanePtr);
 
   private:
-    LayeredTransferFunction& editingModel;
     LaneMixer& laneMixer;
     std::array<double, VISUALIZER_LUT_SIZE>* visualizerLUTPtr{nullptr};
     std::function<void()> onVisualizerUpdate;

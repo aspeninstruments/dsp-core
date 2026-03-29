@@ -52,6 +52,8 @@ struct Lane {
     juce::String equationText;
     juce::String presetSourcePath;
 
+    bool oddSymmetryEnabled = false; // Per-lane odd symmetry enforcement (f(-x) = -f(x))
+
     /**
      * Initialize curveData to a given size with all zeros.
      */

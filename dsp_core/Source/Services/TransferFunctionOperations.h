@@ -27,7 +27,7 @@ class TransferFunctionOperations {
     static void normalize(LayeredTransferFunction& ltf);
 
     // ========================================================================
-    // CurveData overloads (lane-scoped — primary API post-Phase 10)
+    // CurveData overloads (lane-scoped)
     // ========================================================================
 
     /** Invert curve: f(x) → -f(x) */

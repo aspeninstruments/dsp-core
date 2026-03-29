@@ -107,10 +107,9 @@ class SeamlessTransferFunction {
     const LayeredTransferFunction& getEditingModel() const;
 
     /**
-     * Access lane mixer (for future lane-aware controller, message thread only)
+     * Access lane mixer (message thread only)
      *
      * The lane mixer holds the 41-lane model that drives the audio render pipeline.
-     * During the bridge period, it is synced from the editing model (LTF) automatically.
      *
      * @return Reference to lane mixer
      */
@@ -204,17 +203,6 @@ class SeamlessTransferFunction {
      *   transferFunction.renderLUTImmediate();  // Audio LUT now matches restored state
      */
     void renderLUTImmediate();
-
-    /**
-     * Notify that editing model has changed (message thread)
-     *
-     * Call this when the editing model's version has incremented to trigger
-     * an immediate LUT render. This is called by the UI timer (25Hz) when
-     * it detects version changes.
-     *
-     * Thread-safe: Can be called from message thread.
-     */
-    void notifyEditingModelChanged();
 
     /**
      * Get visualizer LUT (message thread only)

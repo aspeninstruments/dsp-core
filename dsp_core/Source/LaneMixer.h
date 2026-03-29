@@ -48,6 +48,7 @@ class LaneMixer {
     static constexpr int TABLE_SIZE = 16384;
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
+    static constexpr int MAX_HARMONIC_NUMBER = 200;
 
     // Extrapolation mode — controls LUT boundary behavior in AudioEngine.
     // Defined here (not on LTF) so LaneMixer is the sole source of truth.
@@ -75,6 +76,9 @@ class LaneMixer {
 
     void setLaneHarmonicNumber(int index, int harmonicNumber);
     int getLaneHarmonicNumber(int index) const;
+
+    void setLaneOddSymmetryEnabled(int index, bool enabled);
+    bool isLaneOddSymmetryEnabled(int index) const;
 
     /**
      * Set the curve data for a lane.
