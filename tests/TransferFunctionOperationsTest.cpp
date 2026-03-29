@@ -282,3 +282,87 @@ TEST_F(TransferFunctionOperationsTest, ChainedOperations_InvertThenNormalize) {
     }
     EXPECT_NEAR(maxAbs, 1.0, 1e-10);
 }
+
+// ============================================================================
+// CurveData Overload Tests
+// ============================================================================
+
+class CurveDataOperationsTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        curve.resize(64);
+        for (int i = 0; i < 64; ++i) {
+            curve[static_cast<size_t>(i)] = -1.0 + (2.0 * i / 63.0);
+        }
+    }
+    std::vector<double> curve;
+};
+
+TEST_F(CurveDataOperationsTest, Invert_FlipsAllValues) {
+    std::vector<double> original = curve;
+    TransferFunctionOperations::invert(curve);
+    for (size_t i = 0; i < curve.size(); ++i) {
+        EXPECT_NEAR(curve[i], -original[i], 1e-10);
+    }
+}
+
+TEST_F(CurveDataOperationsTest, Invert_DoubleInvertRestores) {
+    std::vector<double> original = curve;
+    TransferFunctionOperations::invert(curve);
+    TransferFunctionOperations::invert(curve);
+    for (size_t i = 0; i < curve.size(); ++i) {
+        EXPECT_NEAR(curve[i], original[i], 1e-10);
+    }
+}
+
+TEST_F(CurveDataOperationsTest, RemoveDCInstantaneous_CentersAtMidpoint) {
+    for (auto& v : curve) {
+        v += 0.5;
+    }
+    TransferFunctionOperations::removeDCInstantaneous(curve);
+    EXPECT_NEAR(curve[curve.size() / 2], 0.0, 1e-10);
+}
+
+TEST_F(CurveDataOperationsTest, RemoveDCSteadyState_ZerosAverage) {
+    for (auto& v : curve) {
+        v += 0.5;
+    }
+    TransferFunctionOperations::removeDCSteadyState(curve);
+    double sum = 0.0;
+    for (const auto v : curve) {
+        sum += v;
+    }
+    EXPECT_NEAR(sum / static_cast<double>(curve.size()), 0.0, 1e-10);
+}
+
+TEST_F(CurveDataOperationsTest, Normalize_ScalesToUnit) {
+    for (auto& v : curve) {
+        v *= 0.25;
+    }
+    TransferFunctionOperations::normalize(curve);
+    double maxAbs = 0.0;
+    for (const auto v : curve) {
+        maxAbs = std::max(maxAbs, std::abs(v));
+    }
+    EXPECT_NEAR(maxAbs, 1.0, 1e-10);
+}
+
+TEST_F(CurveDataOperationsTest, Normalize_ZeroCurve_NoOp) {
+    std::vector<double> zeros(64, 0.0);
+    TransferFunctionOperations::normalize(zeros);
+    for (const auto v : zeros) {
+        EXPECT_DOUBLE_EQ(v, 0.0);
+    }
+}
+
+TEST_F(CurveDataOperationsTest, Normalize_PreservesRelativeShape) {
+    for (auto& v : curve) {
+        v *= 0.3;
+    }
+    std::vector<double> original = curve;
+    TransferFunctionOperations::normalize(curve);
+    const double scale = 1.0 / 0.3;
+    for (size_t i = 0; i < curve.size(); ++i) {
+        EXPECT_NEAR(curve[i], original[i] * scale, 1e-10);
+    }
+}

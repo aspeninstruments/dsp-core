@@ -492,4 +492,67 @@ TEST_F(LaneMixerTest, NormalizeIndex_MatchesLTF) {
     }
 }
 
+// ============================================================================
+// ExtrapolationMode Tests
+// ============================================================================
+
+TEST_F(LaneMixerTest, ExtrapolationMode_DefaultIsClamp) {
+    EXPECT_EQ(mixer->getExtrapolationMode(), dsp_core::LaneMixer::ExtrapolationMode::Clamp);
+}
+
+TEST_F(LaneMixerTest, ExtrapolationMode_SetAndGet) {
+    mixer->setExtrapolationMode(dsp_core::LaneMixer::ExtrapolationMode::Linear);
+    EXPECT_EQ(mixer->getExtrapolationMode(), dsp_core::LaneMixer::ExtrapolationMode::Linear);
+
+    mixer->setExtrapolationMode(dsp_core::LaneMixer::ExtrapolationMode::Clamp);
+    EXPECT_EQ(mixer->getExtrapolationMode(), dsp_core::LaneMixer::ExtrapolationMode::Clamp);
+}
+
+TEST_F(LaneMixerTest, ExtrapolationMode_IncrementsVersion) {
+    const auto v0 = mixer->getVersion();
+    mixer->setExtrapolationMode(dsp_core::LaneMixer::ExtrapolationMode::Linear);
+    EXPECT_GT(mixer->getVersion(), v0);
+}
+
+// ============================================================================
+// Convenience API Tests
+// ============================================================================
+
+TEST_F(LaneMixerTest, GetAmplitudes_ReturnsAllLaneAmplitudes) {
+    mixer->setLaneAmplitude(0, 0.5);
+    mixer->setLaneAmplitude(1, 0.8);
+    mixer->setLaneAmplitude(5, -0.3);
+
+    const auto amps = mixer->getAmplitudes();
+    EXPECT_DOUBLE_EQ(amps[0], 0.5);
+    EXPECT_DOUBLE_EQ(amps[1], 0.8);
+    EXPECT_DOUBLE_EQ(amps[5], -0.3);
+    EXPECT_DOUBLE_EQ(amps[2], 0.0);
+}
+
+TEST_F(LaneMixerTest, ClearLaneCurveData_ZerosOutCurve) {
+    // Lane 1 has identity curve by default
+    EXPECT_NE(mixer->getLane(1).curveData[dsp_core::LaneMixer::TABLE_SIZE - 1], 0.0);
+
+    mixer->clearLaneCurveData(1);
+
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
+        EXPECT_DOUBLE_EQ(mixer->getLane(1).curveData[static_cast<size_t>(i)], 0.0)
+            << "CurveData should be zero at index " << i;
+    }
+}
+
+TEST_F(LaneMixerTest, ClearLaneCurveData_IncrementsVersion) {
+    const auto v0 = mixer->getVersion();
+    mixer->clearLaneCurveData(1);
+    EXPECT_GT(mixer->getVersion(), v0);
+}
+
+TEST_F(LaneMixerTest, ClearLaneCurveData_InvalidIndex_NoOp) {
+    const auto v0 = mixer->getVersion();
+    mixer->clearLaneCurveData(-1);
+    mixer->clearLaneCurveData(41);
+    EXPECT_EQ(mixer->getVersion(), v0);
+}
+
 } // namespace dsp_core_test

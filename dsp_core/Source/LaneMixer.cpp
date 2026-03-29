@@ -230,6 +230,36 @@ void LaneMixer::setNormalizationEnabled(bool enabled) {
 }
 
 // ============================================================================
+// Extrapolation Mode
+// ============================================================================
+
+void LaneMixer::setExtrapolationMode(ExtrapolationMode mode) {
+    extrapolationMode_ = mode;
+    incrementVersionIfNotBatching();
+}
+
+// ============================================================================
+// Convenience Accessors
+// ============================================================================
+
+std::array<double, LaneMixer::NUM_LANES> LaneMixer::getAmplitudes() const {
+    std::array<double, NUM_LANES> result{};
+    for (int i = 0; i < NUM_LANES; ++i) {
+        result[static_cast<size_t>(i)] = lanes_[static_cast<size_t>(i)].amplitude;
+    }
+    return result;
+}
+
+void LaneMixer::clearLaneCurveData(int index) {
+    if (!isValidIndex(index)) {
+        return;
+    }
+    auto& lane = lanes_[static_cast<size_t>(index)];
+    std::fill(lane.curveData.begin(), lane.curveData.end(), 0.0);
+    incrementVersionIfNotBatching();
+}
+
+// ============================================================================
 // Version Tracking
 // ============================================================================
 

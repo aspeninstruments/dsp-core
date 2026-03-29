@@ -68,4 +68,55 @@ void TransferFunctionOperations::normalize(LayeredTransferFunction& ltf) {
     // Version counter incremented by setBaseLayerValue() - renderer will update at next poll
 }
 
+// ============================================================================
+// CurveData overloads (lane-scoped)
+// ============================================================================
+
+void TransferFunctionOperations::invert(std::vector<double>& curveData) {
+    for (auto& v : curveData) {
+        v = -v;
+    }
+}
+
+void TransferFunctionOperations::removeDCInstantaneous(std::vector<double>& curveData) {
+    if (curveData.empty()) {
+        return;
+    }
+    const double dcOffset = curveData[curveData.size() / 2];
+    for (auto& v : curveData) {
+        v -= dcOffset;
+    }
+}
+
+void TransferFunctionOperations::removeDCSteadyState(std::vector<double>& curveData) {
+    if (curveData.empty()) {
+        return;
+    }
+    double sum = 0.0;
+    for (const auto v : curveData) {
+        sum += v;
+    }
+    const double average = sum / static_cast<double>(curveData.size());
+    for (auto& v : curveData) {
+        v -= average;
+    }
+}
+
+void TransferFunctionOperations::normalize(std::vector<double>& curveData) {
+    double maxAbsValue = 0.0;
+    for (const auto v : curveData) {
+        maxAbsValue = std::max(maxAbsValue, std::abs(v));
+    }
+
+    constexpr double kMinNormalizeThreshold = 1e-10;
+    if (maxAbsValue < kMinNormalizeThreshold) {
+        return;
+    }
+
+    const double scaleFactor = 1.0 / maxAbsValue;
+    for (auto& v : curveData) {
+        v *= scaleFactor;
+    }
+}
+
 } // namespace dsp_core::Services

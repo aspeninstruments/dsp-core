@@ -1,16 +1,14 @@
 #pragma once
 #include "../LayeredTransferFunction.h"
+#include <vector>
 
 namespace dsp_core::Services {
 
 /**
  * TransferFunctionOperations - Pure service for transfer function transformations
  *
- * Provides stateless operations on LayeredTransferFunction that can be used
- * from any context (UI, presets, automation, tests).
- *
- * All operations modify the base layer and call updateComposite() to ensure
- * the visualizer reflects the changes.
+ * Provides stateless operations on LayeredTransferFunction or raw curve data
+ * (std::vector<double>) that can be used from any context.
  *
  * Service Pattern (5/5 score):
  *   - Pure static methods (no state)
@@ -19,45 +17,30 @@ namespace dsp_core::Services {
  */
 class TransferFunctionOperations {
   public:
-    /**
-     * Invert the base layer: f(x) → -f(x)
-     *
-     * Flips the transfer function vertically around the x-axis.
-     * Useful for creating complementary distortion curves.
-     */
+    // ========================================================================
+    // LayeredTransferFunction overloads (legacy — used during migration)
+    // ========================================================================
+
     static void invert(LayeredTransferFunction& ltf);
-
-    /**
-     * Remove instantaneous DC offset
-     *
-     * Subtracts the value at x=0 (center of table) from all base layer values.
-     * This ensures f(0) = 0 after the operation.
-     *
-     * Use when you want the transfer function to pass through the origin,
-     * eliminating DC offset for signals that cross zero.
-     */
     static void removeDCInstantaneous(LayeredTransferFunction& ltf);
-
-    /**
-     * Remove steady-state DC offset
-     *
-     * Subtracts the average value of the entire base layer from all values.
-     * This centers the transfer function around zero.
-     *
-     * Use when you want to remove overall bias from the transfer function,
-     * which can help reduce DC offset in the processed audio.
-     */
     static void removeDCSteadyState(LayeredTransferFunction& ltf);
-
-    /**
-     * Normalize the base layer to [-1, 1] range
-     *
-     * Scales all base layer values so that max(|f(x)|) = 1.0.
-     * This maximizes the dynamic range without clipping.
-     *
-     * No-op if the base layer is essentially zero (max < 1e-10).
-     */
     static void normalize(LayeredTransferFunction& ltf);
+
+    // ========================================================================
+    // CurveData overloads (lane-scoped — primary API post-Phase 10)
+    // ========================================================================
+
+    /** Invert curve: f(x) → -f(x) */
+    static void invert(std::vector<double>& curveData);
+
+    /** Remove instantaneous DC: subtract value at midpoint so f(0) = 0 */
+    static void removeDCInstantaneous(std::vector<double>& curveData);
+
+    /** Remove steady-state DC: subtract average of all values */
+    static void removeDCSteadyState(std::vector<double>& curveData);
+
+    /** Normalize to [-1, 1] range. No-op if max < 1e-10. */
+    static void normalize(std::vector<double>& curveData);
 
   private:
     TransferFunctionOperations() = delete; // Pure static utility

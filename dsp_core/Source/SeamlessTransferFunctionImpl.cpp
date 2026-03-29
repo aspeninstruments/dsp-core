@@ -388,47 +388,13 @@ RenderJob LUTRenderTimer::captureRenderJob() {
 }
 
 void LUTRenderTimer::syncLaneMixerFromLTF() {
-    // Mirror LTF coefficients[0..40] → lane amplitudes
-    const auto coeffs = ltf.getHarmonicCoefficients();
-    for (int i = 0; i < LaneMixer::NUM_LANES; ++i) {
-        laneMixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
-    }
-
-    // Copy LTF base layer → lane 0 curve data, BUT only if lane 0 hasn't been
-    // directly edited (Phase 5 guard). Directly-edited lanes (Paint/Spline/Equation/Preset)
-    // own their curveData — the bridge must not overwrite it.
-    const auto& lane0Content = laneMixer.getLane(0).contentType;
-    if (lane0Content == LaneContentType::Harmonic) {
-        auto& lane0 = laneMixer.getMutableLane(0);
-        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-            lane0.curveData[static_cast<size_t>(i)] = ltf.getBaseLayerValue(i);
-        }
-    }
-
-    // Always-on mixer: normalization enabled when LTF says so (regardless of mode)
-    laneMixer.setNormalizationEnabled(ltf.isNormalizationEnabled());
-
-    // LEGACY: Spline override only reachable when no lane mixer is present.
-    // Lane-scoped spline editing writes directly to lane curveData and never sets
-    // RenderingMode::Spline, so this block is dead code in production.
-    if (ltf.getRenderingMode() == RenderingMode::Spline) {
-        // Spline override only applies when lane 0 is still in harmonic/default state
-        if (lane0Content == LaneContentType::Harmonic) {
-            const auto& splineLayer = ltf.getSplineLayer();
-            auto& lane0 = laneMixer.getMutableLane(0);
-            for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-                const double x = laneMixer.normalizeIndex(i);
-                lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
-            }
-        }
-        laneMixer.setLaneAmplitude(0, 1.0);
-        for (int i = 1; i < LaneMixer::NUM_LANES; ++i) {
-            laneMixer.setLaneAmplitude(i, 0.0);
-        }
-        laneMixer.setNormalizationEnabled(false);
-    }
-    // Paint, Harmonic, and Equation modes: all lanes active with their coefficients
-    // (synced from LTF coefficients above — mixer always drives audio)
+    // Phase 10: Bridge sync fully DISABLED.
+    // The controller now dual-writes ALL state to both LaneMixer and LTF.
+    // LaneMixer is authoritative — the bridge must not overwrite it.
+    // Any sync here causes version inflation and spurious snapshot diffs.
+    //
+    // Remaining consumers: captureRenderJob() calls computeSum() which reads
+    // only from LaneMixer. The LTF is no longer consulted for rendering.
 }
 
 // VisualizerUpdateTimer Implementation (120Hz, direct model reads)
@@ -461,20 +427,7 @@ void VisualizerUpdateTimer::timerCallback() {
         lastSeenVersion = currentVersion;
 
         if (visualizerLUTPtr) {
-            // Sync LTF state into LaneMixer before sampling (mirrors what the audio path does).
-            // This ensures harmonic slider changes are reflected in the mixer sum.
-            const auto coeffs = editingModel.getHarmonicCoefficients();
-            for (int i = 0; i < LaneMixer::NUM_LANES; ++i) {
-                laneMixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
-            }
-            // Sync base layer to lane 0 (only if not directly edited)
-            if (laneMixer.getLane(0).contentType == LaneContentType::Harmonic) {
-                auto& lane0 = laneMixer.getMutableLane(0);
-                for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-                    lane0.curveData[static_cast<size_t>(i)] = editingModel.getBaseLayerValue(i);
-                }
-            }
-            laneMixer.setNormalizationEnabled(editingModel.isNormalizationEnabled());
+            // Phase 10: Bridge sync fully DISABLED — LaneMixer is authoritative.
 
             // Compute the mixer sum into a temporary buffer, then downsample to visualizer resolution
             std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};

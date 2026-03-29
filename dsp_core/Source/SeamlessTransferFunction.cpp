@@ -247,45 +247,8 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     const auto& model = pimpl->editingModel;
     auto& mixer = pimpl->laneMixer;
 
-    // Sync LTF editing model state into LaneMixer lanes
-    // (Same logic as LUTRenderTimer::syncLaneMixerFromLTF)
-    const auto coeffs = model.getHarmonicCoefficients();
-    for (int i = 0; i < LaneMixer::NUM_LANES; ++i) {
-        mixer.setLaneAmplitude(i, coeffs[static_cast<size_t>(i)]);
-    }
-
-    // Copy LTF base layer → lane 0 curve data, only if lane 0 hasn't been
-    // directly edited (Phase 5 guard)
-    const auto& lane0Content = mixer.getLane(0).contentType;
-    if (lane0Content == LaneContentType::Harmonic) {
-        auto& lane0 = mixer.getMutableLane(0);
-        for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-            lane0.curveData[static_cast<size_t>(i)] = model.getBaseLayerValue(i);
-        }
-    }
-
-    // Always-on mixer: normalization enabled when LTF says so
-    mixer.setNormalizationEnabled(model.isNormalizationEnabled());
-
-    // LEGACY: Spline override only reachable when no lane mixer is present.
-    // Lane-scoped spline editing writes directly to lane curveData and never sets
-    // RenderingMode::Spline, so this block is dead code in production.
-    if (model.getRenderingMode() == RenderingMode::Spline) {
-        if (lane0Content == LaneContentType::Harmonic) {
-            const auto& splineLayer = model.getSplineLayer();
-            auto& lane0 = mixer.getMutableLane(0);
-            for (int i = 0; i < LaneMixer::TABLE_SIZE; ++i) {
-                const double x = mixer.normalizeIndex(i);
-                lane0.curveData[static_cast<size_t>(i)] = splineLayer.evaluate(x);
-            }
-        }
-        mixer.setLaneAmplitude(0, 1.0);
-        for (int i = 1; i < LaneMixer::NUM_LANES; ++i) {
-            mixer.setLaneAmplitude(i, 0.0);
-        }
-        mixer.setNormalizationEnabled(false);
-    }
-    // Paint, Harmonic, Equation: all lanes active (mixer always drives audio)
+    // Phase 10: Bridge sync fully DISABLED — LaneMixer is authoritative.
+    // The controller dual-writes all state to both LaneMixer and LTF.
 
     // Compute the mixed sum
     std::array<double, TABLE_SIZE> sumBuffer{};

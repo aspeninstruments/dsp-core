@@ -49,6 +49,10 @@ class LaneMixer {
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
 
+    // Extrapolation mode — controls LUT boundary behavior in AudioEngine.
+    // Defined here (not on LTF) so LaneMixer is the sole source of truth.
+    enum class ExtrapolationMode { Clamp, Linear };
+
     LaneMixer();
 
     // ========================================================================
@@ -137,6 +141,28 @@ class LaneMixer {
     bool isNormalizationEnabled() const { return normalizationEnabled_; }
 
     // ========================================================================
+    // Extrapolation Mode
+    // ========================================================================
+
+    void setExtrapolationMode(ExtrapolationMode mode);
+    ExtrapolationMode getExtrapolationMode() const { return extrapolationMode_; }
+
+    // ========================================================================
+    // Convenience Accessors
+    // ========================================================================
+
+    /**
+     * Returns all 41 lane amplitudes as an array.
+     * Useful for snapshot capture and bulk reads.
+     */
+    std::array<double, NUM_LANES> getAmplitudes() const;
+
+    /**
+     * Zero out a lane's curve data and increment version.
+     */
+    void clearLaneCurveData(int index);
+
+    // ========================================================================
     // Version Tracking
     // ========================================================================
 
@@ -183,6 +209,7 @@ class LaneMixer {
   private:
     std::array<Lane, NUM_LANES> lanes_;
     bool normalizationEnabled_ = true;
+    ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
 
     // Precomputed harmonic basis functions (shared across all harmonic lanes)
     std::unique_ptr<HarmonicLayer> harmonicLayer_;
