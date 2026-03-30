@@ -140,22 +140,12 @@ double LayeredTransferFunction::computeCompositeAt(int index) const {
     const double wtCoeff = coefficients[0];
     const double unnormalized = wtCoeff * baseValue + harmonicValue;
 
-    // Apply cached normalization scalar if enabled
-    if (normalizationEnabled) {
-        const double normScalar = normalizationScalar.load(std::memory_order_acquire);
-        return normScalar * unnormalized;
-    }
-
-    return unnormalized;
+    // Apply cached normalization scalar
+    const double normScalar = normalizationScalar.load(std::memory_order_acquire);
+    return normScalar * unnormalized;
 }
 
 void LayeredTransferFunction::updateNormalizationScalar() {
-    // If normalization disabled, set scalar to 1.0 (identity)
-    if (!normalizationEnabled) {
-        normalizationScalar.store(1.0, std::memory_order_release);
-        return;
-    }
-
     // Compute max absolute value across entire composite
     double maxAbsValue = 0.0;
     const double wtCoeff = coefficients[0];
@@ -180,17 +170,6 @@ void LayeredTransferFunction::setPaintStrokeActive(bool active) {
 
 bool LayeredTransferFunction::isPaintStrokeActive() const {
     return paintStrokeActive;
-}
-
-void LayeredTransferFunction::setNormalizationEnabled(bool enabled) {
-    normalizationEnabled = enabled;
-
-    // Increment version to trigger renderer update with new normalization state
-    incrementVersionIfNotBatching();
-}
-
-bool LayeredTransferFunction::isNormalizationEnabled() const {
-    return normalizationEnabled;
 }
 
 bool LayeredTransferFunction::hasNonZeroHarmonics() const {
@@ -672,9 +651,6 @@ juce::ValueTree LayeredTransferFunction::toValueTree() const {
     // Serialize normalization scalar
     vt.setProperty("normalizationScalar", normalizationScalar.load(std::memory_order_acquire), nullptr);
 
-    // Serialize normalization enabled state
-    vt.setProperty("normalizationEnabled", normalizationEnabled, nullptr);
-
     // Serialize settings
     vt.setProperty("extrapolationMode", static_cast<int>(extrapMode), nullptr);
 
@@ -729,13 +705,6 @@ void LayeredTransferFunction::fromValueTree(const juce::ValueTree& vt) {
     if (vt.hasProperty("normalizationScalar")) {
         normalizationScalar.store(static_cast<double>(vt.getProperty("normalizationScalar")),
                                   std::memory_order_release);
-    }
-
-    // Load normalization enabled state (default to true if not present for backward compatibility)
-    if (vt.hasProperty("normalizationEnabled")) {
-        normalizationEnabled = static_cast<bool>(vt.getProperty("normalizationEnabled"));
-    } else {
-        normalizationEnabled = true; // Safe default for old presets
     }
 
     // Load settings

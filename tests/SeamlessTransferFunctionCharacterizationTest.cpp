@@ -141,28 +141,11 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, NormalizationEnabled_MaxAbs
     coeffs[0] = 1.0;  // WT mix
     coeffs[1] = 1.0;  // H1
     ltf.setHarmonicCoefficients(coeffs);
-    ltf.setNormalizationEnabled(true);
 
     auto output = renderAndProcess();
 
     const double maxVal = maxAbs(output);
     EXPECT_NEAR(maxVal, 1.0, 0.02) << "Normalized output should have max abs ≈ 1.0";
-}
-
-TEST_F(SeamlessTransferFunctionCharacterizationTest, NormalizationDisabled_CanExceedOne) {
-    auto& ltf = stf->getEditingModel();
-
-    // Same setup as above but normalization disabled
-    auto coeffs = ltf.getHarmonicCoefficients();
-    coeffs[0] = 1.0;  // WT mix
-    coeffs[1] = 1.0;  // H1
-    ltf.setHarmonicCoefficients(coeffs);
-    ltf.setNormalizationEnabled(false);
-
-    auto output = renderAndProcess();
-
-    const double maxVal = maxAbs(output);
-    EXPECT_GT(maxVal, 1.0) << "Unnormalized WT+H1 should exceed 1.0";
 }
 
 } // namespace dsp_core_test

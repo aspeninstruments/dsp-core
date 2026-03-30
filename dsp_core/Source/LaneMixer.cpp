@@ -186,18 +186,16 @@ void LaneMixer::computeSum(double* outputBuffer, int size) const {
         }
     }
 
-    // Apply normalization if enabled
-    if (normalizationEnabled_) {
-        double maxAbs = 0.0;
-        for (int i = 0; i < numSamples; ++i) {
-            maxAbs = std::max(maxAbs, std::abs(outputBuffer[i]));
-        }
+    // Normalize output to [-1, 1] range
+    double maxAbs = 0.0;
+    for (int i = 0; i < numSamples; ++i) {
+        maxAbs = std::max(maxAbs, std::abs(outputBuffer[i]));
+    }
 
-        if (maxAbs > kLaneMixerNormEpsilon) {
-            const double scalar = 1.0 / maxAbs;
-            for (int i = 0; i < numSamples; ++i) {
-                outputBuffer[i] *= scalar;
-            }
+    if (maxAbs > kLaneMixerNormEpsilon) {
+        const double scalar = 1.0 / maxAbs;
+        for (int i = 0; i < numSamples; ++i) {
+            outputBuffer[i] *= scalar;
         }
     }
 }
@@ -232,15 +230,6 @@ double LaneMixer::evaluateSumAt(double x) const {
     }
 
     return sum0 + frac * (sum1 - sum0);
-}
-
-// ============================================================================
-// Normalization
-// ============================================================================
-
-void LaneMixer::setNormalizationEnabled(bool enabled) {
-    normalizationEnabled_ = enabled;
-    incrementVersionIfNotBatching();
 }
 
 // ============================================================================
@@ -345,7 +334,7 @@ juce::ValueTree LaneMixer::toValueTree() const {
     vt.setProperty("formatVersion", 2, nullptr);
     vt.setProperty("numLanes", NUM_LANES, nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
-    vt.setProperty("normalizationEnabled", normalizationEnabled_, nullptr);
+
 
     for (int i = 0; i < NUM_LANES; ++i) {
         const auto& lane = lanes_[static_cast<size_t>(i)];
@@ -409,8 +398,6 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
         return;
 
     const int loadedTableSize = vt.getProperty("tableSize", TABLE_SIZE);
-    normalizationEnabled_ = vt.getProperty("normalizationEnabled", true);
-
     for (int i = 0; i < vt.getNumChildren(); ++i) {
         const auto laneVT = vt.getChild(i);
         if (laneVT.getType().toString() != "Lane")
@@ -520,13 +507,6 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT) {
         auto& lane0 = lanes_[0];
         lane0.curveData.resize(TABLE_SIZE, 0.0);
         std::copy(data, data + copyCount, lane0.curveData.begin());
-    }
-
-    // Parse normalization flag
-    if (ltfVT.hasProperty("normalizationEnabled")) {
-        normalizationEnabled_ = static_cast<bool>(ltfVT.getProperty("normalizationEnabled"));
-    } else {
-        normalizationEnabled_ = true; // Safe default for old presets
     }
 
     // Spline anchors on lane 0 (if SplineLayer child is present)

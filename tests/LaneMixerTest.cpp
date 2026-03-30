@@ -147,10 +147,7 @@ TEST_F(LaneMixerTest, ComputeSum_SingleLaneFullAmplitude_EqualsLaneCurve) {
     }
 }
 
-TEST_F(LaneMixerTest, ComputeSum_TwoLanes_ReturnsSumOfWeightedCurves) {
-    // Disable normalization to test raw sum
-    mixer->setNormalizationEnabled(false);
-
+TEST_F(LaneMixerTest, ComputeSum_TwoLanes_PreservesRelativeProportions) {
     // Lane 1: H1=x, amplitude=0.5
     // Lane 2: T_2(x), amplitude=0.3
     mixer->setLaneAmplitude(1, 0.5);
@@ -158,23 +155,31 @@ TEST_F(LaneMixerTest, ComputeSum_TwoLanes_ReturnsSumOfWeightedCurves) {
 
     auto sum = computeSum();
 
+    // Compute expected raw sum then normalize
     const auto& lane1 = mixer->getLane(1);
     const auto& lane2 = mixer->getLane(2);
 
+    std::vector<double> rawSum(dsp_core::LaneMixer::TABLE_SIZE);
+    double rawMaxAbs = 0.0;
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
+        rawSum[static_cast<size_t>(i)] = 0.5 * lane1.curveData[static_cast<size_t>(i)] +
+                                          0.3 * lane2.curveData[static_cast<size_t>(i)];
+        rawMaxAbs = std::max(rawMaxAbs, std::abs(rawSum[static_cast<size_t>(i)]));
+    }
+
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
-        const double expected = 0.5 * lane1.curveData[static_cast<size_t>(i)] +
-                                0.3 * lane2.curveData[static_cast<size_t>(i)];
+        const double expected = rawSum[static_cast<size_t>(i)] / rawMaxAbs;
         EXPECT_NEAR(sum[static_cast<size_t>(i)], expected, 1e-10)
-            << "Two-lane sum at index " << i;
+            << "Normalized two-lane sum at index " << i;
     }
 }
 
 TEST_F(LaneMixerTest, ComputeSum_NegativeAmplitude_InvertsCurve) {
-    mixer->setNormalizationEnabled(false);
     mixer->setLaneAmplitude(1, -1.0);
 
     auto sum = computeSum();
 
+    // H1 with amplitude -1.0: raw = -x, max(|-x|) = 1.0, normalized = -x
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
         const double x = mixer->normalizeIndex(i);
         EXPECT_NEAR(sum[static_cast<size_t>(i)], -x, 1e-10)
@@ -192,17 +197,6 @@ TEST_F(LaneMixerTest, ComputeSum_WithNormalization_MaxAbsIsOne) {
 
     const double maxVal = maxAbs(sum);
     EXPECT_NEAR(maxVal, 1.0, 1e-10) << "Normalized sum should have max abs = 1.0";
-}
-
-TEST_F(LaneMixerTest, ComputeSum_WithoutNormalization_CanExceedOne) {
-    mixer->setNormalizationEnabled(false);
-    mixer->setLaneAmplitude(1, 5.0);
-
-    auto sum = computeSum();
-
-    const double maxVal = maxAbs(sum);
-    EXPECT_GT(maxVal, 1.0) << "Unnormalized sum with amplitude 5.0 should exceed 1.0";
-    EXPECT_NEAR(maxVal, 5.0, 1e-10) << "Max should be 5.0 * max(|x|) = 5.0";
 }
 
 // ============================================================================
@@ -325,32 +319,29 @@ TEST_F(LaneMixerTest, BackwardCompatibility_DefaultSumMatchesLTFDefault) {
 TEST_F(LaneMixerTest, BackwardCompatibility_WithHarmonics_MatchesLTF) {
     // Set up LaneMixer to match a specific LTF configuration:
     // WT=0.5, H1=0.8, H3=0.3
-    mixer->setNormalizationEnabled(false);
     mixer->setLaneAmplitude(0, 0.5);  // WT mix
     mixer->setLaneAmplitude(1, 0.8);  // H1
     mixer->setLaneAmplitude(3, 0.3);  // H3
 
-    // Set up equivalent LTF
-    dsp_core::LayeredTransferFunction ltf(dsp_core::LaneMixer::TABLE_SIZE, -1.0, 1.0);
-    ltf.setCoefficient(0, 0.5);  // WT
-    ltf.setCoefficient(1, 0.8);  // H1
-    ltf.setCoefficient(3, 0.3);  // H3
-    ltf.setRenderingMode(dsp_core::RenderingMode::Harmonic);
-
     auto mixerSum = computeSum();
 
-    // LTF evaluates: WT*base[i] + H1*T_1[i] + H3*T_3[i] (without normalization)
-    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 500) {
+    // Compute expected raw sum then normalize
+    std::vector<double> rawSum(dsp_core::LaneMixer::TABLE_SIZE);
+    double rawMaxAbs = 0.0;
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
         const double x = mixer->normalizeIndex(i);
-        // LTF composite (unnormalized): WT*tanh(2x) + H1*x + H3*sin(3*asin(x))
         const double wtContrib = 0.5 * std::tanh(2.0 * x);
         const double h1Contrib = 0.8 * x;
         const double h3Contrib =
             0.3 * std::sin(3.0 * std::asin(std::max(-1.0, std::min(1.0, x))));
-        const double expected = wtContrib + h1Contrib + h3Contrib;
+        rawSum[static_cast<size_t>(i)] = wtContrib + h1Contrib + h3Contrib;
+        rawMaxAbs = std::max(rawMaxAbs, std::abs(rawSum[static_cast<size_t>(i)]));
+    }
 
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 500) {
+        const double expected = rawSum[static_cast<size_t>(i)] / rawMaxAbs;
         EXPECT_NEAR(mixerSum[static_cast<size_t>(i)], expected, 1e-8)
-            << "Mixer sum should match LTF composite at index " << i;
+            << "Mixer sum should match normalized LTF composite at index " << i;
     }
 }
 
@@ -364,7 +355,6 @@ TEST_F(LaneMixerTest, Serialization_ToValueTree_RoundTrips) {
     mixer->setLaneAmplitude(1, 0.8);
     mixer->setLaneAmplitude(5, -0.3);
     mixer->setLaneContentType(5, dsp_core::LaneContentType::Paint);
-    mixer->setNormalizationEnabled(false);
 
     // Write custom curve data to lane 5
     std::vector<double> customCurve(dsp_core::LaneMixer::TABLE_SIZE);
@@ -402,7 +392,6 @@ TEST_F(LaneMixerTest, Serialization_ToValueTree_RoundTrips) {
         }
     }
 
-    EXPECT_EQ(mixer->isNormalizationEnabled(), mixer2.isNormalizationEnabled());
 }
 
 TEST_F(LaneMixerTest, Serialization_SplineAnchors_RoundTrip) {
@@ -438,7 +427,6 @@ TEST_F(LaneMixerTest, ResetToDefaults_RestoresInitialState) {
     // Modify state
     mixer->setLaneAmplitude(1, 0.5);
     mixer->setLaneAmplitude(5, 0.8);
-    mixer->setNormalizationEnabled(false);
 
     // Reset
     mixer->resetToDefaults();
@@ -447,7 +435,6 @@ TEST_F(LaneMixerTest, ResetToDefaults_RestoresInitialState) {
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 0.0);
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(1), 1.0);
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(5), 0.0);
-    // Note: normalizationEnabled is not reset by resetToDefaults (it's a setting, not lane state)
 }
 
 // ============================================================================
@@ -465,14 +452,12 @@ TEST_F(LaneMixerTest, InvalidLaneIndex_DoesNotCrash) {
 }
 
 TEST_F(LaneMixerTest, EvaluateSumAt_InterpolatesBetweenPoints) {
-    mixer->setNormalizationEnabled(false);
     // With H1=1.0 (y=x), evaluateSumAt should return approximately x
     const double result = mixer->evaluateSumAt(0.5);
     EXPECT_NEAR(result, 0.5, 1e-3); // Allow some interpolation error
 }
 
 TEST_F(LaneMixerTest, EvaluateSumAt_ClampsToRange) {
-    mixer->setNormalizationEnabled(false);
     // Values outside [-1, 1] should be clamped
     const double atMin = mixer->evaluateSumAt(-2.0);
     const double atMax = mixer->evaluateSumAt(2.0);

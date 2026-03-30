@@ -842,16 +842,6 @@ TEST_F(LayeredTransferFunctionTest, SetRenderingMode_IncrementsVersion) {
     EXPECT_EQ(ltf->getVersion(), versionBefore + 1);
 }
 
-TEST_F(LayeredTransferFunctionTest, SetNormalizationEnabled_IncrementsVersion) {
-    uint64_t versionBefore = ltf->getVersion();
-    ltf->setNormalizationEnabled(false);
-    EXPECT_EQ(ltf->getVersion(), versionBefore + 1);
-
-    versionBefore = ltf->getVersion();
-    ltf->setNormalizationEnabled(true);
-    EXPECT_EQ(ltf->getVersion(), versionBefore + 1);
-}
-
 TEST_F(LayeredTransferFunctionTest, SetExtrapolationMode_IncrementsVersion) {
     uint64_t versionBefore = ltf->getVersion();
     ltf->setExtrapolationMode(dsp_core::LayeredTransferFunction::ExtrapolationMode::Linear);

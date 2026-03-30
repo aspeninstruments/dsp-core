@@ -197,16 +197,6 @@ class LayeredTransferFunction {
     //     normScalar = computeFreshScalar(); // Re-scan
     //   renderLUT(normScalar);
     //
-    // ────────────────────────────────────────────────────────────────────────
-    // DISABLING NORMALIZATION
-    // ────────────────────────────────────────────────────────────────────────
-    //
-    // setNormalizationEnabled(false):
-    //   - Fixes scalar at 1.0 (identity)
-    //   - Allows output > ±1.0 (creative distortion)
-    //   - WARNING: Can cause clipping in audio output
-    //   - Use case: Precise mathematical relationships, no auto-scaling
-
     /**
      * Compute and cache normalization scalar explicitly
      *
@@ -241,25 +231,6 @@ class LayeredTransferFunction {
      * @return true if paint stroke active (use frozen scalar), false otherwise
      */
     bool isPaintStrokeActive() const;
-
-    /**
-     * Enable or disable automatic normalization
-     *
-     * When disabled, the normalization scalar is fixed at 1.0, effectively bypassing
-     * the automatic scaling that keeps output in [-1, 1]. This allows for creative
-     * distortion effects or preserving exact mathematical relationships.
-     *
-     * WARNING: Disabling normalization can result in output values > ±1.0, which may
-     * cause clipping or distortion in the audio output.
-     *
-     * @param enabled If true, enable automatic normalization (default); if false, bypass normalization
-     */
-    void setNormalizationEnabled(bool enabled);
-
-    /**
-     * Check if automatic normalization is enabled
-     */
-    bool isNormalizationEnabled() const;
 
     /**
      * Set rendering mode (determines evaluation path for LUT rendering)
@@ -507,7 +478,6 @@ class LayeredTransferFunction {
      * Set normalization scalar directly (for worker thread to restore frozen state)
      *
      * CRITICAL: Only used by LUT renderer to restore frozen normalization state.
-     * UI code should NOT call this - use setNormalizationEnabled() instead.
      *
      * @param scalar The normalization scalar to set
      */
@@ -550,9 +520,6 @@ class LayeredTransferFunction {
     // Normalization scalar (applied to mix, not to layers)
     // Cached value computed by updateNormalizationScalar() or set by renderer
     mutable std::atomic<double> normalizationScalar{1.0};
-
-    // Normalization enable/disable (allows bypassing auto-normalization for creative effects)
-    bool normalizationEnabled = true; // Default: enabled (safe behavior)
 
     // Paint stroke active flag (prevents normalization recomputation during strokes)
     // Message thread only - not atomic (single-threaded access)

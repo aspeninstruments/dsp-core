@@ -138,13 +138,6 @@ class LaneMixer {
     double evaluateSumAt(double x) const;
 
     // ========================================================================
-    // Normalization
-    // ========================================================================
-
-    void setNormalizationEnabled(bool enabled);
-    bool isNormalizationEnabled() const { return normalizationEnabled_; }
-
-    // ========================================================================
     // Extrapolation Mode
     // ========================================================================
 
@@ -212,7 +205,6 @@ class LaneMixer {
 
   private:
     std::array<Lane, NUM_LANES> lanes_;
-    bool normalizationEnabled_ = true;
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
 
     // Precomputed harmonic basis functions (shared across all harmonic lanes)
