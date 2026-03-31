@@ -271,7 +271,7 @@ void SeamlessTransferFunction::renderLUTImmediate() {
 
     // Also update the lane LUT if a lane is selected
     const int laneIdx = pimpl->selectedVisualizerLane;
-    if (laneIdx >= 0 && laneIdx < LaneMixer::NUM_LANES) {
+    if (laneIdx >= 0 && laneIdx < mixer.getActiveLaneCount()) {
         const auto& lane = mixer.getLane(laneIdx);
         for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
             const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);

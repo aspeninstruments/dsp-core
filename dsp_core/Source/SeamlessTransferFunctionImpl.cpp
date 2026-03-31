@@ -427,7 +427,7 @@ void VisualizerUpdateTimer::timerCallback() {
     // Compute selected lane's raw curve for secondary visualizer overlay
     if (laneLUTPtr_ && selectedLanePtr_) {
         const int laneIdx = *selectedLanePtr_;
-        if (laneIdx >= 0 && laneIdx < LaneMixer::NUM_LANES) {
+        if (laneIdx >= 0 && laneIdx < laneMixer.getActiveLaneCount()) {
             const auto& lane = laneMixer.getLane(laneIdx);
             for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
                 const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
@@ -471,7 +471,7 @@ void VisualizerUpdateTimer::forceUpdate() {
         // Compute selected lane's raw curve for secondary visualizer overlay
         if (laneLUTPtr_ && selectedLanePtr_) {
             const int laneIdx = *selectedLanePtr_;
-            if (laneIdx >= 0 && laneIdx < LaneMixer::NUM_LANES) {
+            if (laneIdx >= 0 && laneIdx < laneMixer.getActiveLaneCount()) {
                 const auto& lane = laneMixer.getLane(laneIdx);
                 for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
                     const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);

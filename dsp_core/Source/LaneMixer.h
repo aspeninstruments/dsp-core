@@ -11,29 +11,30 @@
 namespace dsp_core {
 
 /**
- * LaneMixer - 41-lane mixer for arbitrary waveshapes.
+ * LaneMixer - Dynamic-count mixer for arbitrary waveshapes (up to MAX_LANES).
  *
  * Replaces the single-layer model (LayeredTransferFunction) with a multi-lane
  * architecture where each lane holds an independent curve that can be any
  * waveshape (harmonic, painted, spline, equation, preset capture).
  *
  * Mixing formula:
- *   sum[i] = Σ(lane[n].amplitude × lane[n].curveData[i])  for n = 0..NUM_LANES-1
+ *   sum[i] = Sigma(lane[n].amplitude * lane[n].curveData[i])  for n = 0..activeLaneCount_-1
  *   output[i] = normalizationEnabled ? sum[i] / max(|sum|) : sum[i]
  *
- * Default initialization:
+ * Default initialization (13 lanes):
  *   Lane 0:  tanh(2x), amplitude=0.0  ("WT" base layer)
- *   Lane 1:  T₁(x)=x, amplitude=1.0  (H1 — linear passthrough)
- *   Lane 2-40: T_n(x),  amplitude=0.0  (H2-H40 — Chebyshev harmonics)
+ *   Lane 1:  T_1(x)=x, amplitude=1.0  (H1 -- linear passthrough)
+ *   Lane 2-12: T_n(x),  amplitude=0.0  (H2-H12 -- Chebyshev harmonics)
  *
  * This default produces y=x (clean passthrough), identical to current behavior.
  *
- * MEMORY: 41 × 16384 × 8 bytes = 5.2 MB (message thread only)
+ * MEMORY: Only active lanes have populated curveData (128 KB each).
+ * Default 13 lanes = 1.6 MB. MAX_LANES fully active = 12.8 MB.
  * Audio thread only sees the 128KB rendered sum LUT via triple buffering.
  *
  * THREADING CONTRACT
  * ==================
- * - Message Thread: All mutations (setLaneAmplitude, setLaneCurveData, etc.)
+ * - Message Thread: All mutations (setLaneAmplitude, setLaneCurveData, addLane, removeLane, etc.)
  * - Worker Thread:  Read-only via computeSum(), getVersion() polling
  * - Audio Thread:   Never accesses LaneMixer directly (reads rendered LUT)
  *
@@ -44,13 +45,13 @@ namespace dsp_core {
  */
 class LaneMixer {
   public:
-    static constexpr int NUM_LANES = 41;
+    static constexpr int MAX_LANES = 100;
     static constexpr int TABLE_SIZE = 16384;
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
     static constexpr int MAX_HARMONIC_NUMBER = 200;
 
-    // Extrapolation mode — controls LUT boundary behavior in AudioEngine.
+    // Extrapolation mode -- controls LUT boundary behavior in AudioEngine.
     // Defined here (not on LTF) so LaneMixer is the sole source of truth.
     enum class ExtrapolationMode { Clamp, Linear };
 
@@ -62,7 +63,36 @@ class LaneMixer {
 
     const Lane& getLane(int index) const;
     Lane& getMutableLane(int index);
-    int getNumLanes() const { return NUM_LANES; }
+    int getNumLanes() const { return activeLaneCount_; }
+    int getActiveLaneCount() const { return activeLaneCount_; }
+
+    // ========================================================================
+    // Dynamic Lane Management (message thread only)
+    // ========================================================================
+
+    /**
+     * Insert a new lane after insertAfterIndex (-1 = append at end).
+     * Returns the new lane's index, or -1 if at MAX_LANES.
+     */
+    int addLane(int insertAfterIndex = -1);
+
+    /**
+     * Remove lane at index. Returns false if invalid or activeLaneCount_ <= 1.
+     */
+    bool removeLane(int index);
+
+    // ========================================================================
+    // Lane Identity
+    // ========================================================================
+
+    uint32_t getLaneId(int index) const;
+    int findLaneById(uint32_t laneId) const;
+
+    // ========================================================================
+    // Version Counter Access (for Phase 9 audio-thread-safe writes)
+    // ========================================================================
+
+    std::atomic<uint64_t>& getVersionCounter() { return versionCounter_; }
 
     // ========================================================================
     // Lane Mutations (message thread only)
@@ -90,7 +120,7 @@ class LaneMixer {
     /**
      * Set a single sample in a lane's curve data.
      * Used by paint mode for per-sample writes during brush strokes.
-     * Does NOT increment version — caller should use beginBatchUpdate()/endBatchUpdate()
+     * Does NOT increment version -- caller should use beginBatchUpdate()/endBatchUpdate()
      * or call incrementVersion() after a series of writes.
      */
     void setLaneCurveValue(int laneIndex, int sampleIndex, double value);
@@ -108,7 +138,7 @@ class LaneMixer {
     void fillLaneWithHarmonic(int index, int harmonicNumber);
 
     /**
-     * Fill lane 0 with tanh(2x) — the default "WT" base layer curve.
+     * Fill lane 0 with tanh(2x) -- the default "WT" base layer curve.
      */
     void fillLaneWithTanh2x(int index);
 
@@ -119,7 +149,7 @@ class LaneMixer {
     /**
      * Compute the weighted sum of all lanes into an output buffer.
      *
-     * sum[i] = Σ(lane[n].amplitude × lane[n].curveData[i])
+     * sum[i] = Sigma(lane[n].amplitude * lane[n].curveData[i])
      *
      * If normalization is enabled, the output is scaled so max(|output|) = 1.0.
      *
@@ -129,8 +159,8 @@ class LaneMixer {
     void computeSum(double* outputBuffer, int size) const;
 
     /**
-     * Evaluate the mixed sum at a normalized position x ∈ [-1, 1].
-     * Uses Catmull-Rom interpolation on the internally maintained sum cache.
+     * Evaluate the mixed sum at a normalized position x in [-1, 1].
+     * Uses linear interpolation on the internally maintained sum cache.
      *
      * Note: Call computeSum() first to update the internal cache, or use
      * this only after the sum has been computed at least once.
@@ -149,10 +179,10 @@ class LaneMixer {
     // ========================================================================
 
     /**
-     * Returns all 41 lane amplitudes as an array.
+     * Returns all active lane amplitudes as a vector.
      * Useful for snapshot capture and bulk reads.
      */
-    std::array<double, NUM_LANES> getAmplitudes() const;
+    std::vector<double> getAmplitudes() const;
 
     /**
      * Zero out a lane's curve data and increment version.
@@ -189,12 +219,26 @@ class LaneMixer {
     /**
      * Migrate from legacy LayeredTransferFunction ValueTree format.
      *
-     * Maps: coefficients[0..40] → lane amplitudes, BaseLayer → lane 0 curve data,
+     * Maps: coefficients[0..40] -> lane amplitudes, BaseLayer -> lane 0 curve data,
      * lanes 1-40 filled with Chebyshev harmonics, normalization flag preserved.
      *
      * Does NOT handle editingMode/presetPath/equationText (plugin-level metadata).
      */
     void fromLegacyLTFValueTree(const juce::ValueTree& ltfVT);
+
+    /**
+     * Migrate from legacy LTF format with editing mode context.
+     *
+     * @param wasHarmonicMode  Whether the saved editing mode was Harmonic
+     * @param oddSymmetryWasEnabled  Whether odd symmetry was enabled system-wide
+     *
+     * Case B (harmonic + odd symmetry): Lane 0 = base, odd harmonics only (21 lanes)
+     * Case B (harmonic, no symmetry): Lane 0 + H1-H39 (41 lanes)
+     * Case C (non-harmonic): Lane 0 = saved state, Lanes 1-12 = default H1-H12 (13 lanes)
+     */
+    void fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
+                                 bool wasHarmonicMode,
+                                 bool oddSymmetryWasEnabled);
 
     // ========================================================================
     // Utilities
@@ -204,7 +248,10 @@ class LaneMixer {
     double normalizeIndex(int index) const;
 
   private:
-    std::array<Lane, NUM_LANES> lanes_;
+    std::array<Lane, MAX_LANES> lanes_;
+    int activeLaneCount_ = 0;
+    uint32_t nextLaneId_ = 0;
+
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
 
     // Precomputed harmonic basis functions (shared across all harmonic lanes)
@@ -221,7 +268,11 @@ class LaneMixer {
     }
 
     void initializeDefaults();
-    bool isValidIndex(int index) const { return index >= 0 && index < NUM_LANES; }
+    bool isValidIndex(int index) const { return index >= 0 && index < activeLaneCount_; }
+
+    int findNextUnusedHarmonicNumber() const;
+    void shiftLanesRight(int fromIndex);
+    void shiftLanesLeft(int fromIndex);
 };
 
 /**

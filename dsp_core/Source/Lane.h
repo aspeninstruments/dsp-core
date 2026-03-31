@@ -2,6 +2,7 @@
 
 #include "SplineTypes.h"
 #include <juce_core/juce_core.h>
+#include <atomic>
 #include <vector>
 
 namespace dsp_core {
@@ -33,7 +34,7 @@ enum class LaneContentType {
  *   - Mode-specific metadata (harmonicNumber, splineAnchors, equationText, etc.)
  *
  * Lane 0 defaults to tanh(2x) ("WT" base layer).
- * Lanes 1-40 default to Chebyshev harmonics T_1(x) through T_40(x).
+ * Lanes 1+ default to Chebyshev harmonics.
  * All lanes are interchangeable and can hold any content type.
  *
  * THREADING: Message thread only. Audio thread reads the rendered sum LUT
@@ -42,10 +43,10 @@ enum class LaneContentType {
 struct Lane {
     std::vector<double> curveData; // TABLE_SIZE points — the lane's waveshape
 
-    double amplitude = 0.0; // Mix amount [-1, 1], negative = phase inversion
+    std::atomic<double> amplitude{0.0}; // Mix amount [-1, 1], negative = phase inversion
 
     LaneContentType contentType = LaneContentType::Harmonic;
-    int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1-40 = T_n). Only meaningful for Harmonic type.
+    int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
 
     // Mode-specific state (only populated for the relevant content type)
     std::vector<SplineAnchor> splineAnchors;
@@ -53,6 +54,67 @@ struct Lane {
     juce::String presetSourcePath;
 
     bool oddSymmetryEnabled = false; // Per-lane odd symmetry enforcement (f(-x) = -f(x))
+
+    uint32_t laneId = 0; // Stable identity, never reused
+
+    Lane() = default;
+    ~Lane() = default;
+
+    // Move constructor — std::atomic is not movable, so load/store explicitly.
+    // memory_order_relaxed is correct: shifting is message-thread-only, and the
+    // version counter increment after the shift provides the release fence.
+    Lane(Lane&& other) noexcept
+        : curveData(std::move(other.curveData)),
+          amplitude(other.amplitude.load(std::memory_order_relaxed)),
+          contentType(other.contentType),
+          harmonicNumber(other.harmonicNumber),
+          splineAnchors(std::move(other.splineAnchors)),
+          equationText(std::move(other.equationText)),
+          presetSourcePath(std::move(other.presetSourcePath)),
+          oddSymmetryEnabled(other.oddSymmetryEnabled),
+          laneId(other.laneId) {}
+
+    Lane& operator=(Lane&& other) noexcept {
+        curveData = std::move(other.curveData);
+        amplitude.store(other.amplitude.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+        contentType = other.contentType;
+        harmonicNumber = other.harmonicNumber;
+        splineAnchors = std::move(other.splineAnchors);
+        equationText = std::move(other.equationText);
+        presetSourcePath = std::move(other.presetSourcePath);
+        oddSymmetryEnabled = other.oddSymmetryEnabled;
+        laneId = other.laneId;
+        return *this;
+    }
+
+    // Copy constructor/assignment — needed for snapshot capture/restore
+    Lane(const Lane& other)
+        : curveData(other.curveData),
+          amplitude(other.amplitude.load(std::memory_order_relaxed)),
+          contentType(other.contentType),
+          harmonicNumber(other.harmonicNumber),
+          splineAnchors(other.splineAnchors),
+          equationText(other.equationText),
+          presetSourcePath(other.presetSourcePath),
+          oddSymmetryEnabled(other.oddSymmetryEnabled),
+          laneId(other.laneId) {}
+
+    Lane& operator=(const Lane& other) {
+        if (this != &other) {
+            curveData = other.curveData;
+            amplitude.store(other.amplitude.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+            contentType = other.contentType;
+            harmonicNumber = other.harmonicNumber;
+            splineAnchors = other.splineAnchors;
+            equationText = other.equationText;
+            presetSourcePath = other.presetSourcePath;
+            oddSymmetryEnabled = other.oddSymmetryEnabled;
+            laneId = other.laneId;
+        }
+        return *this;
+    }
 
     /**
      * Initialize curveData to a given size with all zeros.
@@ -66,7 +128,7 @@ struct Lane {
      * A lane contributes if its amplitude is non-zero and it has curve data.
      */
     bool isActive() const {
-        return std::abs(amplitude) > 1e-12 && !curveData.empty();
+        return std::abs(amplitude.load(std::memory_order_acquire)) > 1e-12 && !curveData.empty();
     }
 };
 
