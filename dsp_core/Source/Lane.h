@@ -33,7 +33,7 @@ enum class LaneContentType {
  *   - contentType: What kind of data this lane holds
  *   - Mode-specific metadata (harmonicNumber, splineAnchors, equationText, etc.)
  *
- * Lane 0 defaults to tanh(2x) ("WT" base layer).
+ * Lane 0 defaults to tanh(x) ("WT" base layer, equation mode).
  * Lanes 1+ default to Chebyshev harmonics.
  * All lanes are interchangeable and can hold any content type.
  *

@@ -21,12 +21,13 @@ namespace dsp_core {
  *   sum[i] = Sigma(lane[n].amplitude * lane[n].curveData[i])  for n = 0..activeLaneCount_-1
  *   output[i] = normalizationEnabled ? sum[i] / max(|sum|) : sum[i]
  *
- * Default initialization (13 lanes):
- *   Lane 0:  tanh(2x), amplitude=0.0  ("WT" base layer)
- *   Lane 1:  T_1(x)=x, amplitude=1.0  (H1 -- linear passthrough)
- *   Lane 2-12: T_n(x),  amplitude=0.0  (H2-H12 -- Chebyshev harmonics)
+ * Default initialization (11 lanes):
+ *   Lane 0:    tanh(x),  amplitude=0.0  ("WT" base layer, equation mode)
+ *   Lane 1:    T_1(x)=x, amplitude=1.0  (H1 -- linear passthrough)
+ *   Lane 2-10: T_n(x),   amplitude=0.0  (H3,H5,...,H19 -- odd Chebyshev harmonics)
+ *   All lanes: oddSymmetryEnabled=true
  *
- * This default produces y=x (clean passthrough), identical to current behavior.
+ * This default produces y=x (clean passthrough).
  *
  * MEMORY: Only active lanes have populated curveData (128 KB each).
  * Default 13 lanes = 1.6 MB. MAX_LANES fully active = 12.8 MB.
@@ -138,7 +139,7 @@ class LaneMixer {
     void fillLaneWithHarmonic(int index, int harmonicNumber);
 
     /**
-     * Fill lane 0 with tanh(2x) -- the default "WT" base layer curve.
+     * Fill a lane with tanh(2x). Used by legacy migration and harmonic-0 paths.
      */
     void fillLaneWithTanh2x(int index);
 

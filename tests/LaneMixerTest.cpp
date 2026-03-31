@@ -49,24 +49,26 @@ class LaneMixerTest : public ::testing::Test {
 // ============================================================================
 
 TEST_F(LaneMixerTest, DefaultInitialization_HasCorrectLaneCount) {
-    EXPECT_EQ(mixer->getNumLanes(), 41);
+    EXPECT_EQ(mixer->getNumLanes(), 11);
 }
 
-TEST_F(LaneMixerTest, DefaultInitialization_Lane0IsTanh2x) {
+TEST_F(LaneMixerTest, DefaultInitialization_Lane0IsTanhX) {
     const auto& lane = mixer->getLane(0);
-    EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Harmonic);
+    EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Equation);
     EXPECT_EQ(lane.harmonicNumber, 0);
     EXPECT_DOUBLE_EQ(lane.amplitude, 0.0);
+    EXPECT_TRUE(lane.oddSymmetryEnabled);
+    EXPECT_EQ(lane.equationText, juce::String("tanh(x)"));
     EXPECT_EQ(static_cast<int>(lane.curveData.size()), dsp_core::LaneMixer::TABLE_SIZE);
 
-    // Verify curve is tanh(2x) at several points
+    // Verify curve is tanh(x) at several points
     const int midpoint = dsp_core::LaneMixer::TABLE_SIZE / 2;
     const double xMid = mixer->normalizeIndex(midpoint);
-    EXPECT_NEAR(lane.curveData[static_cast<size_t>(midpoint)], std::tanh(2.0 * xMid), 1e-10);
+    EXPECT_NEAR(lane.curveData[static_cast<size_t>(midpoint)], std::tanh(xMid), 1e-10);
 
     // Check endpoints
-    EXPECT_NEAR(lane.curveData[0], std::tanh(2.0 * (-1.0)), 1e-10);
-    EXPECT_NEAR(lane.curveData[dsp_core::LaneMixer::TABLE_SIZE - 1], std::tanh(2.0 * 1.0), 1e-10);
+    EXPECT_NEAR(lane.curveData[0], std::tanh(-1.0), 1e-10);
+    EXPECT_NEAR(lane.curveData[dsp_core::LaneMixer::TABLE_SIZE - 1], std::tanh(1.0), 1e-10);
 }
 
 TEST_F(LaneMixerTest, DefaultInitialization_Lane1IsIdentity) {
@@ -74,6 +76,7 @@ TEST_F(LaneMixerTest, DefaultInitialization_Lane1IsIdentity) {
     EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Harmonic);
     EXPECT_EQ(lane.harmonicNumber, 1);
     EXPECT_DOUBLE_EQ(lane.amplitude, 1.0);
+    EXPECT_TRUE(lane.oddSymmetryEnabled);
 
     // T_1(x) = x (identity function)
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
@@ -83,41 +86,48 @@ TEST_F(LaneMixerTest, DefaultInitialization_Lane1IsIdentity) {
     }
 }
 
-TEST_F(LaneMixerTest, DefaultInitialization_Lanes2Through40AreChebyshev) {
-    for (int n = 2; n <= 40; ++n) {
-        const auto& lane = mixer->getLane(n);
+TEST_F(LaneMixerTest, DefaultInitialization_Lanes2Through10AreOddHarmonics) {
+    // Expected odd harmonic numbers for lanes 2-10
+    const std::array<int, 9> expectedHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
+
+    for (int laneIdx = 2; laneIdx <= 10; ++laneIdx) {
+        const auto& lane = mixer->getLane(laneIdx);
+        const int expectedN = expectedHarmonics[laneIdx - 2];
         EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Harmonic)
-            << "Lane " << n << " should be Harmonic type";
-        EXPECT_EQ(lane.harmonicNumber, n)
-            << "Lane " << n << " should have harmonicNumber=" << n;
+            << "Lane " << laneIdx << " should be Harmonic type";
+        EXPECT_EQ(lane.harmonicNumber, expectedN)
+            << "Lane " << laneIdx << " should have harmonicNumber=" << expectedN;
+        EXPECT_DOUBLE_EQ(lane.amplitude, 0.0)
+            << "Lane " << laneIdx << " should have amplitude=0.0";
+        EXPECT_TRUE(lane.oddSymmetryEnabled)
+            << "Lane " << laneIdx << " should have oddSymmetryEnabled";
         EXPECT_EQ(static_cast<int>(lane.curveData.size()), dsp_core::LaneMixer::TABLE_SIZE)
-            << "Lane " << n << " should have TABLE_SIZE curve data";
+            << "Lane " << laneIdx << " should have TABLE_SIZE curve data";
     }
 
-    // Spot check: T_2(x) = 2x² - 1 (Chebyshev of the first kind)
-    // But we use cos(2*acos(x)) which is equivalent
+    // Spot check: Lane 2 = H3, sin(3*asin(x))
     const auto& lane2 = mixer->getLane(2);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
-        const double x = mixer->normalizeIndex(i);
-        const double expected = std::cos(2.0 * std::acos(std::max(-1.0, std::min(1.0, x))));
+        const double x = std::clamp(mixer->normalizeIndex(i), -1.0, 1.0);
+        const double expected = std::sin(3.0 * std::asin(x));
         EXPECT_NEAR(lane2.curveData[static_cast<size_t>(i)], expected, 1e-8)
-            << "Lane 2 (T_2) at index " << i;
+            << "Lane 2 (H3) at index " << i;
     }
 
-    // Spot check: T_3(x) = sin(3*asin(x)) (odd harmonic)
-    const auto& lane3 = mixer->getLane(3);
+    // Spot check: Lane 5 = H9, sin(9*asin(x))
+    const auto& lane5 = mixer->getLane(5);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
-        const double x = mixer->normalizeIndex(i);
-        const double expected = std::sin(3.0 * std::asin(std::max(-1.0, std::min(1.0, x))));
-        EXPECT_NEAR(lane3.curveData[static_cast<size_t>(i)], expected, 1e-8)
-            << "Lane 3 (T_3) at index " << i;
+        const double x = std::clamp(mixer->normalizeIndex(i), -1.0, 1.0);
+        const double expected = std::sin(9.0 * std::asin(x));
+        EXPECT_NEAR(lane5.curveData[static_cast<size_t>(i)], expected, 1e-8)
+            << "Lane 5 (H9) at index " << i;
     }
 }
 
 TEST_F(LaneMixerTest, DefaultInitialization_OnlyLane1HasNonZeroAmplitude) {
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 0.0); // WT
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(1), 1.0); // H1
-    for (int i = 2; i <= 40; ++i) {
+    for (int i = 2; i < mixer->getNumLanes(); ++i) {
         EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(i), 0.0)
             << "Lane " << i << " should have amplitude 0.0";
     }
@@ -297,8 +307,8 @@ TEST_F(LaneMixerTest, BackwardCompatibility_DefaultSumMatchesLTFDefault) {
     dsp_core::LayeredTransferFunction ltf(dsp_core::LaneMixer::TABLE_SIZE, -1.0, 1.0);
     // LTF constructor sets WT=0.0, H1=1.0 by default
 
-    // LaneMixer default: Lane 0 (WT, tanh2x, amp=0), Lane 1 (H1=x, amp=1.0)
-    // Sum = 0*tanh(2x) + 1.0*x = x
+    // LaneMixer default: Lane 0 (WT, tanh(x), amp=0), Lane 1 (H1=x, amp=1.0)
+    // Sum = 0*tanh(x) + 1.0*x = x
 
     // Both should produce y=x (with normalization, which is identity for max(|x|)=1)
     auto mixerSum = computeSum();
@@ -316,12 +326,11 @@ TEST_F(LaneMixerTest, BackwardCompatibility_DefaultSumMatchesLTFDefault) {
     }
 }
 
-TEST_F(LaneMixerTest, BackwardCompatibility_WithHarmonics_MatchesLTF) {
-    // Set up LaneMixer to match a specific LTF configuration:
-    // WT=0.5, H1=0.8, H3=0.3
-    mixer->setLaneAmplitude(0, 0.5);  // WT mix
+TEST_F(LaneMixerTest, MixingMultipleLanes_ProducesCorrectNormalizedSum) {
+    // Set up: Lane 0 = tanh(x) at 0.5, Lane 1 = H1 at 0.8, Lane 2 = H3 at 0.3
+    mixer->setLaneAmplitude(0, 0.5);  // WT (tanh(x))
     mixer->setLaneAmplitude(1, 0.8);  // H1
-    mixer->setLaneAmplitude(3, 0.3);  // H3
+    mixer->setLaneAmplitude(2, 0.3);  // H3
 
     auto mixerSum = computeSum();
 
@@ -330,10 +339,10 @@ TEST_F(LaneMixerTest, BackwardCompatibility_WithHarmonics_MatchesLTF) {
     double rawMaxAbs = 0.0;
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
         const double x = mixer->normalizeIndex(i);
-        const double wtContrib = 0.5 * std::tanh(2.0 * x);
+        const double wtContrib = 0.5 * std::tanh(x);
         const double h1Contrib = 0.8 * x;
         const double h3Contrib =
-            0.3 * std::sin(3.0 * std::asin(std::max(-1.0, std::min(1.0, x))));
+            0.3 * std::sin(3.0 * std::asin(std::clamp(x, -1.0, 1.0)));
         rawSum[static_cast<size_t>(i)] = wtContrib + h1Contrib + h3Contrib;
         rawMaxAbs = std::max(rawMaxAbs, std::abs(rawSum[static_cast<size_t>(i)]));
     }
@@ -341,7 +350,7 @@ TEST_F(LaneMixerTest, BackwardCompatibility_WithHarmonics_MatchesLTF) {
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 500) {
         const double expected = rawSum[static_cast<size_t>(i)] / rawMaxAbs;
         EXPECT_NEAR(mixerSum[static_cast<size_t>(i)], expected, 1e-8)
-            << "Mixer sum should match normalized LTF composite at index " << i;
+            << "Mixer sum should match normalized composite at index " << i;
     }
 }
 
@@ -371,7 +380,8 @@ TEST_F(LaneMixerTest, Serialization_ToValueTree_RoundTrips) {
     mixer2.fromValueTree(vt);
 
     // Verify all lanes round-trip correctly
-    for (int n = 0; n < 41; ++n) {
+    ASSERT_EQ(mixer->getNumLanes(), mixer2.getNumLanes());
+    for (int n = 0; n < mixer->getNumLanes(); ++n) {
         const auto& original = mixer->getLane(n);
         const auto& restored = mixer2.getLane(n);
 
@@ -431,10 +441,12 @@ TEST_F(LaneMixerTest, ResetToDefaults_RestoresInitialState) {
     // Reset
     mixer->resetToDefaults();
 
-    // Verify defaults
+    // Verify defaults: lane 0 = 0.0, lane 1 = 1.0, lanes 2-10 = 0.0
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 0.0);
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(1), 1.0);
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(5), 0.0);
+    EXPECT_EQ(mixer->getNumLanes(), 11);
+    EXPECT_EQ(mixer->getLane(5).harmonicNumber, 9);  // Lane 5 = H9
 }
 
 // ============================================================================
