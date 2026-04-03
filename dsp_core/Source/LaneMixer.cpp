@@ -1,4 +1,5 @@
 #include "LaneMixer.h"
+#include "Services/TransferFunctionOperations.h"
 #include <algorithm>
 #include <cmath>
 
@@ -237,6 +238,8 @@ void LaneMixer::fillLaneWithTanh2x(int index) {
         lane.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * x);
     }
 
+    Services::TransferFunctionOperations::normalize(lane.curveData);
+
     incrementVersionIfNotBatching();
 }
 
@@ -266,6 +269,54 @@ void LaneMixer::computeSum(double* outputBuffer, int size) const {
     }
 
     // Normalize output to [-1, 1] range
+    double maxAbs = 0.0;
+    for (int i = 0; i < numSamples; ++i) {
+        maxAbs = std::max(maxAbs, std::abs(outputBuffer[i]));
+    }
+
+    if (maxAbs > kLaneMixerNormEpsilon) {
+        const double scalar = 1.0 / maxAbs;
+        for (int i = 0; i < numSamples; ++i) {
+            outputBuffer[i] *= scalar;
+        }
+    }
+}
+
+void LaneMixer::computeScan(double* outputBuffer, int size) const {
+    const int numSamples = std::min(size, TABLE_SIZE);
+
+    if (activeLaneCount_ <= 0) {
+        std::fill(outputBuffer, outputBuffer + numSamples, 0.0);
+        return;
+    }
+
+    if (activeLaneCount_ == 1) {
+        const auto& lane = lanes_[0];
+        const int curveSize = std::min(static_cast<int>(lane.curveData.size()), numSamples);
+        std::copy(lane.curveData.begin(), lane.curveData.begin() + curveSize, outputBuffer);
+        if (curveSize < numSamples) {
+            std::fill(outputBuffer + curveSize, outputBuffer + numSamples, 0.0);
+        }
+    } else {
+        const double pos = scanPosition_.load(std::memory_order_acquire);
+        const double f = pos * (activeLaneCount_ - 1);
+        const int lo = std::clamp(static_cast<int>(std::floor(f)), 0, activeLaneCount_ - 1);
+        const int hi = std::min(lo + 1, activeLaneCount_ - 1);
+        const double t = f - lo;
+
+        const auto& laneA = lanes_[static_cast<size_t>(lo)];
+        const auto& laneB = lanes_[static_cast<size_t>(hi)];
+        const int sizeA = static_cast<int>(laneA.curveData.size());
+        const int sizeB = static_cast<int>(laneB.curveData.size());
+
+        for (int i = 0; i < numSamples; ++i) {
+            const double a = (i < sizeA) ? laneA.curveData[static_cast<size_t>(i)] : 0.0;
+            const double b = (i < sizeB) ? laneB.curveData[static_cast<size_t>(i)] : 0.0;
+            outputBuffer[i] = (1.0 - t) * a + t * b;
+        }
+    }
+
+    // Normalize to [-1, 1]
     double maxAbs = 0.0;
     for (int i = 0; i < numSamples; ++i) {
         maxAbs = std::max(maxAbs, std::abs(outputBuffer[i]));
@@ -309,6 +360,20 @@ double LaneMixer::evaluateSumAt(double x) const {
     }
 
     return sum0 + frac * (sum1 - sum0);
+}
+
+// ============================================================================
+// Mixer Mode
+// ============================================================================
+
+void LaneMixer::setMixerMode(MixerMode mode) {
+    mixerMode_ = mode;
+    incrementVersionIfNotBatching();
+}
+
+void LaneMixer::setScanPosition(double position) {
+    scanPosition_.store(std::clamp(position, 0.0, 1.0), std::memory_order_release);
+    incrementVersionIfNotBatching();
 }
 
 // ============================================================================
@@ -364,21 +429,22 @@ void LaneMixer::resetToDefaults() {
 }
 
 void LaneMixer::initializeDefaults() {
-    // Lane 0: Equation mode — tanh(x), amplitude=0.0, odd symmetry
+    // Lane 0: Equation mode — tanh(2x), amplitude=0.0, odd symmetry
     {
         auto& lane = lanes_[0];
         lane = Lane{};
         lane.amplitude.store(0.0, std::memory_order_relaxed);
         lane.contentType = LaneContentType::Equation;
         lane.harmonicNumber = 0;
-        lane.equationText = "tanh(x)";
+        lane.equationText = "tanh(2x)";
         lane.oddSymmetryEnabled = true;
         lane.laneId = 0;
         lane.curveData.resize(TABLE_SIZE);
         for (int i = 0; i < TABLE_SIZE; ++i) {
             const double x = normalizeIndex(i);
-            lane.curveData[static_cast<size_t>(i)] = std::tanh(x);
+            lane.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * x);
         }
+        Services::TransferFunctionOperations::normalize(lane.curveData);
     }
 
     // Lane 1: H1 (identity), amplitude=1.0, odd symmetry
@@ -420,6 +486,7 @@ void LaneMixer::initializeDefaults() {
 
     activeLaneCount_ = kDefaultLaneCount;
     nextLaneId_ = static_cast<uint32_t>(kDefaultLaneCount);
+    mixerMode_ = MixerMode::Blend;
 }
 
 // ============================================================================
@@ -432,6 +499,7 @@ juce::ValueTree LaneMixer::toValueTree() const {
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
+    vt.setProperty("mixerMode", static_cast<int>(mixerMode_), nullptr);
 
     for (int i = 0; i < activeLaneCount_; ++i) {
         const auto& lane = lanes_[static_cast<size_t>(i)];
@@ -470,8 +538,11 @@ juce::ValueTree LaneMixer::toValueTree() const {
             laneVT.appendChild(anchorsVT, nullptr);
         }
 
-        // Skip curveData for Harmonic lanes — regenerated from harmonicNumber on load
-        const bool canRegenerate = (lane.contentType == LaneContentType::Harmonic);
+        // Skip curveData for Harmonic lanes — regenerated from harmonicNumber on load.
+        // Exception: harmonicNumber==0 (WT base layer) may hold legacy unnormalized data
+        // that can't be perfectly regenerated, so always serialize it.
+        const bool canRegenerate = (lane.contentType == LaneContentType::Harmonic
+                                    && lane.harmonicNumber != 0);
         if (!canRegenerate && !lane.curveData.empty()) {
             juce::MemoryBlock rawData(lane.curveData.data(),
                                       lane.curveData.size() * sizeof(double));
@@ -497,6 +568,9 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
 
     const int formatVersion = vt.getProperty("formatVersion", 2);
     const int loadedTableSize = vt.getProperty("tableSize", TABLE_SIZE);
+
+    mixerMode_ = static_cast<MixerMode>(
+        static_cast<int>(vt.getProperty("mixerMode", 0)));
 
     if (formatVersion >= 3) {
         // Dynamic format: read lane count, IDs, nextLaneId
@@ -680,6 +754,7 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
                 for (int i = 0; i < TABLE_SIZE; ++i) {
                     lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
                 }
+                Services::TransferFunctionOperations::normalize(lane0.curveData);
             }
         }
 
@@ -727,6 +802,7 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
                 for (int i = 0; i < TABLE_SIZE; ++i) {
                     lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
                 }
+                Services::TransferFunctionOperations::normalize(lane0.curveData);
             }
         }
 
@@ -774,6 +850,7 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
                 for (int i = 0; i < TABLE_SIZE; ++i) {
                     lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
                 }
+                Services::TransferFunctionOperations::normalize(lane0.curveData);
             }
         }
 

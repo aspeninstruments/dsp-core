@@ -22,7 +22,7 @@ namespace dsp_core {
  *   output[i] = normalizationEnabled ? sum[i] / max(|sum|) : sum[i]
  *
  * Default initialization (11 lanes):
- *   Lane 0:    tanh(x),  amplitude=0.0  ("WT" base layer, equation mode)
+ *   Lane 0:    tanh(2x), amplitude=0.0  ("WT" base layer, equation mode)
  *   Lane 1:    T_1(x)=x, amplitude=1.0  (H1 -- linear passthrough)
  *   Lane 2-10: T_n(x),   amplitude=0.0  (H3,H5,...,H19 -- odd Chebyshev harmonics)
  *   All lanes: oddSymmetryEnabled=true
@@ -55,6 +55,11 @@ class LaneMixer {
     // Extrapolation mode -- controls LUT boundary behavior in AudioEngine.
     // Defined here (not on LTF) so LaneMixer is the sole source of truth.
     enum class ExtrapolationMode { Clamp, Linear };
+
+    // Mixer mode -- controls how lanes are combined into the output curve.
+    //   Blend: Weighted sum of all lanes (existing behavior)
+    //   Scan:  Wavetable-style sweep across lanes using scan position
+    enum class MixerMode { Blend = 0, Scan = 1 };
 
     LaneMixer();
 
@@ -148,7 +153,7 @@ class LaneMixer {
     // ========================================================================
 
     /**
-     * Compute the weighted sum of all lanes into an output buffer.
+     * Compute the weighted sum of all lanes into an output buffer (Blend mode).
      *
      * sum[i] = Sigma(lane[n].amplitude * lane[n].curveData[i])
      *
@@ -160,6 +165,18 @@ class LaneMixer {
     void computeSum(double* outputBuffer, int size) const;
 
     /**
+     * Compute the scan output into an output buffer (Scan mode).
+     *
+     * Interpolates between adjacent lanes based on scan position.
+     * Lane amplitudes are ignored — raw curve data is used directly.
+     * Output is normalized to [-1, 1].
+     *
+     * @param outputBuffer Pre-allocated buffer of at least TABLE_SIZE doubles
+     * @param size Number of output samples (must be <= TABLE_SIZE)
+     */
+    void computeScan(double* outputBuffer, int size) const;
+
+    /**
      * Evaluate the mixed sum at a normalized position x in [-1, 1].
      * Uses linear interpolation on the internally maintained sum cache.
      *
@@ -167,6 +184,21 @@ class LaneMixer {
      * this only after the sum has been computed at least once.
      */
     double evaluateSumAt(double x) const;
+
+    // ========================================================================
+    // Mixer Mode
+    // ========================================================================
+
+    void setMixerMode(MixerMode mode);
+    MixerMode getMixerMode() const { return mixerMode_; }
+
+    /**
+     * Set the scan position for Scan mode.
+     * Clamped to [0, 1]. 0 = first lane, 1 = last lane.
+     * Increments version counter so the render pipeline picks up the change.
+     */
+    void setScanPosition(double position);
+    double getScanPosition() const { return scanPosition_.load(std::memory_order_acquire); }
 
     // ========================================================================
     // Extrapolation Mode
@@ -252,6 +284,9 @@ class LaneMixer {
     std::array<Lane, MAX_LANES> lanes_;
     int activeLaneCount_ = 0;
     uint32_t nextLaneId_ = 0;
+
+    MixerMode mixerMode_ = MixerMode::Blend;
+    std::atomic<double> scanPosition_{0.0};
 
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
 

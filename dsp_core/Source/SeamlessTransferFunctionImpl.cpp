@@ -368,8 +368,12 @@ void LUTRenderTimer::forceRender() {
 RenderJob LUTRenderTimer::captureRenderJob() {
     RenderJob job;
 
-    // Compute the mixed sum (normalization applied by LaneMixer)
-    laneMixer.computeSum(job.sumData.data(), TABLE_SIZE);
+    // Compute the output curve based on mixer mode
+    if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+        laneMixer.computeScan(job.sumData.data(), TABLE_SIZE);
+    } else {
+        laneMixer.computeSum(job.sumData.data(), TABLE_SIZE);
+    }
 
     job.extrapolationMode = static_cast<LayeredTransferFunction::ExtrapolationMode>(
         laneMixer.getExtrapolationMode());
@@ -406,9 +410,13 @@ void VisualizerUpdateTimer::timerCallback() {
         lastSeenVersion = currentVersion;
 
         if (visualizerLUTPtr) {
-            // Compute the mixer sum into a temporary buffer, then downsample to visualizer resolution
+            // Compute the output curve into a temporary buffer, then downsample to visualizer resolution
             std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
-            laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+            if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+                laneMixer.computeScan(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+            } else {
+                laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+            }
 
             // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
             for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
@@ -453,9 +461,13 @@ void VisualizerUpdateTimer::forceUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     if (visualizerLUTPtr) {
-        // Compute mixer sum and downsample (same as timerCallback path)
+        // Compute output curve and downsample (same as timerCallback path)
         std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
-        laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+        if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+            laneMixer.computeScan(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+        } else {
+            laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+        }
 
         for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
             const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
