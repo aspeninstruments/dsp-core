@@ -49,6 +49,12 @@ TEST(FeatureDetectorDebug, WhyNoExtremaForH3) {
 
     std::cout << "\nVertical range: [" << minY << ", " << maxY << "], span=" << verticalRange << '\n';
 
+    // Extract curve data for service calls
+    std::vector<double> curveData(ltf->getTableSize());
+    for (int i = 0; i < ltf->getTableSize(); ++i) {
+        curveData[i] = ltf->getBaseLayerValue(i);
+    }
+
     // Now run feature detection with different thresholds
     std::cout << "\n=== Feature Detection with Default Thresholds ===" << '\n';
     {
@@ -56,7 +62,9 @@ TEST(FeatureDetectorDebug, WhyNoExtremaForH3) {
         std::cout << "Config: derivativeThreshold=" << config.derivativeThreshold
                   << ", significanceThreshold=" << config.significanceThreshold << '\n';
 
-        auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+        auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         std::cout << "Result: " << features.localExtrema.size() << " extrema" << '\n';
     }
 
@@ -69,7 +77,9 @@ TEST(FeatureDetectorDebug, WhyNoExtremaForH3) {
 
         std::cout << "Config: All thresholds = 0.0" << '\n';
 
-        auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+        auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         std::cout << "Result: " << features.localExtrema.size() << " extrema" << '\n';
 
         for (size_t i = 0; i < std::min(size_t(10), features.localExtrema.size()); ++i) {

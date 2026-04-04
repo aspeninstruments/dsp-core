@@ -36,7 +36,7 @@ AudioEngine::AudioEngine() {
             lutBuffers[bufIdx].data[i] = x;
         }
         lutBuffers[bufIdx].version = 0;
-        lutBuffers[bufIdx].extrapolationMode = LayeredTransferFunction::ExtrapolationMode::Clamp;
+        lutBuffers[bufIdx].extrapolationMode = LaneMixer::ExtrapolationMode::Clamp;
     }
 }
 
@@ -128,7 +128,7 @@ double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
     const int index = static_cast<int>(x_proj);
     const double t = x_proj - index;
 
-    if (lut->extrapolationMode == LayeredTransferFunction::ExtrapolationMode::Clamp) {
+    if (lut->extrapolationMode == LaneMixer::ExtrapolationMode::Clamp) {
         const int idx0 = std::clamp(index - 1, 0, TABLE_SIZE - 1);
         const int idx1 = std::clamp(index, 0, TABLE_SIZE - 1);
         const int idx2 = std::clamp(index + 1, 0, TABLE_SIZE - 1);
@@ -186,7 +186,7 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
 
     const auto extrapMode = newLUT->extrapolationMode;
 
-    if (extrapMode == LayeredTransferFunction::ExtrapolationMode::Clamp) {
+    if (extrapMode == LaneMixer::ExtrapolationMode::Clamp) {
         const int idx0 = std::clamp(index - 1, 0, TABLE_SIZE - 1);
         const int idx1 = std::clamp(index, 0, TABLE_SIZE - 1);
         const int idx2 = std::clamp(index + 1, 0, TABLE_SIZE - 1);
@@ -375,8 +375,7 @@ RenderJob LUTRenderTimer::captureRenderJob() {
         laneMixer.computeSum(job.sumData.data(), TABLE_SIZE);
     }
 
-    job.extrapolationMode = static_cast<LayeredTransferFunction::ExtrapolationMode>(
-        laneMixer.getExtrapolationMode());
+    job.extrapolationMode = laneMixer.getExtrapolationMode();
     job.version = laneMixer.getVersion();
 
     return job;

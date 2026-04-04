@@ -49,9 +49,14 @@ class AlgorithmBenchmark : public ::testing::Test {
         config.maxAnchors = 64; // Generous limit for fair comparison
         config.tangentAlgorithm = algo;
 
+        // Extract curve data for fitting
+        auto curveData = extractCurveData();
+
         // Time the fitting operation
         auto start = std::chrono::high_resolution_clock::now();
-        auto fitResult = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto fitResult = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         auto end = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double, std::milli> const duration = end - start;
@@ -104,6 +109,14 @@ class AlgorithmBenchmark : public ::testing::Test {
             double const y = func(x);
             ltf->setBaseLayerValue(i, y);
         }
+    }
+
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
     }
 
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
@@ -276,11 +289,15 @@ TEST_F(AlgorithmBenchmark, RepeatedFittingTest) {
 
     const int NUM_ITERATIONS = 100;
 
+    auto curveData = extractCurveData();
+
     // Warm up
     for (int i = 0; i < 10; ++i) {
         dsp_core::SplineFitConfig config;
         config.tangentAlgorithm = dsp_core::TangentAlgorithm::Akima;
-        dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     }
 
     // Benchmark Akima
@@ -288,7 +305,9 @@ TEST_F(AlgorithmBenchmark, RepeatedFittingTest) {
     for (int i = 0; i < NUM_ITERATIONS; ++i) {
         dsp_core::SplineFitConfig config;
         config.tangentAlgorithm = dsp_core::TangentAlgorithm::Akima;
-        dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     }
     auto akimaEnd = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> const akimaDuration = akimaEnd - akimaStart;
@@ -298,7 +317,9 @@ TEST_F(AlgorithmBenchmark, RepeatedFittingTest) {
     for (int i = 0; i < NUM_ITERATIONS; ++i) {
         dsp_core::SplineFitConfig config;
         config.tangentAlgorithm = dsp_core::TangentAlgorithm::FritschCarlson;
-        dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     }
     auto fcEnd = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> const fcDuration = fcEnd - fcStart;

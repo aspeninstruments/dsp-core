@@ -23,6 +23,14 @@ class SymmetryAnalyzerTest : public ::testing::Test {
         }
     }
 
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
     // Helper: Set curve to polynomial: y = x^n
     void setPolynomial(int power) {
         for (int i = 0; i < ltf->getTableSize(); ++i) {
@@ -70,7 +78,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_IdentityFunction_PerfectSymmetry) {
     setPolynomial(1);
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_GE(result.score, 0.99) << "Identity function should have near-perfect symmetry";
@@ -87,7 +96,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_CubicPolynomial_PerfectSymmetry) {
     setPolynomial(3);
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_GE(result.score, 0.99) << "Cubic polynomial should have perfect symmetry";
@@ -105,7 +115,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_TanhCurve_PerfectSymmetry) {
     setTanh(5.0);
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_GE(result.score, 0.99) << "Tanh should have perfect symmetry";
@@ -131,7 +142,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_TanhWithBump_ApproximateSymmetry) {
     }
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_GE(result.score, 0.85) << "Should still detect approximate symmetry";
@@ -149,7 +161,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_AsymmetricCurve_NotSymmetric) {
     setPolynomial(2);
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_LT(result.score, 0.90) << "Even function should NOT be odd-symmetric";
@@ -166,7 +179,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_HarmonicOdd_PerfectSymmetry) {
     setHarmonic(3);
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_GE(result.score, 0.99) << "Odd harmonic should have perfect symmetry";
@@ -183,7 +197,8 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_HarmonicEven_Asymmetric) {
     setHarmonic(2);
 
     // Execute
-    auto result = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveData = extractCurveData();
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
 
     // Verify
     EXPECT_LT(result.score, 0.90) << "Even harmonic should NOT be odd-symmetric";
@@ -213,13 +228,14 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_ConfigThresholds_AffectClassification) {
     SymmetryAnalyzer::Config config1;
     config1.perfectThreshold = 0.99;
     config1.approximateThreshold = 0.90;
-    auto result1 = SymmetryAnalyzer::analyzeOddSymmetry(*ltf, config1);
+    auto curveData = extractCurveData();
+    auto result1 = SymmetryAnalyzer::analyzeOddSymmetry(curveData, config1);
 
     // Execute with Config 2: perfectThreshold = 0.90
     SymmetryAnalyzer::Config config2;
     config2.perfectThreshold = 0.90;
     config2.approximateThreshold = 0.80;
-    auto result2 = SymmetryAnalyzer::analyzeOddSymmetry(*ltf, config2);
+    auto result2 = SymmetryAnalyzer::analyzeOddSymmetry(curveData, config2);
 
     // Verify scores are identical (thresholds don't affect computation)
     EXPECT_DOUBLE_EQ(result1.score, result2.score);
@@ -281,19 +297,22 @@ TEST_F(SymmetryAnalyzerTest, CurveData_TooSmall_Asymmetric) {
     EXPECT_EQ(result.classification, SymmetryAnalyzer::Result::Classification::Asymmetric);
 }
 
-TEST_F(SymmetryAnalyzerTest, CurveData_MatchesLTFResult) {
-    // Verify curveData overload produces same result as LTF overload
+TEST_F(SymmetryAnalyzerTest, CurveData_MatchesExtractedData) {
+    // Verify extractCurveData helper produces consistent results
     setTanh(5.0);
 
-    // Extract curve data from LTF
-    std::vector<double> curveData(tableSize);
+    // Extract via helper
+    auto helperData = extractCurveData();
+
+    // Extract manually
+    std::vector<double> manualData(tableSize);
     for (int i = 0; i < tableSize; ++i) {
-        curveData[static_cast<size_t>(i)] = ltf->getBaseLayerValue(i);
+        manualData[static_cast<size_t>(i)] = ltf->getBaseLayerValue(i);
     }
 
-    auto ltfResult = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
-    auto curveResult = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
+    auto helperResult = SymmetryAnalyzer::analyzeOddSymmetry(helperData);
+    auto manualResult = SymmetryAnalyzer::analyzeOddSymmetry(manualData);
 
-    EXPECT_NEAR(ltfResult.score, curveResult.score, 0.02);
-    EXPECT_EQ(ltfResult.classification, curveResult.classification);
+    EXPECT_NEAR(helperResult.score, manualResult.score, 0.02);
+    EXPECT_EQ(helperResult.classification, manualResult.classification);
 }

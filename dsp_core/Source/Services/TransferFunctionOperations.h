@@ -1,5 +1,4 @@
 #pragma once
-#include "../LayeredTransferFunction.h"
 #include <vector>
 
 namespace dsp_core::Services {
@@ -7,8 +6,8 @@ namespace dsp_core::Services {
 /**
  * TransferFunctionOperations - Pure service for transfer function transformations
  *
- * Provides stateless operations on LayeredTransferFunction or raw curve data
- * (std::vector<double>) that can be used from any context.
+ * Provides stateless operations on raw curve data (std::vector<double>)
+ * that can be used from any context.
  *
  * Service Pattern (5/5 score):
  *   - Pure static methods (no state)
@@ -17,18 +16,6 @@ namespace dsp_core::Services {
  */
 class TransferFunctionOperations {
   public:
-    // ========================================================================
-    // LayeredTransferFunction overloads (legacy — used during migration)
-    // ========================================================================
-
-    static void invert(LayeredTransferFunction& ltf);
-    static void removeDCInstantaneous(LayeredTransferFunction& ltf);
-    static void removeDCSteadyState(LayeredTransferFunction& ltf);
-    static void normalize(LayeredTransferFunction& ltf);
-
-    // ========================================================================
-    // CurveData overloads (lane-scoped)
-    // ========================================================================
 
     /** Invert curve vertically: f(x) → -f(x) */
     static void invert(std::vector<double>& curveData);

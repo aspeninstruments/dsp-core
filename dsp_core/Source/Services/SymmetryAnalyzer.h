@@ -3,9 +3,6 @@
 
 namespace dsp_core {
 
-// Forward declaration
-class LayeredTransferFunction;
-
 namespace Services {
 
 /**
@@ -87,24 +84,7 @@ class SymmetryAnalyzer {
     };
 
     /**
-     * Analyze curve symmetry
-     *
-     * @param ltf Transfer function to analyze
-     * @param config Analysis configuration
-     * @return Symmetry analysis result
-     */
-    static Result analyzeOddSymmetry(const LayeredTransferFunction& ltf, const Config& config);
-
-    /**
-     * Analyze curve symmetry with default configuration
-     *
-     * @param ltf Transfer function to analyze
-     * @return Symmetry analysis result
-     */
-    static Result analyzeOddSymmetry(const LayeredTransferFunction& ltf);
-
-    /**
-     * Analyze odd symmetry directly from lane curve data
+     * Analyze odd symmetry from curve data
      *
      * @param curveData Raw curve samples (e.g., Lane::curveData)
      * @param config Analysis configuration

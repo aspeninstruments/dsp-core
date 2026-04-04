@@ -1,6 +1,5 @@
 #pragma once
 
-#include "LayeredTransferFunction.h"
 #include "LaneMixer.h"
 #include <array>
 #include <functional>
@@ -48,12 +47,12 @@ class SeamlessTransferFunction {
      * INITIALIZATION SEQUENCE (REQUIRED ORDER):
      *
      * 1. Construct SeamlessTransferFunction
-     *    - editingModel initialized to identity
+     *    - LaneMixer initialized to defaults (H1=1.0 → y=x)
      *    - AudioEngine initialized to identity LUTs
      *    - Worker/poller NOT started yet
      *
-     * 2. Create controller: new CurveEditorController(stf.getEditingModel())
-     *    - Controller can now mutate editing model
+     * 2. Create controller: new CurveEditorController(stf.getLaneMixer(), ...)
+     *    - Controller can now mutate lane mixer
      *    - Still no async updates happening
      *
      * 3. Call startSeamlessUpdates() (message thread)
@@ -70,21 +69,6 @@ class SeamlessTransferFunction {
      *
      * 6. Call releaseResources() before destruction
      *    - Stops worker thread cleanly
-     *
-     * EXAMPLE (from PluginProcessor):
-     *
-     *   // Constructor (message thread):
-     *   transferFunction = std::make_unique<SeamlessTransferFunction>();
-     *   controller = std::make_unique<CurveEditorController>(
-     *       transferFunction->getEditingModel()
-     *   );
-     *   transferFunction->startSeamlessUpdates();  // NOW safe to start
-     *
-     *   // prepareToPlay (audio thread):
-     *   transferFunction->prepareToPlay(sampleRate, samplesPerBlock);
-     *
-     *   // releaseResources (audio thread):
-     *   transferFunction->releaseResources();
      */
     SeamlessTransferFunction();
     ~SeamlessTransferFunction();
@@ -94,17 +78,6 @@ class SeamlessTransferFunction {
     SeamlessTransferFunction& operator=(const SeamlessTransferFunction&) = delete;
     SeamlessTransferFunction(SeamlessTransferFunction&&) = delete;
     SeamlessTransferFunction& operator=(SeamlessTransferFunction&&) = delete;
-
-    /**
-     * Access editing model (for UI/controller, message thread only)
-     *
-     * The editing model is what the controller mutates in response to user input.
-     * Changes are detected by the poller and asynchronously rendered to LUTs.
-     *
-     * @return Reference to editing model
-     */
-    LayeredTransferFunction& getEditingModel();
-    const LayeredTransferFunction& getEditingModel() const;
 
     /**
      * Access lane mixer (message thread only)

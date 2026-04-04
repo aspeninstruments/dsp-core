@@ -160,6 +160,22 @@ class SplineFitterIntegrationTest : public ::testing::Test {
         return curve;
     }
 
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
+    static std::vector<double> extractCurveData(const LayeredTransferFunction& source) {
+        std::vector<double> data(source.getTableSize());
+        for (int i = 0; i < source.getTableSize(); ++i) {
+            data[i] = source.getBaseLayerValue(i);
+        }
+        return data;
+    }
+
     std::unique_ptr<LayeredTransferFunction> ltf;
     static constexpr double kTolerance = 1e-3;
 };
@@ -207,7 +223,11 @@ TEST_F(SplineFitterIntegrationTest, UserWorkflow_AnchorManipulation_NoAnchorCree
 
     // STEP d: Convert back to spline mode
     bakeCompositeToBase(); // Flatten harmonics (no-op here)
-    auto refitResult = SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto refitResult = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // STEP e: Verify 3 anchors (±2) - NO ANCHOR CREEPING
     EXPECT_TRUE(refitResult.success) << "Refit should succeed";
@@ -240,7 +260,11 @@ TEST_F(SplineFitterIntegrationTest, UserWorkflow_AnchorManipulation_NoAnchorCree
 
     // STEP h: Convert back to spline mode
     bakeCompositeToBase();
-    auto finalResult = SplineFitter::fitCurve(*ltf, config);
+    curveData = extractCurveData();
+
+    auto finalResult = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // STEP i: Verify anchor count is reasonable (<20)
     EXPECT_TRUE(finalResult.success) << "Final refit should succeed";
@@ -292,7 +316,11 @@ TEST_F(SplineFitterIntegrationTest, HarmonicWorkflow_MixBakeRefit_NoAnchorExplos
 
     // STEP c: Convert to spline mode
     auto config = SplineFitConfig::tight();
-    auto harmonicFitResult = SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto harmonicFitResult = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(harmonicFitResult.success) << "Harmonic fit should succeed";
     ltf->setSplineAnchors(harmonicFitResult.anchors);
@@ -325,7 +353,11 @@ TEST_F(SplineFitterIntegrationTest, HarmonicWorkflow_MixBakeRefit_NoAnchorExplos
     auto modifiedState = captureBaseLayer();
 
     bakeCompositeToBase();
-    auto refitResult = SplineFitter::fitCurve(*ltf, config);
+    curveData = extractCurveData();
+
+    auto refitResult = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // STEP h: Verify no anchor explosion
     // After one drag and refit, anchor count should be similar (±50%)
@@ -380,7 +412,11 @@ TEST_F(SplineFitterIntegrationTest, MultiCycle_Backtranslation_ConvergesToStable
 
         // Bake and refit
         bakeCompositeToBase();
-        auto fitResult = SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto fitResult = SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         EXPECT_TRUE(fitResult.success) << "Cycle " << cycle << " fit should succeed";
         anchorHistory.push_back(fitResult.anchors.size());
@@ -458,7 +494,11 @@ TEST_F(SplineFitterIntegrationTest, ComplexHarmonic_Backtranslation_PreservesSha
 
     // First fit - use tight config for complex harmonic curves
     auto config = SplineFitConfig::tight();
-    auto fitResult1 = SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto fitResult1 = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(fitResult1.success) << "First H15 fit should succeed";
     EXPECT_GE(fitResult1.anchors.size(), 12) << "H15 should need at least 12 anchors (14 extrema)";
@@ -479,7 +519,11 @@ TEST_F(SplineFitterIntegrationTest, ComplexHarmonic_Backtranslation_PreservesSha
     ltf->setRenderingMode(RenderingMode::Paint);
 
     bakeCompositeToBase();
-    auto fitResult2 = SplineFitter::fitCurve(*ltf, config);
+    curveData = extractCurveData();
+
+    auto fitResult2 = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify anchor count stability (±30%)
     EXPECT_TRUE(fitResult2.success) << "Second H15 fit should succeed";
@@ -550,7 +594,11 @@ TEST_F(SplineFitterIntegrationTest, SymmetricFitting_Backtranslation_NoAnchorCre
 
     for (int iter = 0; iter < numIterations; ++iter) {
         // Fit
-        auto fitResult = SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto fitResult = SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         ASSERT_TRUE(fitResult.success) << "Iteration " << iter << " fit should succeed";
 
         anchorHistory.push_back(fitResult.anchors.size());
@@ -653,7 +701,11 @@ TEST_F(SplineFitterIntegrationTest, SymmetricFitting_RegressionTest_NeverModePre
     auto config = SplineFitConfig::tight();
     config.symmetryDetection = SymmetryDetection::Never; // Original greedy algorithm
 
-    auto result = SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "H3 fit with Never mode should succeed";
 
@@ -711,7 +763,11 @@ TEST_F(SplineFitterIntegrationTest, SymmetricFitting_VisualSymmetry_PreservedAcr
 
     for (int cycle = 0; cycle < numCycles; ++cycle) {
         // Fit
-        auto fitResult = SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto fitResult = SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         ASSERT_TRUE(fitResult.success) << "Cycle " << cycle << " fit should succeed";
 
         // Measure visual symmetry by checking paired anchors
@@ -803,7 +859,11 @@ TEST_F(SplineFitterIntegrationTest, SymmetricFitting_CompareAutoVsNever_Demonstr
     }
 
     for (int cycle = 0; cycle < numCycles; ++cycle) {
-        auto fitResult = SplineFitter::fitCurve(*ltfAuto, configAuto);
+        auto curveData = extractCurveData(*ltfAuto);
+
+        auto fitResult = SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltfAuto->getMinSignalValue(), ltfAuto->getMaxSignalValue(), configAuto);
         ASSERT_TRUE(fitResult.success) << "Auto mode cycle " << cycle << " should succeed";
 
         anchorHistoryAuto.push_back(fitResult.anchors.size());
@@ -829,7 +889,11 @@ TEST_F(SplineFitterIntegrationTest, SymmetricFitting_CompareAutoVsNever_Demonstr
     }
 
     for (int cycle = 0; cycle < numCycles; ++cycle) {
-        auto fitResult = SplineFitter::fitCurve(*ltfNever, configNever);
+        auto curveData = extractCurveData(*ltfNever);
+
+        auto fitResult = SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltfNever->getMinSignalValue(), ltfNever->getMaxSignalValue(), configNever);
         ASSERT_TRUE(fitResult.success) << "Never mode cycle " << cycle << " should succeed";
 
         anchorHistoryNever.push_back(fitResult.anchors.size());
@@ -902,7 +966,11 @@ TEST_F(SplineFitterIntegrationTest, RegressionTest_ReenterSplineTool_FitsCorrect
     // Step B: Enter spline mode → fit endpoints
     std::cout << "Step B: Enter spline mode → fit endpoints\n";
     ltf->setRenderingMode(RenderingMode::Spline);
-    auto fitResult1 = SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto fitResult1 = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(fitResult1.success) << "Initial fit should succeed";
     EXPECT_EQ(fitResult1.anchors.size(), 2) << "Identity should fit to 2 endpoints";
 
@@ -936,7 +1004,11 @@ TEST_F(SplineFitterIntegrationTest, RegressionTest_ReenterSplineTool_FitsCorrect
     // Step E: Re-enter spline mode → CRITICAL TEST
     std::cout << "Step E: Re-enter spline mode → fit should match baked curve\n";
     ltf->setRenderingMode(RenderingMode::Spline);
-    auto fitResult2 = SplineFitter::fitCurve(*ltf, config);
+    curveData = extractCurveData();
+
+    auto fitResult2 = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(fitResult2.success) << "Refit should succeed";
 
     std::cout << "  Refit produced " << fitResult2.anchors.size() << " anchors\n";
@@ -1043,7 +1115,11 @@ TEST_F(SplineFitterIntegrationTest, BugInvestigation_WTvsH1_FittingDifference) {
     }
 
     // Fit Case A (after baking)
-    auto fitA = SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto fitA = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     std::cout << "Case A FIT RESULT:\n"
               << "  Anchors: " << fitA.anchors.size() << "\n"
@@ -1097,7 +1173,11 @@ TEST_F(SplineFitterIntegrationTest, BugInvestigation_WTvsH1_FittingDifference) {
     }
 
     // Fit Case B (after baking)
-    auto fitB = SplineFitter::fitCurve(*ltf, config);
+    curveData = extractCurveData();
+
+    auto fitB = SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     std::cout << "Case B FIT RESULT:\n"
               << "  Anchors: " << fitB.anchors.size() << "\n"

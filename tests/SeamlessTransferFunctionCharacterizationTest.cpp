@@ -81,13 +81,11 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, DefaultLUT_IsIdentityFuncti
 }
 
 TEST_F(SeamlessTransferFunctionCharacterizationTest, AfterHarmonicChange_LUTReflectsNewCurve) {
-    auto& ltf = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
     // Set H1=0.5, H3=0.5 (mix of linear and cubic harmonics)
-    auto coeffs = ltf.getHarmonicCoefficients();
-    coeffs[1] = 0.5;  // H1
-    coeffs[3] = 0.5;  // H3
-    ltf.setHarmonicCoefficients(coeffs);
+    mixer.setLaneAmplitude(1, 0.5);  // H1
+    mixer.setLaneAmplitude(3, 0.5);  // H3
 
     auto output = renderAndProcess();
 
@@ -107,17 +105,15 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, AfterHarmonicChange_LUTRefl
 }
 
 TEST_F(SeamlessTransferFunctionCharacterizationTest, PaintModeRender_MixerStillActive) {
-    auto& ltf = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
-    // Set WT mix to 1.0, all harmonics to zero, switch to Paint mode
-    // With the always-on mixer, Paint mode keeps all lanes active.
-    // Only lane 0 (WT=1.0, tanh(2x)) contributes here since harmonics are zero.
+    // Set WT mix to 1.0, all harmonics to zero
+    // Only lane 0 (WT=1.0, tanh(2x)) contributes — all other lanes have amp=0.
     // Normalization is applied: output = tanh(2x) / max(|tanh(2x)|)
-    auto coeffs = ltf.getHarmonicCoefficients();
-    std::fill(coeffs.begin(), coeffs.end(), 0.0);
-    coeffs[0] = 1.0;  // WT mix = 1.0
-    ltf.setHarmonicCoefficients(coeffs);
-    ltf.setRenderingMode(dsp_core::RenderingMode::Paint);
+    for (int i = 0; i < mixer.getActiveLaneCount(); ++i) {
+        mixer.setLaneAmplitude(i, 0.0);
+    }
+    mixer.setLaneAmplitude(0, 1.0);  // WT mix = 1.0
 
     auto output = renderAndProcess();
 
@@ -132,15 +128,13 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, PaintModeRender_MixerStillA
 }
 
 TEST_F(SeamlessTransferFunctionCharacterizationTest, NormalizationEnabled_MaxAbsIsOne) {
-    auto& ltf = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
-    // Set WT=1.0, H1=1.0 in Harmonic mode (composite will be tanh(2x) + x)
+    // Set WT=1.0, H1=1.0 (composite will be tanh(2x) + x)
     // The max abs of tanh(2x)+x on [-1,1] is tanh(2)+1 ≈ 1.964
     // With normalization, output should be scaled to max abs = 1.0
-    auto coeffs = ltf.getHarmonicCoefficients();
-    coeffs[0] = 1.0;  // WT mix
-    coeffs[1] = 1.0;  // H1
-    ltf.setHarmonicCoefficients(coeffs);
+    mixer.setLaneAmplitude(0, 1.0);  // WT mix
+    mixer.setLaneAmplitude(1, 1.0);  // H1
 
     auto output = renderAndProcess();
 

@@ -64,6 +64,22 @@ class SplineFitterTest : public ::testing::Test {
         }
     }
 
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
+    std::vector<double> extractCurveData(const dsp_core::LayeredTransferFunction& source) const {
+        std::vector<double> data(source.getTableSize());
+        for (int i = 0; i < source.getTableSize(); ++i) {
+            data[i] = source.getBaseLayerValue(i);
+        }
+        return data;
+    }
+
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
 };
 
@@ -124,7 +140,11 @@ TEST_F(SplineFitterTest, FitCurve_IdentityCurve_MinimalAnchors) {
     setIdentityCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_GE(result.numAnchors, 2);  // At least endpoints
@@ -141,7 +161,11 @@ TEST_F(SplineFitterTest, FitCurve_SCurve_MoreAnchors) {
     setSCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_GE(result.numAnchors, 3); // S-curve needs anchors at inflection points
@@ -151,7 +175,11 @@ TEST_F(SplineFitterTest, FitCurve_TightConfig_ProducesValidResult) {
     setSCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_GE(result.numAnchors, 2); // At least endpoints
@@ -162,7 +190,11 @@ TEST_F(SplineFitterTest, FitCurve_AnchorsAreSorted) {
     setSCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -180,7 +212,11 @@ TEST_F(SplineFitterTest, PCHIPTangents_MonotonicSequence) {
     setIdentityCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -200,7 +236,11 @@ TEST_F(SplineFitterTest, PCHIPTangents_LocalExtremum) {
     }
 
     auto config = dsp_core::SplineFitConfig::tight(); // Use tight to capture peak
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -219,7 +259,11 @@ TEST_F(SplineFitterTest, PCHIPTangents_SlopeCapping) {
     setStepFunction();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -241,7 +285,11 @@ TEST_F(SplineFitterTest, FitCurve_FlatCurve) {
     }
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_GE(result.numAnchors, 2); // At least endpoints
@@ -264,7 +312,11 @@ TEST_F(SplineFitterTest, FitCurve_MonotonicityEnforcement_ProducesReasonableResu
     auto config = dsp_core::SplineFitConfig::tight();
     config.enforceMonotonicity = true;
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -288,7 +340,11 @@ TEST_F(SplineFitterTest, FitCurve_NonMonotonicCurve_WithoutEnforcement) {
     auto config = dsp_core::SplineFitConfig::tight();
     config.enforceMonotonicity = false;
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     // Without enforcement, anchors may be non-monotonic
@@ -419,7 +475,11 @@ TEST_F(SplineFitterTest, Integration_ErrorMetrics) {
     setIdentityCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_GE(result.maxError, 0.0);
@@ -434,7 +494,11 @@ TEST_F(SplineFitterTest, Integration_FitAndReconstruct) {
     setSCurve();
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -477,7 +541,11 @@ TEST_F(SplineFitterTest, TanhCurves_VariousSteepness) {
 
         // Fit with tight tolerance for accuracy
         auto config = dsp_core::SplineFitConfig::tight();
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         EXPECT_TRUE(result.success) << "tanh(" << n << "x) fit failed";
 
@@ -539,7 +607,11 @@ TEST_F(SplineFitterTest, TrigHarmonics_AllBasisFunctions) {
         // Use Never mode to test original greedy algorithm behavior
         auto config = dsp_core::SplineFitConfig::tight();
         config.symmetryDetection = dsp_core::SymmetryDetection::Never;
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         EXPECT_TRUE(result.success) << "Harmonic " << n << " fit failed";
 
@@ -619,7 +691,11 @@ TEST_F(SplineFitterTest, Performance_ComplexCurves) {
 
         // Measure execution time
         auto startTime = std::chrono::high_resolution_clock::now();
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         auto endTime = std::chrono::high_resolution_clock::now();
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
@@ -661,7 +737,11 @@ TEST_F(SplineFitterTest, EdgeCase_ExtremelySteepTanh) {
     config.symmetryDetection = dsp_core::SymmetryDetection::Never; // Test original greedy behavior
     config.maxAnchors = 64; // May need many anchors for near-discontinuity
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -684,7 +764,11 @@ TEST_F(SplineFitterTest, Quality_SmoothnessC1Continuity) {
     }
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -739,7 +823,11 @@ TEST_F(SplineFitterTest, Regression_NoBowingInStraightRegions) {
     }
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -769,6 +857,22 @@ TEST_F(SplineFitterTest, Regression_NoBowingInStraightRegions) {
 class FeatureBasedFittingTest : public ::testing::Test {
   protected:
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
+
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
+    static std::vector<double> extractCurveData(const dsp_core::LayeredTransferFunction& source) {
+        std::vector<double> data(source.getTableSize());
+        for (int i = 0; i < source.getTableSize(); ++i) {
+            data[i] = source.getBaseLayerValue(i);
+        }
+        return data;
+    }
 
     void SetUp() override {
         ltf = std::make_unique<dsp_core::LayeredTransferFunction>(256, -1.0, 1.0);
@@ -801,7 +905,10 @@ class FeatureBasedFittingTest : public ::testing::Test {
     static int countSpuriousExtrema(const std::vector<dsp_core::SplineAnchor>& anchors,
                                     const dsp_core::LayeredTransferFunction& originalData) {
         // Get actual extrema from original data
-        auto dataFeatures = dsp_core::Services::CurveFeatureDetector::detectFeatures(originalData);
+        auto originalCurveData = extractCurveData(originalData);
+        auto dataFeatures = dsp_core::Services::CurveFeatureDetector::detectFeatures(
+            originalCurveData.data(), static_cast<int>(originalCurveData.size()),
+            originalData.getMinSignalValue(), originalData.getMaxSignalValue());
         std::set<int> const dataExtremaIndices(dataFeatures.localExtrema.begin(), dataFeatures.localExtrema.end());
 
         int spuriousCount = 0;
@@ -863,7 +970,11 @@ TEST_F(FeatureBasedFittingTest, Tanh_NoSpuriousExtrema_PCHIP) {
     config.maxAnchors = 32;
     config.tangentAlgorithm = dsp_core::TangentAlgorithm::PCHIP;
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_EQ(0, countSpuriousExtrema(result.anchors, *ltf)) << "Tanh curve should have zero spurious extrema";
@@ -877,7 +988,11 @@ TEST_F(FeatureBasedFittingTest, Tanh_NoSpuriousExtrema_FritschCarlson) {
     setupCurve([](double x) { return std::tanh(3.0 * x); });
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     EXPECT_EQ(0, countSpuriousExtrema(result.anchors, *ltf))
@@ -897,7 +1012,11 @@ TEST_F(FeatureBasedFittingTest, Tanh_Akima_MinimalExtrema) {
     config.maxAnchors = 32;
     config.tangentAlgorithm = dsp_core::TangentAlgorithm::Akima;
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
     // Akima may have small overshoots (not monotone-preserving)
@@ -914,7 +1033,11 @@ TEST_F(FeatureBasedFittingTest, Sine_AnchorsAtPeaksAndValleys) {
     setupCurve([](double x) { return std::sin(M_PI * x); }); // 0.5 periods in [-1, 1]
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -943,7 +1066,11 @@ TEST_F(FeatureBasedFittingTest, Cubic_FitQuality) {
     setupCurve([](double x) { return x * x * x; });
 
     auto config = dsp_core::SplineFitConfig::tight();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     EXPECT_TRUE(result.success);
 
@@ -984,7 +1111,11 @@ TEST_F(FeatureBasedFittingTest, TangentAlgorithmComparison_TanhQualityVsSpeed) {
         config.maxAnchors = 32;
         config.tangentAlgorithm = algo;
 
-        auto fit = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto fit = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         results.push_back(
             {algo, name, static_cast<int>(fit.anchors.size()), fit.maxError, countSpuriousExtrema(fit.anchors, *ltf)});
@@ -1086,7 +1217,11 @@ TEST_F(SplineFitterTest, AllHarmonics_PureWaveshapers) {
     for (int n = 1; n <= 40; ++n) {
         setHarmonicCurve(*ltf, n);
 
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         EXPECT_TRUE(result.success) << "Harmonic " << n << " fit failed";
 
@@ -1143,7 +1278,11 @@ TEST_F(SplineFitterTest, AllHarmonics_MixedWithIdentity) {
     for (int n = 1; n <= 40; ++n) {
         setMixedCurve(*ltf, n);
 
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         EXPECT_TRUE(result.success) << "Mixed harmonic " << n << " fit failed";
 
@@ -1197,7 +1336,11 @@ TEST_F(SplineFitterTest, RegressionTest_SymmetryComparison) {
     std::cout << "WITH Symmetry (Auto Mode):" << '\n';
     std::cout << "  symmetryDetection: " << (int)configWith.symmetryDetection << " (0=Auto, 1=Always, 2=Never)" << '\n';
 
-    auto resultWith = dsp_core::Services::SplineFitter::fitCurve(*ltf, configWith);
+    auto curveData = extractCurveData();
+
+    auto resultWith = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), configWith);
     std::cout << "  Anchors: " << resultWith.numAnchors << '\n';
     std::cout << "  MaxError: " << std::fixed << std::setprecision(4) << resultWith.maxError << '\n';
     std::cout << '\n';
@@ -1209,7 +1352,9 @@ TEST_F(SplineFitterTest, RegressionTest_SymmetryComparison) {
     std::cout << "WITHOUT Symmetry (Never Mode - Baseline):" << '\n';
     std::cout << "  symmetryDetection: " << (int)configWithout.symmetryDetection << '\n';
 
-    auto resultWithout = dsp_core::Services::SplineFitter::fitCurve(*ltf, configWithout);
+    auto resultWithout = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), configWithout);
     std::cout << "  Anchors: " << resultWithout.numAnchors << '\n';
     std::cout << "  MaxError: " << std::fixed << std::setprecision(4) << resultWithout.maxError << '\n';
     std::cout << '\n';
@@ -1241,7 +1386,11 @@ TEST_F(SplineFitterTest, HighFrequencyHarmonics_DetailedAnalysis) {
     for (int n = 15; n <= 20; ++n) {
         setHarmonicCurve(*ltf, n);
 
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         std::cout << "\nHarmonic " << n << ":" << '\n';
         std::cout << "  Total anchors: " << result.numAnchors << '\n';
@@ -1345,9 +1494,21 @@ class BacktranslationTest : public ::testing::Test {
         }
 
         // Step 2: Refit samples back to anchors
-        auto refitResult = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto refitResult = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         return refitResult;
+    }
+
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
     }
 
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
@@ -1533,7 +1694,11 @@ TEST_F(BacktranslationTest, ProgressiveComplexity_AnchorCountScaling) {
 
     for (int const n : harmonics) {
         setHarmonicCurve(*ltf, n);
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         ASSERT_TRUE(result.success) << "Harmonic " << n << " fit failed";
 
@@ -1601,7 +1766,11 @@ TEST_F(BacktranslationTest, ProgressiveComplexity_ErrorQuality) {
 
     for (const auto& [harmonic, threshold] : testCases) {
         setHarmonicCurve(*ltf, harmonic);
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         ASSERT_TRUE(result.success) << "Harmonic " << harmonic << " fit failed";
 
@@ -1625,12 +1794,20 @@ TEST_F(BacktranslationTest, HarmonicComparison_LowVsHighOrder) {
 
     // Fit Harmonic 3 (2 extrema)
     setHarmonicCurve(*ltf, 3);
-    auto result3 = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result3 = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result3.success) << "Harmonic 3 fit failed";
 
     // Fit Harmonic 10 (9 extrema)
     setHarmonicCurve(*ltf, 10);
-    auto result10 = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    curveData = extractCurveData();
+
+    auto result10 = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result10.success) << "Harmonic 10 fit failed";
 
     std::cout << "\n=== Harmonic Comparison: H3 vs H10 ===" << '\n';
@@ -1689,7 +1866,11 @@ TEST_F(BacktranslationTest, Scribble_HighFrequencyNoise_Simplified) {
 
     // Measure timing
     auto startTime = std::chrono::high_resolution_clock::now();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
@@ -1748,7 +1929,11 @@ TEST_F(BacktranslationTest, Scribble_RandomWalk_Simplified) {
 
     // Measure timing
     auto startTime = std::chrono::high_resolution_clock::now();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
@@ -1812,7 +1997,11 @@ TEST_F(BacktranslationTest, Scribble_LocalizedNoise_DoesNotAffectStraightRegions
 
     // Measure timing
     auto startTime = std::chrono::high_resolution_clock::now();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
@@ -1935,7 +2124,11 @@ TEST_F(SplineFitterTest, Performance_AdaptiveAlgorithm_Baseline) {
         test.setupFunc(*ltf);
 
         auto startTime = std::chrono::high_resolution_clock::now();
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
@@ -2011,7 +2204,11 @@ TEST_F(SplineFitterTest, Performance_LargeDataset_16kSamples) {
         test.setupFunc(*ltfHiRes);
 
         auto startTime = std::chrono::high_resolution_clock::now();
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltfHiRes, config);
+        auto curveData = extractCurveData(*ltfHiRes);
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltfHiRes->getMinSignalValue(), ltfHiRes->getMaxSignalValue(), config);
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
@@ -2048,7 +2245,11 @@ TEST_F(SplineFitterTest, Performance_WorstCase_ComplexHarmonic) {
 
     // Measure performance
     auto startTime = std::chrono::high_resolution_clock::now();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
@@ -2113,6 +2314,14 @@ class ZeroCrossingTest : public ::testing::Test {
         }
     }
 
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
 };
 
@@ -2135,7 +2344,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_CubicPolynomial_PairedAnchors) {
     config.maxAnchors = 10;
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Cubic fit should succeed";
@@ -2189,7 +2402,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_TanhCurve_AutoDetect) {
     config.symmetryThreshold = 0.90;
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Tanh fit should succeed";
@@ -2238,7 +2455,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_AsymmetricCurve_AutoDisables) {
     config.symmetryDetection = dsp_core::SymmetryDetection::Auto;
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Asymmetric curve should fit successfully";
@@ -2260,7 +2481,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_NeverMode_OriginalBehavior) {
     config.symmetryDetection = dsp_core::SymmetryDetection::Never;
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Cubic fit should succeed with Never mode";
@@ -2284,7 +2509,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_LimitedAnchors_StopsWhenFull) {
     config.maxAnchors = 5; // Odd number - can't fit all pairs
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Should succeed with limited anchors";
@@ -2309,7 +2538,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_Harmonic3_Symmetric) {
     config.symmetryDetection = dsp_core::SymmetryDetection::Auto;
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Harmonic 3 fit should succeed";
@@ -2362,7 +2595,11 @@ TEST_F(ZeroCrossingTest, SymmetricFitting_Harmonic2_Asymmetric) {
     config.symmetryDetection = dsp_core::SymmetryDetection::Auto;
 
     // Execute
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     // Verify
     ASSERT_TRUE(result.success) << "Harmonic 2 fit should succeed";
@@ -2491,7 +2728,11 @@ TEST_F(BacktranslationTest, TanhCurve_SmoothBacktranslation) {
 
     // Fit once
     auto config = dsp_core::SplineFitConfig::tight();
-    auto firstFit = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto firstFit = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(firstFit.success) << "First fit failed";
 
     std::cout << "First fit: " << firstFit.numAnchors << " anchors, "

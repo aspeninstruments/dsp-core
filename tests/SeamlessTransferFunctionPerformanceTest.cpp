@@ -59,8 +59,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CrossfadeDuration_ScalesWithSamp
         stf->prepareToPlay(tc.sampleRate, 512);
 
         // Modify editing model to trigger LUT render
-        auto& editingModel = stf->getEditingModel();
-        editingModel.setCoefficient(1, 0.5); // Trigger version increment
+        auto& mixer = stf->getLaneMixer();
+        mixer.setLaneAmplitude(1, 0.5); // Trigger version increment
 
         // Wait for worker thread to render
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -102,8 +102,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CrossfadeDuration_TradeoffAnalys
     const int expectedCrossfadeSamples = 441;
 
     // Verify current setting
-    auto& editingModel = stf->getEditingModel();
-    editingModel.setCoefficient(1, 0.5);
+    auto& mixer = stf->getLaneMixer();
+    mixer.setLaneAmplitude(1, 0.5);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     std::vector<double> samples(expectedCrossfadeSamples);
@@ -140,13 +140,13 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, Latency_InteractiveOperations) {
     // Wait for initial render
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    auto& editingModel = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
     // Measure latency: edit → LUT render → audio update
     auto t0 = std::chrono::high_resolution_clock::now();
 
     // Make edit (harmonic coefficient change - should be fast)
-    editingModel.setCoefficient(1, 0.8);
+    mixer.setLaneAmplitude(1, 0.8);
 
     // Wait for new LUT to be rendered and swapped
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -182,31 +182,33 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, Latency_SplineFitting) {
     stf->prepareToPlay(44100.0, 512);
     stf->startSeamlessUpdates();
 
-    auto& editingModel = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
-    // Create complex base layer that will require spline fitting
+    // Create complex curve data on lane 0 (sine wave)
+    std::vector<double> sineData(16384);
     for (int i = 0; i < 16384; ++i) {
         double const x = -1.0 + (i / 16383.0) * 2.0;
-        double const y = std::sin(x * 3.14159 * 2.0); // Sine wave
-        editingModel.setBaseLayerValue(i, y);
+        sineData[static_cast<size_t>(i)] = std::sin(x * 3.14159 * 2.0);
     }
-
+    mixer.setLaneCurveData(0, sineData);
+    mixer.setLaneAmplitude(0, 1.0);
+    // Zero out other lanes so only lane 0 contributes
+    for (int i = 1; i < mixer.getActiveLaneCount(); ++i) {
+        mixer.setLaneAmplitude(i, 0.0);
+    }
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    // Enable spline layer (triggers SplineFitter)
-    editingModel.setRenderingMode(dsp_core::RenderingMode::Spline);
-
-    // Wait for spline fitting and LUT render
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    // Trigger a LUT render (spline fitting is now done by the controller, not the STF)
+    stf->renderLUTImmediate();
 
     auto t1 = std::chrono::high_resolution_clock::now();
     auto latencyMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-    // SplineFitter latency is acceptable for mode transitions
-    EXPECT_LT(latencyMs, 1000.0) << "Spline fitting latency should be <1000ms";
+    // LUT render latency should be fast
+    EXPECT_LT(latencyMs, 1000.0) << "LUT render latency should be <1000ms";
 
-    std::cout << "[PERFORMANCE] Spline fitting latency: " << latencyMs << "ms" << '\n';
+    std::cout << "[PERFORMANCE] LUT render latency: " << latencyMs << "ms" << '\n';
 }
 
 // ============================================================================
@@ -247,11 +249,11 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CPUProfiler_WorkerThreadPriority
     stf->prepareToPlay(44100.0, 512);
     stf->startSeamlessUpdates();
 
-    auto& editingModel = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
     // Rapid edits to stress worker thread
     for (int i = 0; i < 100; ++i) {
-        editingModel.setCoefficient(1, 0.5 + i * 0.001);
+        mixer.setLaneAmplitude(1, 0.5 + i * 0.001);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
@@ -280,11 +282,11 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, MemoryProfiler_NoLeaks) {
     stf->prepareToPlay(44100.0, 512);
     stf->startSeamlessUpdates();
 
-    auto& editingModel = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
     // Warm-up: trigger initial allocations
     for (int i = 0; i < 10; ++i) {
-        editingModel.setCoefficient(1, 0.5 + i * 0.01);
+        mixer.setLaneAmplitude(1, 0.5 + i * 0.01);
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
@@ -297,7 +299,7 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, MemoryProfiler_NoLeaks) {
     std::array<double*, 1> channelPointers = {samples.data()};
     juce::AudioBuffer<double> buffer(channelPointers.data(), 1, 512);
     for (int i = 0; i < 1000; ++i) {
-        editingModel.setCoefficient(1, 0.5 + i * 0.0001);
+        mixer.setLaneAmplitude(1, 0.5 + i * 0.0001);
 
         // Process audio
         for (double & sample : samples) sample = 0.5;
@@ -327,11 +329,11 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, MemoryProfiler_RenderJobsDiscard
     stf->prepareToPlay(44100.0, 512);
     stf->startSeamlessUpdates();
 
-    auto& editingModel = stf->getEditingModel();
+    auto& mixer = stf->getLaneMixer();
 
     // Rapid edits to fill job queue
     for (int i = 0; i < 100; ++i) {
-        editingModel.setCoefficient(1, 0.5 + i * 0.001);
+        mixer.setLaneAmplitude(1, 0.5 + i * 0.001);
         std::this_thread::sleep_for(std::chrono::milliseconds(2)); // Faster than polling
     }
 

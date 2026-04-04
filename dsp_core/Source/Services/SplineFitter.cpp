@@ -8,7 +8,39 @@
 
 namespace dsp_core::Services {
 
-SplineFitResult SplineFitter::fitCurve(const LayeredTransferFunction& ltf, const SplineFitConfig& config) {
+double SplineFitter::normalizeIndex(int index, int tableSize, double minValue, double maxValue) {
+    if (tableSize <= 1) return minValue;
+    return minValue + (maxValue - minValue) * static_cast<double>(index) / static_cast<double>(tableSize - 1);
+}
+
+double SplineFitter::interpolateCurve(const double* curveData, int tableSize, double minValue, double maxValue, double x) {
+    // Catmull-Rom interpolation matching LTF's applyTransferFunction quality
+    const double indexF = (x - minValue) / (maxValue - minValue) * static_cast<double>(tableSize - 1);
+    const int lastIdx = tableSize - 1;
+    const int i0 = std::clamp(static_cast<int>(std::floor(indexF)), 0, lastIdx);
+    const double frac = indexF - i0;
+
+    const int im1 = std::max(i0 - 1, 0);
+    const int i1 = std::min(i0 + 1, lastIdx);
+    const int i2 = std::min(i0 + 2, lastIdx);
+
+    const double p0 = curveData[im1];
+    const double p1 = curveData[i0];
+    const double p2 = curveData[i1];
+    const double p3 = curveData[i2];
+
+    const double t = frac;
+    const double t2 = t * t;
+    const double t3 = t2 * t;
+    return 0.5 * ((2.0 * p1) +
+                   (-p0 + p2) * t +
+                   (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+                   (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+}
+
+SplineFitResult SplineFitter::fitCurve(const double* curveData, int tableSize,
+                                        double minValue, double maxValue,
+                                        const SplineFitConfig& config) {
 
     SplineFitResult result;
 
@@ -24,12 +56,12 @@ SplineFitResult SplineFitter::fitCurve(const LayeredTransferFunction& ltf, const
         if (featureConfig.maxFeatures == 0 || featureConfig.maxFeatures > maxFeaturesFromBudget) {
             featureConfig.maxFeatures = maxFeaturesFromBudget;
         }
-        auto features = CurveFeatureDetector::detectFeatures(ltf, featureConfig);
+        auto features = CurveFeatureDetector::detectFeatures(curveData, tableSize, minValue, maxValue, featureConfig);
         mandatoryIndices = features.mandatoryAnchors;
     }
 
     // Step 1: Sample & sanitize
-    auto samples = sampleAndSanitize(ltf, config);
+    auto samples = sampleAndSanitize(curveData, tableSize, minValue, maxValue, config);
 
     if (samples.empty()) {
         result.success = false;
@@ -45,7 +77,7 @@ SplineFitResult SplineFitter::fitCurve(const LayeredTransferFunction& ltf, const
 
     // Step 2: Greedy spline fitting with feature-based initialization
     // Start with mandatory feature anchors, then iteratively refine (error-driven)
-    auto anchors = greedySplineFit(samples, config, &ltf, mandatoryIndices);
+    auto anchors = greedySplineFit(samples, config, curveData, tableSize, minValue, maxValue, mandatoryIndices);
 
     if (anchors.empty()) {
         result.success = false;
@@ -77,19 +109,17 @@ SplineFitResult SplineFitter::fitCurve(const LayeredTransferFunction& ltf, const
     return result;
 }
 
-std::vector<SplineFitter::Sample> SplineFitter::sampleAndSanitize(const LayeredTransferFunction& ltf,
+std::vector<SplineFitter::Sample> SplineFitter::sampleAndSanitize(const double* curveData, int tableSize,
+                                                                  double minValue, double maxValue,
                                                                   const SplineFitConfig& config) {
 
-    const int tableSize = ltf.getTableSize();
     std::vector<Sample> samples;
     samples.reserve(tableSize * 2); // Reserve extra space for densification
 
-    // Raster-to-polyline: sample entire composite (what user sees)
-    // normalizationScalar is preserved when entering spline mode
-    // evaluateBaseAndHarmonics applies the correct normScalar to return normalized values
+    // Raster-to-polyline: sample entire curve data
     for (int i = 0; i < tableSize; ++i) {
-        double x = ltf.normalizeIndex(i);           // Maps to [-1, 1]
-        double y = ltf.evaluateBaseAndHarmonics(x); // Returns normalized base + harmonics
+        double x = normalizeIndex(i, tableSize, minValue, maxValue);
+        double y = curveData[i];
         samples.push_back({x, y});
     }
 
@@ -106,9 +136,8 @@ std::vector<SplineFitter::Sample> SplineFitter::sampleAndSanitize(const LayeredT
         if (i < samples.size() - 1) {
             double midX = (samples[i].x + samples[i + 1].x) / 2.0;
 
-            // Sample the ACTUAL normalized composite at midpoint
-            // This prevents false errors from linear interpolation on high-frequency curves
-            double midY = ltf.evaluateBaseAndHarmonics(midX);
+            // Sample using Catmull-Rom interpolation for sub-sample accuracy
+            double midY = interpolateCurve(curveData, tableSize, minValue, maxValue, midX);
 
             densified.push_back({midX, midY});
         }
@@ -518,7 +547,8 @@ SplineFitter::WorstFitResult SplineFitter::findWorstFitSample(const std::vector<
 
 std::vector<SplineAnchor> SplineFitter::greedySplineFit(const std::vector<Sample>& samples,
                                                         const SplineFitConfig& config,
-                                                        const LayeredTransferFunction* ltf,
+                                                        const double* curveData, int tableSize,
+                                                        double minValue, double maxValue,
                                                         const std::vector<int>& mandatoryAnchorIndices) {
 
     if (samples.size() < 2)
@@ -526,11 +556,11 @@ std::vector<SplineAnchor> SplineFitter::greedySplineFit(const std::vector<Sample
 
     // Initialize anchors from mandatory features or endpoints
     std::vector<SplineAnchor> anchors;
-    if (mandatoryAnchorIndices.empty() || ltf == nullptr) {
+    if (mandatoryAnchorIndices.empty() || curveData == nullptr) {
         anchors.push_back({samples.front().x, samples.front().y, false, 0.0});
         anchors.push_back({samples.back().x, samples.back().y, false, 0.0});
     } else {
-        anchors = initializeAnchorsFromIndices(samples, *ltf, mandatoryAnchorIndices);
+        anchors = initializeAnchorsFromIndices(samples, tableSize, minValue, maxValue, mandatoryAnchorIndices);
     }
 
     // Calculate how many additional anchors we can add
@@ -556,8 +586,9 @@ std::vector<SplineAnchor> SplineFitter::greedySplineFit(const std::vector<Sample
 
     // Analyze symmetry if needed (controlled by config.symmetryDetection)
     bool useSymmetricMode = false;
-    if (config.symmetryDetection == SymmetryDetection::Auto && ltf != nullptr) {
-        auto symmetryResult = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    if (config.symmetryDetection == SymmetryDetection::Auto && curveData != nullptr && tableSize > 0) {
+        std::vector<double> curveVec(curveData, curveData + tableSize);
+        auto symmetryResult = SymmetryAnalyzer::analyzeOddSymmetry(curveVec);
         useSymmetricMode = (symmetryResult.score >= config.symmetryThreshold);
     }
     // If Never: useSymmetricMode remains false
@@ -596,12 +627,12 @@ std::vector<SplineAnchor> SplineFitter::greedySplineFit(const std::vector<Sample
 // Helper Methods for Greedy Spline Fitting
 
 std::vector<SplineAnchor> SplineFitter::initializeAnchorsFromIndices(const std::vector<Sample>& samples,
-                                                                      const LayeredTransferFunction& ltf,
+                                                                      int tableSize, double minValue, double maxValue,
                                                                       const std::vector<int>& mandatoryIndices) {
     std::vector<SplineAnchor> anchors;
 
     for (const int tableIdx : mandatoryIndices) {
-        const double targetX = ltf.normalizeIndex(tableIdx);
+        const double targetX = normalizeIndex(tableIdx, tableSize, minValue, maxValue);
 
         // Find closest sample to this x coordinate
         size_t closestIdx = 0;

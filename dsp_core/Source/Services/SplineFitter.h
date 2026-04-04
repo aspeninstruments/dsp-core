@@ -1,18 +1,18 @@
 #pragma once
 #include "../SplineTypes.h"
-#include "../LayeredTransferFunction.h"
+#include <vector>
 
 namespace dsp_core::Services {
 
 /**
  * SplineFitter - Pure service for spline curve fitting
  *
- * Converts painted baseLayer curve to control points + cubic Hermite spline
+ * Converts curve data (raw array) to control points + cubic Hermite spline
  * using feature-based initialization and greedy error-driven refinement.
  *
  * Algorithm (5 stages):
  *   1. Feature Detection: identify extrema and inflection points
- *   2. Sample & Sanitize: baseLayer → clean polyline
+ *   2. Sample & Sanitize: curve data → clean polyline
  *   3. Greedy Fitting: feature anchors + error-driven refinement
  *   4. Tangent Computation: compute Fritsch-Carlson monotone tangents
  *   5. Error Analysis: compute fit quality metrics
@@ -24,8 +24,18 @@ namespace dsp_core::Services {
  */
 class SplineFitter {
   public:
-    // Main API: Fit painted curve to spline anchors
-    static SplineFitResult fitCurve(const LayeredTransferFunction& ltf,
+    /**
+     * Fit a spline to raw curve data.
+     *
+     * @param curveData  Array of curve samples (e.g., Lane::curveData)
+     * @param tableSize  Number of samples in the array
+     * @param minValue   Minimum x value (typically -1.0)
+     * @param maxValue   Maximum x value (typically 1.0)
+     * @param config     Fitting configuration
+     * @return Fit result with anchors and error metrics
+     */
+    static SplineFitResult fitCurve(const double* curveData, int tableSize,
+                                    double minValue, double maxValue,
                                     const SplineFitConfig& config = SplineFitConfig::tight());
 
     // Tangent computation (exposed for manual anchor manipulation)
@@ -38,7 +48,9 @@ class SplineFitter {
     struct Sample {
         double x, y;
     };
-    static std::vector<Sample> sampleAndSanitize(const LayeredTransferFunction& ltf, const SplineFitConfig& config);
+    static std::vector<Sample> sampleAndSanitize(const double* curveData, int tableSize,
+                                                  double minValue, double maxValue,
+                                                  const SplineFitConfig& config);
 
     // Sub-steps of sanitize
     static void sortByX(std::vector<Sample>& samples);
@@ -61,7 +73,8 @@ class SplineFitter {
     // Greedy spline fitting (replaces RDP + refinement)
     // Now uses feature-based anchor placement: starts with mandatory feature anchors
     static std::vector<SplineAnchor> greedySplineFit(const std::vector<Sample>& samples, const SplineFitConfig& config,
-                                                     const LayeredTransferFunction* ltf = nullptr,
+                                                     const double* curveData = nullptr, int tableSize = 0,
+                                                     double minValue = -1.0, double maxValue = 1.0,
                                                      const std::vector<int>& mandatoryAnchorIndices = {});
 
     // Find sample with worst fit error
@@ -75,7 +88,7 @@ class SplineFitter {
 
     // Helper methods for greedySplineFit to reduce cognitive complexity
     static std::vector<SplineAnchor> initializeAnchorsFromIndices(const std::vector<Sample>& samples,
-                                                                   const LayeredTransferFunction& ltf,
+                                                                   int tableSize, double minValue, double maxValue,
                                                                    const std::vector<int>& mandatoryIndices);
 
     // Insert anchor pair in symmetric mode. Returns number of anchors added (1 or 2)
@@ -84,6 +97,12 @@ class SplineFitter {
 
     // Insert single anchor in asymmetric mode. Returns true if anchor was inserted
     static bool insertAnchorAsymmetric(std::vector<SplineAnchor>& anchors, const Sample& worstSample);
+
+    // Coordinate mapping helper
+    static double normalizeIndex(int index, int tableSize, double minValue, double maxValue);
+
+    // Catmull-Rom interpolation for reading curve data at arbitrary x positions
+    static double interpolateCurve(const double* curveData, int tableSize, double minValue, double maxValue, double x);
 
     SplineFitter() = delete; // Pure static utility
 };

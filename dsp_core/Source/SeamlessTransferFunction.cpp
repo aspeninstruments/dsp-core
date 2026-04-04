@@ -30,9 +30,7 @@ namespace dsp_core {
  */
 class SeamlessTransferFunction::Impl {
   public:
-    Impl()
-        : editingModel(TABLE_SIZE, MIN_VALUE, MAX_VALUE) {
-        // editingModel initialized to identity
+    Impl() {
         // laneMixer initialized to defaults (H1=1.0 → y=x)
         // audioEngine initialized to identity LUTs (in AudioEngine constructor)
         // renderer and timers are null (created in startSeamlessUpdates)
@@ -43,9 +41,6 @@ class SeamlessTransferFunction::Impl {
             visualizerLUT[i] = x;
         }
     }
-
-    // Editing model (message thread only — controller/modes still write here)
-    LayeredTransferFunction editingModel;
 
     // Lane mixer (message thread only — render pipeline reads from here)
     LaneMixer laneMixer;
@@ -74,7 +69,7 @@ class SeamlessTransferFunction::Impl {
 
 SeamlessTransferFunction::SeamlessTransferFunction()
     : pimpl(std::make_unique<Impl>()) {
-    // editingModel already initialized in Impl constructor
+    // laneMixer initialized to defaults in Impl constructor
     // audioEngine already initialized (identity LUTs)
     // Worker thread and poller NOT created yet (deferred to startSeamlessUpdates)
 }
@@ -96,14 +91,6 @@ SeamlessTransferFunction::~SeamlessTransferFunction() {
     }
 
     // pimpl destruction handles the rest
-}
-
-LayeredTransferFunction& SeamlessTransferFunction::getEditingModel() {
-    return pimpl->editingModel;
-}
-
-const LayeredTransferFunction& SeamlessTransferFunction::getEditingModel() const {
-    return pimpl->editingModel;
 }
 
 LaneMixer& SeamlessTransferFunction::getLaneMixer() {
@@ -250,8 +237,7 @@ void SeamlessTransferFunction::renderLUTImmediate() {
 
     // Set metadata
     outputBuffer->version = mixer.getVersion();
-    outputBuffer->extrapolationMode = static_cast<LayeredTransferFunction::ExtrapolationMode>(
-        mixer.getExtrapolationMode());
+    outputBuffer->extrapolationMode = mixer.getExtrapolationMode();
 
     // Signal audio thread that new LUT is ready (using release to ensure LUT writes are visible)
     pimpl->audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);

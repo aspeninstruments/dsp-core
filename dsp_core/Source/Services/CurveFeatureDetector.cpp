@@ -1,24 +1,25 @@
 #include "CurveFeatureDetector.h"
-#include "../LayeredTransferFunction.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace dsp_core::Services {
 
-// NOTE: All methods use getBaseLayerValue() instead of getCompositeValue()
-// because composite might have normalization issues during fitting.
+double CurveFeatureDetector::normalizeIndex(int index, int tableSize, double minValue, double maxValue) {
+    if (tableSize <= 1) return minValue;
+    return minValue + (maxValue - minValue) * static_cast<double>(index) / static_cast<double>(tableSize - 1);
+}
 
-CurveFeatureDetector::FeatureResult CurveFeatureDetector::detectFeatures(const LayeredTransferFunction& ltf,
+CurveFeatureDetector::FeatureResult CurveFeatureDetector::detectFeatures(const double* curveData, int tableSize,
+                                                                         double minValue, double maxValue,
                                                                          const FeatureDetectionConfig& config) {
     FeatureResult result;
-    const int tableSize = ltf.getTableSize();
 
     // Compute vertical metrics for significance thresholds
-    double minY = ltf.getBaseLayerValue(0);
-    double maxY = ltf.getBaseLayerValue(0);
+    double minY = curveData[0];
+    double maxY = curveData[0];
     for (int i = 1; i < tableSize; ++i) {
-        const double y = ltf.getBaseLayerValue(i);
+        const double y = curveData[i];
         minY = std::min(minY, y);
         maxY = std::max(maxY, y);
     }
@@ -28,7 +29,7 @@ CurveFeatureDetector::FeatureResult CurveFeatureDetector::detectFeatures(const L
 
     // Detect features
     std::vector<Feature> features;
-    detectLocalExtrema(ltf, config, amplitudeThreshold, verticalCenter, result, features);
+    detectLocalExtrema(curveData, tableSize, minValue, maxValue, config, amplitudeThreshold, verticalCenter, result, features);
 
     // Build mandatory anchors list
     prioritizeFeatures(config, tableSize, result, features);
@@ -41,14 +42,14 @@ CurveFeatureDetector::FeatureResult CurveFeatureDetector::detectFeatures(const L
     return result;
 }
 
-void CurveFeatureDetector::detectLocalExtrema(const LayeredTransferFunction& ltf, const FeatureDetectionConfig& config,
+void CurveFeatureDetector::detectLocalExtrema(const double* curveData, int tableSize, double minValue, double maxValue,
+                                              const FeatureDetectionConfig& config,
                                               double amplitudeThreshold, double verticalCenter, FeatureResult& result,
                                               std::vector<Feature>& features) {
-    const int tableSize = ltf.getTableSize();
 
     for (int i = 1; i < tableSize - 1; ++i) {
-        const double deriv_prev = estimateDerivative(ltf, i - 1);
-        const double deriv = estimateDerivative(ltf, i);
+        const double deriv_prev = estimateDerivative(curveData, tableSize, minValue, maxValue, i - 1);
+        const double deriv = estimateDerivative(curveData, tableSize, minValue, maxValue, i);
 
         // Detect derivative sign changes (local extrema)
         const bool hasSignChange = (deriv_prev * deriv < 0.0);
@@ -59,7 +60,7 @@ void CurveFeatureDetector::detectLocalExtrema(const LayeredTransferFunction& ltf
             continue;
         }
 
-        const double y = ltf.getBaseLayerValue(i);
+        const double y = curveData[i];
 
         if (config.enableSignificanceFiltering) {
             // Local prominence filtering - measure how much extremum stands out
@@ -72,7 +73,7 @@ void CurveFeatureDetector::detectLocalExtrema(const LayeredTransferFunction& ltf
             for (int j = windowStart; j <= windowEnd; ++j) {
                 if (j == i)
                     continue;
-                const double y_j = ltf.getBaseLayerValue(j);
+                const double y_j = curveData[j];
                 neighborMin = std::min(neighborMin, y_j);
                 neighborMax = std::max(neighborMax, y_j);
             }
@@ -123,34 +124,26 @@ void CurveFeatureDetector::prioritizeFeatures(const FeatureDetectionConfig& conf
     }
 }
 
-double CurveFeatureDetector::estimateDerivative(const LayeredTransferFunction& ltf, int idx) {
-    const int tableSize = ltf.getTableSize();
-
+double CurveFeatureDetector::estimateDerivative(const double* curveData, int tableSize, double minValue, double maxValue, int idx) {
     // Forward difference for first point
     if (idx == 0) {
-        double x0 = ltf.normalizeIndex(0);
-        double x1 = ltf.normalizeIndex(1);
-        double y0 = ltf.getBaseLayerValue(0);
-        double y1 = ltf.getBaseLayerValue(1);
-        return (y1 - y0) / (x1 - x0);
+        double x0 = normalizeIndex(0, tableSize, minValue, maxValue);
+        double x1 = normalizeIndex(1, tableSize, minValue, maxValue);
+        return (curveData[1] - curveData[0]) / (x1 - x0);
     }
 
     // Backward difference for last point
     if (idx == tableSize - 1) {
-        double x0 = ltf.normalizeIndex(tableSize - 2);
-        double x1 = ltf.normalizeIndex(tableSize - 1);
-        double y0 = ltf.getBaseLayerValue(tableSize - 2);
-        double y1 = ltf.getBaseLayerValue(tableSize - 1);
-        return (y1 - y0) / (x1 - x0);
+        double x0 = normalizeIndex(tableSize - 2, tableSize, minValue, maxValue);
+        double x1 = normalizeIndex(tableSize - 1, tableSize, minValue, maxValue);
+        return (curveData[tableSize - 1] - curveData[tableSize - 2]) / (x1 - x0);
     }
 
     // Central difference for interior points
-    double x0 = ltf.normalizeIndex(idx - 1);
-    double x1 = ltf.normalizeIndex(idx + 1);
-    double y0 = ltf.getBaseLayerValue(idx - 1);
-    double y1 = ltf.getBaseLayerValue(idx + 1);
+    double x0 = normalizeIndex(idx - 1, tableSize, minValue, maxValue);
+    double x1 = normalizeIndex(idx + 1, tableSize, minValue, maxValue);
 
-    return (y1 - y0) / (x1 - x0);
+    return (curveData[idx + 1] - curveData[idx - 1]) / (x1 - x0);
 }
 
 } // namespace dsp_core::Services

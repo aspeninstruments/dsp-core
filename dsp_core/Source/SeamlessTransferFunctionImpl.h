@@ -1,6 +1,5 @@
 #pragma once
 
-#include "LayeredTransferFunction.h"
 #include "LaneMixer.h"
 #include <array>
 #include <atomic>
@@ -47,8 +46,8 @@ enum class BufferRole {
 struct LUTBuffer {
     std::array<double, TABLE_SIZE> data;
     uint64_t version{0};
-    LayeredTransferFunction::ExtrapolationMode extrapolationMode{
-        LayeredTransferFunction::ExtrapolationMode::Clamp};
+    LaneMixer::ExtrapolationMode extrapolationMode{
+        LaneMixer::ExtrapolationMode::Clamp};
 };
 
 /**
@@ -260,8 +259,8 @@ struct RenderJob {
     std::array<double, TABLE_SIZE> sumData;
 
     // Extrapolation mode (affects LUT boundary behavior in AudioEngine)
-    LayeredTransferFunction::ExtrapolationMode extrapolationMode{
-        LayeredTransferFunction::ExtrapolationMode::Clamp};
+    LaneMixer::ExtrapolationMode extrapolationMode{
+        LaneMixer::ExtrapolationMode::Clamp};
 
     // Version stamp
     uint64_t version{0};

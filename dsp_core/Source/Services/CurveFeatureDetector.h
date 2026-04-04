@@ -3,9 +3,6 @@
 
 namespace dsp_core {
 
-// Forward declaration to break circular dependency
-class LayeredTransferFunction;
-
 /**
  * Configuration for feature detection and significance filtering
  */
@@ -93,23 +90,29 @@ class CurveFeatureDetector {
     /**
      * Detect all geometric features requiring spline anchors
      *
-     * @param ltf Input transfer function (base layer)
+     * @param curveData Raw curve samples
+     * @param tableSize Number of samples
+     * @param minValue Minimum x value (typically -1.0)
+     * @param maxValue Maximum x value (typically 1.0)
      * @param config Configuration for detection and filtering (optional)
      * @return Feature indices (table indices, not normalized coordinates)
      */
-    static FeatureResult detectFeatures(const LayeredTransferFunction& ltf,
+    static FeatureResult detectFeatures(const double* curveData, int tableSize,
+                                        double minValue, double maxValue,
                                         const FeatureDetectionConfig& config = FeatureDetectionConfig{});
 
   private:
     CurveFeatureDetector() = delete; // Pure static service
 
     /**
-     * Estimate first derivative at index using central difference
-     * @param ltf Input transfer function
-     * @param idx Table index
-     * @return Estimated dy/dx
+     * Compute normalized x position from table index
      */
-    static double estimateDerivative(const LayeredTransferFunction& ltf, int idx);
+    static double normalizeIndex(int index, int tableSize, double minValue, double maxValue);
+
+    /**
+     * Estimate first derivative at index using central difference
+     */
+    static double estimateDerivative(const double* curveData, int tableSize, double minValue, double maxValue, int idx);
 
     // Internal feature representation for prioritization
     struct Feature {
@@ -118,7 +121,8 @@ class CurveFeatureDetector {
     };
 
     // Helper methods to reduce cognitive complexity
-    static void detectLocalExtrema(const LayeredTransferFunction& ltf, const FeatureDetectionConfig& config,
+    static void detectLocalExtrema(const double* curveData, int tableSize, double minValue, double maxValue,
+                                   const FeatureDetectionConfig& config,
                                    double amplitudeThreshold, double verticalCenter, FeatureResult& result,
                                    std::vector<Feature>& features);
 

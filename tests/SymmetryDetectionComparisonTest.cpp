@@ -38,6 +38,14 @@ class SymmetryDetectionComparisonTest : public ::testing::Test {
         ltf = std::make_unique<LayeredTransferFunction>(kTableSize, -1.0, 1.0);
     }
 
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
     // Metrics captured for each fit
     struct FitMetrics {
         double maxError = 0.0;
@@ -115,7 +123,10 @@ class SymmetryDetectionComparisonTest : public ::testing::Test {
         config.maxAnchors = 48; // Allow enough anchors for complex curves
         config.positionTolerance = 0.01; // Reasonable tolerance for comparison
 
-        auto result = SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+        auto result = SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         FitMetrics metrics;
         metrics.maxError = result.maxError;

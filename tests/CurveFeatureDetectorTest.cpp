@@ -55,6 +55,22 @@ class CurveFeatureDetectorTest : public ::testing::Test {
     }
 
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
+
+    [[nodiscard]] std::vector<double> extractCurveData() const {
+        std::vector<double> data(static_cast<size_t>(ltf->getTableSize()));
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[static_cast<size_t>(i)] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
+    [[nodiscard]] static std::vector<double> extractCurveData(const dsp_core::LayeredTransferFunction& src) {
+        std::vector<double> data(static_cast<size_t>(src.getTableSize()));
+        for (int i = 0; i < src.getTableSize(); ++i) {
+            data[static_cast<size_t>(i)] = src.getBaseLayerValue(i);
+        }
+        return data;
+    }
 };
 
 // ============================================================================
@@ -63,7 +79,7 @@ class CurveFeatureDetectorTest : public ::testing::Test {
 
 TEST_F(CurveFeatureDetectorTest, DetectsNoExtremaInMonotonicTanh) {
     createTanhCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     EXPECT_EQ(0, features.localExtrema.size()) << "Tanh is monotonic, should have no local extrema";
     // NOTE: Inflection point detection is not yet implemented in CurveFeatureDetector
@@ -74,7 +90,7 @@ TEST_F(CurveFeatureDetectorTest, DetectsNoExtremaInMonotonicTanh) {
 
 TEST_F(CurveFeatureDetectorTest, DetectsSineExtrema) {
     createSineCurve(2); // 2 full periods
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     // 2 periods of sine have 4 extrema (2 peaks + 2 valleys)
     EXPECT_GE(features.localExtrema.size(), 3) << "2 periods of sine should have ~4 extrema";
@@ -83,7 +99,7 @@ TEST_F(CurveFeatureDetectorTest, DetectsSineExtrema) {
 
 TEST_F(CurveFeatureDetectorTest, DetectsCubicInflection) {
     createCubicCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     EXPECT_EQ(0, features.localExtrema.size()) << "x³ is monotonic, no local extrema";
     // NOTE: Inflection point detection is not yet implemented in CurveFeatureDetector
@@ -93,7 +109,7 @@ TEST_F(CurveFeatureDetectorTest, DetectsCubicInflection) {
 
 TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsIncludeEndpoints) {
     createLinearCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     EXPECT_GE(features.mandatoryAnchors.size(), 2) << "Must always have at least endpoints";
     EXPECT_EQ(0, features.mandatoryAnchors.front()) << "First anchor should be index 0";
@@ -102,7 +118,7 @@ TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsIncludeEndpoints) {
 
 TEST_F(CurveFeatureDetectorTest, LinearCurveHasNoFeatures) {
     createLinearCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     EXPECT_EQ(0, features.localExtrema.size()) << "Linear curve has no extrema";
     EXPECT_EQ(0, features.inflectionPoints.size()) << "Linear curve has no inflection points";
@@ -115,7 +131,7 @@ TEST_F(CurveFeatureDetectorTest, LinearCurveHasNoFeatures) {
 
 TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsAreSorted) {
     createSineCurve(2);
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     for (size_t i = 1; i < features.mandatoryAnchors.size(); ++i) {
         EXPECT_LT(features.mandatoryAnchors[i - 1], features.mandatoryAnchors[i])
@@ -125,7 +141,7 @@ TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsAreSorted) {
 
 TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsAreUnique) {
     createSineCurve(2);
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     for (size_t i = 1; i < features.mandatoryAnchors.size(); ++i) {
         EXPECT_NE(features.mandatoryAnchors[i - 1], features.mandatoryAnchors[i])
@@ -135,7 +151,7 @@ TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsAreUnique) {
 
 TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsIncludeAllExtrema) {
     createSineCurve(1);
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     // All local extrema should be in mandatory anchors
     for (int const extremumIdx : features.localExtrema) {
@@ -147,7 +163,7 @@ TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsIncludeAllExtrema) {
 
 TEST_F(CurveFeatureDetectorTest, MandatoryAnchorsIncludeAllInflectionPoints) {
     createCubicCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     // All inflection points should be in mandatory anchors
     for (int const inflectionIdx : features.inflectionPoints) {
@@ -167,7 +183,7 @@ TEST_F(CurveFeatureDetectorTest, HandlesConstantCurve) {
         ltf->setBaseLayerValue(i, 0.5);
     }
 
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     EXPECT_EQ(0, features.localExtrema.size()) << "Constant curve has no extrema";
     EXPECT_EQ(0, features.inflectionPoints.size()) << "Constant curve has no inflection points";
@@ -181,7 +197,7 @@ TEST_F(CurveFeatureDetectorTest, HandlesStepFunction) {
         ltf->setBaseLayerValue(i, x < 0.0 ? -0.5 : 0.5);
     }
 
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     // Step function has discontinuous derivative, may or may not detect extremum
     // Just verify we get reasonable output
@@ -195,7 +211,7 @@ TEST_F(CurveFeatureDetectorTest, HandlesStepFunction) {
 
 TEST_F(CurveFeatureDetectorTest, DerivativeEstimationIsReasonable) {
     createLinearCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     // For linear curve, derivative should be constant (slope = 1)
     // No sign changes means no extrema
@@ -204,7 +220,7 @@ TEST_F(CurveFeatureDetectorTest, DerivativeEstimationIsReasonable) {
 
 TEST_F(CurveFeatureDetectorTest, SecondDerivativeDetectsInflection) {
     createCubicCurve();
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue()); })();
 
     // NOTE: Inflection point detection (d²y/dx² sign changes) is not yet implemented
     // The CurveFeatureDetector only detects local extrema (dy/dx sign changes)
@@ -255,7 +271,7 @@ TEST_F(CurveFeatureDetectorTest, SignificanceFilter_NoisyScribble_FiltersMinorBu
     // Apply significance filtering: 2% threshold (should filter out 0.1% bumps but keep 15% peaks)
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.02; // 2% of vertical range
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     // Should detect only the 3 major peaks (each has 2 extrema = 6 total)
     // Plus some noise that passes the threshold
@@ -275,7 +291,7 @@ TEST_F(CurveFeatureDetectorTest, SignificanceFilter_SmoothCurve_NoFalsePositives
 
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.01; // Even with low threshold
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     EXPECT_EQ(0, features.localExtrema.size()) << "Smooth monotonic tanh should have no extrema";
 }
@@ -291,7 +307,7 @@ TEST_F(CurveFeatureDetectorTest, SignificanceFilter_LargeExtrema_AllPreserved) {
     // Note: With 256 samples over 2 periods, local amplitude at peaks is relatively small
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.001; // 0.1% of range (very permissive)
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     // Sine wave has full amplitude (2.0 range), so all extrema should be preserved
     // 2 periods = 2 peaks + 2 valleys = 4 extrema
@@ -332,6 +348,22 @@ class ExactExtremaPositioningTest : public ::testing::Test {
     }
 
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
+
+    [[nodiscard]] std::vector<double> extractCurveData() const {
+        std::vector<double> data(static_cast<size_t>(ltf->getTableSize()));
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[static_cast<size_t>(i)] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
+    [[nodiscard]] static std::vector<double> extractCurveData(const dsp_core::LayeredTransferFunction& src) {
+        std::vector<double> data(static_cast<size_t>(src.getTableSize()));
+        for (int i = 0; i < src.getTableSize(); ++i) {
+            data[static_cast<size_t>(i)] = src.getBaseLayerValue(i);
+        }
+        return data;
+    }
 };
 
 /**
@@ -358,7 +390,7 @@ TEST_F(ExactExtremaPositioningTest, Harmonic3_ExactExtremaAt_PlusMinusHalf) {
     // Disable significance filtering to test raw extrema detection
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.0; // Disable filtering
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     // Should detect 2 extrema (peaks at x = ±0.5)
     EXPECT_EQ(2, features.localExtrema.size()) << "Harmonic 3 has exactly 2 extrema";
@@ -395,7 +427,7 @@ TEST_F(ExactExtremaPositioningTest, Harmonic5_ExactExtremaPositions) {
 
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.0; // Disable filtering
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     // Should detect 4 extrema
     EXPECT_EQ(4, features.localExtrema.size()) << "Harmonic 5 has exactly 4 extrema";
@@ -439,7 +471,7 @@ TEST_F(ExactExtremaPositioningTest, Parabola_ExtremumAtExactVertex) {
 
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.0; // Disable filtering
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     // Should detect 1 extremum (peak)
     EXPECT_EQ(1, features.localExtrema.size()) << "Parabola has exactly 1 extremum";
@@ -470,7 +502,7 @@ TEST_F(ExactExtremaPositioningTest, Harmonic40_AllExtremaAtExactPositions) {
 
     dsp_core::FeatureDetectionConfig config;
     config.significanceThreshold = 0.0; // Disable filtering
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto features = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
 
     // Should detect 39 extrema (Chebyshev T_n has n-1 extrema)
     // Note: May detect 40 if boundary is included - accept 39-40
@@ -544,7 +576,8 @@ TEST_F(ExactExtremaPositioningTest, DiscretizationError_DemonstrateIssue) {
         ltfCoarse->setBaseLayerValue(i, y);
     }
 
-    auto featuresCoarse = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltfCoarse, config);
+    auto curveCoarse = extractCurveData(*ltfCoarse);
+    auto featuresCoarse = dsp_core::Services::CurveFeatureDetector::detectFeatures(curveCoarse.data(), static_cast<int>(curveCoarse.size()), ltfCoarse->getMinSignalValue(), ltfCoarse->getMaxSignalValue(), config);
 
     // Expected extrema at x = ±0.5
     std::vector<double> positionsCoarse;
@@ -568,7 +601,7 @@ TEST_F(ExactExtremaPositioningTest, DiscretizationError_DemonstrateIssue) {
         ltf->setBaseLayerValue(i, y);
     }
 
-    auto featuresFine = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, config);
+    auto featuresFine = ([&]() { auto c = extractCurveData(); return dsp_core::Services::CurveFeatureDetector::detectFeatures(c.data(), static_cast<int>(c.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config); })();
     auto positionsFine = getExtremaPositions(featuresFine);
 
     double fineError = 0.0;

@@ -64,6 +64,14 @@ class HarmonicAnchorDistributionTest : public ::testing::Test {
                   << "%)" << '\n';
     }
 
+    std::vector<double> extractCurveData() const {
+        std::vector<double> data(ltf->getTableSize());
+        for (int i = 0; i < ltf->getTableSize(); ++i) {
+            data[i] = ltf->getBaseLayerValue(i);
+        }
+        return data;
+    }
+
     std::unique_ptr<dsp_core::LayeredTransferFunction> ltf;
 };
 
@@ -76,7 +84,11 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic3_FeatureDetection) {
     // Show what features are detected
     dsp_core::FeatureDetectionConfig featureConfig;
     featureConfig.maxFeatures = 100;
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, featureConfig);
+    auto curveData = extractCurveData();
+
+    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
 
     std::cout << "\n=== H3 Feature Detection ===" << '\n';
     std::cout << "Local extrema: " << features.localExtrema.size() << '\n';
@@ -86,7 +98,9 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic3_FeatureDetection) {
         std::cout << "  Extremum " << i << ": x=" << x << '\n';
     }
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result.success);
 
     analyzeAnchorDistribution(result.anchors, 3);
@@ -99,7 +113,11 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic3_NoFeatureDetection) {
     auto config = dsp_core::SplineFitConfig::tight();
     config.enableFeatureDetection = false;
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto curveData = extractCurveData();
+
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result.success);
 
     std::cout << "\n=== NO Feature Detection (Pure Greedy) ===" << '\n';
@@ -115,12 +133,18 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic5_FeatureDetection) {
     // Show what features are detected
     dsp_core::FeatureDetectionConfig featureConfig;
     featureConfig.maxFeatures = 100;
-    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(*ltf, featureConfig);
+    auto curveData = extractCurveData();
+
+    auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
 
     std::cout << "\n=== H5 Feature Detection ===" << '\n';
     std::cout << "Local extrema: " << features.localExtrema.size() << '\n';
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curveData.data(), static_cast<int>(curveData.size()),
+        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result.success);
 
     analyzeAnchorDistribution(result.anchors, 5);
@@ -134,7 +158,11 @@ TEST_F(HarmonicAnchorDistributionTest, NoBoundaryClusteringRegression) {
     // Test H3
     {
         setHarmonicCurve(3);
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         ASSERT_TRUE(result.success);
 
         // Count anchors near boundaries
@@ -161,7 +189,11 @@ TEST_F(HarmonicAnchorDistributionTest, NoBoundaryClusteringRegression) {
     // Test H5
     {
         setHarmonicCurve(5);
-        auto result = dsp_core::Services::SplineFitter::fitCurve(*ltf, config);
+        auto curveData = extractCurveData();
+
+        auto result = dsp_core::Services::SplineFitter::fitCurve(
+            curveData.data(), static_cast<int>(curveData.size()),
+            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         ASSERT_TRUE(result.success);
 
         int nearMinusOne = 0;

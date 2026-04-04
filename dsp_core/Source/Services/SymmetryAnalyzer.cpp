@@ -1,70 +1,9 @@
 #include "SymmetryAnalyzer.h"
-#include "../LayeredTransferFunction.h"
 #include <cmath>
 #include <numeric>
 #include <algorithm>
 
 namespace dsp_core::Services {
-
-SymmetryAnalyzer::Result SymmetryAnalyzer::analyzeOddSymmetry(const LayeredTransferFunction& ltf,
-                                                              const Config& config) {
-
-    Result result;
-    result.centerX = 0.0; // Assume symmetry about origin
-
-    // Sample curve at complementary points
-    std::vector<double> fPositive, fNegative;
-    fPositive.reserve(config.sampleCount);
-    fNegative.reserve(config.sampleCount);
-
-    const int tableSize = ltf.getTableSize();
-    const int centerIdx = tableSize / 2;
-
-    // Sample from center to right edge
-    for (int i = 0; i < config.sampleCount; ++i) {
-        // Map to [0, tableSize/2] range
-        const double t = static_cast<double>(i) / (config.sampleCount - 1);
-        const int positiveIdx = centerIdx + static_cast<int>(t * (tableSize - centerIdx - 1));
-        const int negativeIdx = centerIdx - static_cast<int>(t * centerIdx);
-
-        // Evaluate at the x positions (includes base + harmonics, ignores spline)
-        const double xPositive = ltf.normalizeIndex(positiveIdx);
-        const double xNegative = ltf.normalizeIndex(negativeIdx);
-
-        const double yPositive = ltf.evaluateBaseAndHarmonics(xPositive);
-        const double yNegative = ltf.evaluateBaseAndHarmonics(xNegative);
-
-        fPositive.push_back(yPositive);
-        fNegative.push_back(yNegative);
-    }
-
-    // CRITICAL: Check zero-crossing at origin for odd symmetry
-    // For odd symmetry f(-x) = -f(x), we must have f(0) = 0
-    // If |f(0)| > tolerance, the curve cannot be odd-symmetric
-    const double yAtZero = ltf.evaluateBaseAndHarmonics(0.0);
-    const double zeroCrossingTolerance = 0.1; // 10% tolerance
-
-    if (std::abs(yAtZero) > zeroCrossingTolerance) {
-        // Curve doesn't cross zero → NOT odd-symmetric
-        result.score = 0.0;
-        result.classification = Result::Classification::Asymmetric;
-        return result;
-    }
-
-    // Compute symmetry score (correlation between f(x) and -f(-x))
-    result.score = computeSymmetryScore(fPositive, fNegative);
-
-    // Classify based on thresholds
-    if (result.score >= config.perfectThreshold) {
-        result.classification = Result::Classification::Perfect;
-    } else if (result.score >= config.approximateThreshold) {
-        result.classification = Result::Classification::Approximate;
-    } else {
-        result.classification = Result::Classification::Asymmetric;
-    }
-
-    return result;
-}
 
 double SymmetryAnalyzer::computeSymmetryScore(const std::vector<double>& fPositive,
                                               const std::vector<double>& fNegative) {
@@ -107,10 +46,6 @@ double SymmetryAnalyzer::computeSymmetryScore(const std::vector<double>& fPositi
 
     // Clamp to [0, 1] range (negative correlation = asymmetric)
     return std::max(0.0, std::min(1.0, correlation));
-}
-
-SymmetryAnalyzer::Result SymmetryAnalyzer::analyzeOddSymmetry(const LayeredTransferFunction& ltf) {
-    return analyzeOddSymmetry(ltf, Config{});
 }
 
 SymmetryAnalyzer::Result SymmetryAnalyzer::analyzeOddSymmetry(const std::vector<double>& curveData,
