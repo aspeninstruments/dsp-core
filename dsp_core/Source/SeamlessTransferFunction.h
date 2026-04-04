@@ -31,7 +31,7 @@ namespace dsp_core {
  *   - Memory overhead: ~1.4MB (393KB triple-buffered LUTs + ~1MB job queue)
  *
  * REUSABILITY:
- *   - Drop-in replacement for LayeredTransferFunction
+ *   - Renders the weighted sum of LaneMixer lanes into a production LUT
  *   - Can be reused across multiple Aspen Instruments plugins
  *   - No plugin-specific dependencies
  */
@@ -172,7 +172,7 @@ class SeamlessTransferFunction {
      *   - The next processBlock() will use the newly rendered LUT
      *
      * Typical Usage:
-     *   transferFunction.getEditingModel().fromValueTree(savedState);
+     *   transferFunction.getLaneMixer().fromValueTree(savedState);
      *   transferFunction.renderLUTImmediate();  // Audio LUT now matches restored state
      */
     void renderLUTImmediate();
