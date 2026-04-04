@@ -113,4 +113,58 @@ SymmetryAnalyzer::Result SymmetryAnalyzer::analyzeOddSymmetry(const LayeredTrans
     return analyzeOddSymmetry(ltf, Config{});
 }
 
+SymmetryAnalyzer::Result SymmetryAnalyzer::analyzeOddSymmetry(const std::vector<double>& curveData,
+                                                              const Config& config) {
+    Result result;
+    result.centerX = 0.0;
+
+    const int tableSize = static_cast<int>(curveData.size());
+    if (tableSize < 3) {
+        result.score = 0.0;
+        result.classification = Result::Classification::Asymmetric;
+        return result;
+    }
+
+    const int centerIdx = tableSize / 2;
+
+    // Check zero-crossing at origin
+    const double zeroCrossingTolerance = 0.1;
+    if (std::abs(curveData[static_cast<size_t>(centerIdx)]) > zeroCrossingTolerance) {
+        result.score = 0.0;
+        result.classification = Result::Classification::Asymmetric;
+        return result;
+    }
+
+    // Sample complementary points for correlation
+    std::vector<double> fPositive;
+    std::vector<double> fNegative;
+    fPositive.reserve(config.sampleCount);
+    fNegative.reserve(config.sampleCount);
+
+    for (int i = 0; i < config.sampleCount; ++i) {
+        const double t = static_cast<double>(i) / (config.sampleCount - 1);
+        const int positiveIdx = centerIdx + static_cast<int>(t * (tableSize - centerIdx - 1));
+        const int negativeIdx = centerIdx - static_cast<int>(t * centerIdx);
+
+        fPositive.push_back(curveData[static_cast<size_t>(positiveIdx)]);
+        fNegative.push_back(curveData[static_cast<size_t>(negativeIdx)]);
+    }
+
+    result.score = computeSymmetryScore(fPositive, fNegative);
+
+    if (result.score >= config.perfectThreshold) {
+        result.classification = Result::Classification::Perfect;
+    } else if (result.score >= config.approximateThreshold) {
+        result.classification = Result::Classification::Approximate;
+    } else {
+        result.classification = Result::Classification::Asymmetric;
+    }
+
+    return result;
+}
+
+SymmetryAnalyzer::Result SymmetryAnalyzer::analyzeOddSymmetry(const std::vector<double>& curveData) {
+    return analyzeOddSymmetry(curveData, Config{});
+}
+
 } // namespace dsp_core::Services

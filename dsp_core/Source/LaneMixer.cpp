@@ -71,6 +71,40 @@ int LaneMixer::addLane(int insertAfterIndex) {
     return insertionIndex;
 }
 
+int LaneMixer::duplicateLane(int sourceLaneIndex) {
+    if (activeLaneCount_ >= MAX_LANES)
+        return -1;
+    if (!isValidIndex(sourceLaneIndex))
+        return -1;
+
+    // Copy the source lane BEFORE shifting (shift uses move semantics)
+    Lane sourceCopy(lanes_[static_cast<size_t>(sourceLaneIndex)]);
+
+    const int insertionIndex = sourceLaneIndex + 1;
+
+    // Adjust scan position to maintain continuity across the insertion
+    if (activeLaneCount_ > 1) {
+        const double scanPos = scanPosition_.load(std::memory_order_acquire);
+        const double f = scanPos * (activeLaneCount_ - 1);
+        const double fNew = (static_cast<double>(insertionIndex) <= std::ceil(f))
+                                ? f + 1.0
+                                : f;
+        const double newScanPos = std::clamp(fNew / activeLaneCount_, 0.0, 1.0);
+        scanPosition_.store(newScanPos, std::memory_order_release);
+    }
+
+    shiftLanesRight(insertionIndex);
+    activeLaneCount_++;
+
+    auto& newLane = lanes_[static_cast<size_t>(insertionIndex)];
+    newLane = std::move(sourceCopy);
+    newLane.laneId = nextLaneId_++;
+    newLane.amplitude.store(0.0, std::memory_order_relaxed);
+
+    incrementVersionIfNotBatching();
+    return insertionIndex;
+}
+
 bool LaneMixer::removeLane(int index) {
     if (!isValidIndex(index) || activeLaneCount_ <= 1)
         return false;

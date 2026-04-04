@@ -83,6 +83,14 @@ class LaneMixer {
     int addLane(int insertAfterIndex = -1);
 
     /**
+     * Duplicate an existing lane and insert the copy immediately after it.
+     * The new lane gets a fresh laneId and amplitude=0.0.
+     * Adjusts scanPosition_ to maintain scan continuity.
+     * Returns the new lane's index, or -1 if at MAX_LANES or invalid source.
+     */
+    int duplicateLane(int sourceLaneIndex);
+
+    /**
      * Remove lane at index. Returns false if invalid or activeLaneCount_ <= 1.
      */
     bool removeLane(int index);

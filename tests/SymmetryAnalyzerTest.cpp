@@ -232,3 +232,68 @@ TEST_F(SymmetryAnalyzerTest, Symmetry_ConfigThresholds_AffectClassification) {
             << "Config 2: same score but lower threshold should be Perfect";
     }
 }
+
+//==============================================================================
+// CurveData Overload Tests
+//==============================================================================
+
+TEST_F(SymmetryAnalyzerTest, CurveData_TanhVector_PerfectSymmetry) {
+    // Build a tanh curve as raw vector
+    std::vector<double> curveData(tableSize);
+    for (int i = 0; i < tableSize; ++i) {
+        const double x = -1.0 + 2.0 * static_cast<double>(i) / (tableSize - 1);
+        curveData[static_cast<size_t>(i)] = std::tanh(5.0 * x);
+    }
+
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
+
+    EXPECT_GE(result.score, 0.99);
+    EXPECT_EQ(result.classification, SymmetryAnalyzer::Result::Classification::Perfect);
+}
+
+TEST_F(SymmetryAnalyzerTest, CurveData_EvenFunction_Asymmetric) {
+    // x^2 is even, not odd-symmetric
+    std::vector<double> curveData(tableSize);
+    for (int i = 0; i < tableSize; ++i) {
+        const double x = -1.0 + 2.0 * static_cast<double>(i) / (tableSize - 1);
+        curveData[static_cast<size_t>(i)] = x * x;
+    }
+
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
+
+    EXPECT_LT(result.score, 0.90);
+    EXPECT_EQ(result.classification, SymmetryAnalyzer::Result::Classification::Asymmetric);
+}
+
+TEST_F(SymmetryAnalyzerTest, CurveData_FlatZero_PerfectSymmetry) {
+    std::vector<double> curveData(tableSize, 0.0);
+
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
+
+    EXPECT_GE(result.score, 0.99);
+}
+
+TEST_F(SymmetryAnalyzerTest, CurveData_TooSmall_Asymmetric) {
+    std::vector<double> curveData(2, 0.0);
+
+    auto result = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
+
+    EXPECT_EQ(result.classification, SymmetryAnalyzer::Result::Classification::Asymmetric);
+}
+
+TEST_F(SymmetryAnalyzerTest, CurveData_MatchesLTFResult) {
+    // Verify curveData overload produces same result as LTF overload
+    setTanh(5.0);
+
+    // Extract curve data from LTF
+    std::vector<double> curveData(tableSize);
+    for (int i = 0; i < tableSize; ++i) {
+        curveData[static_cast<size_t>(i)] = ltf->getBaseLayerValue(i);
+    }
+
+    auto ltfResult = SymmetryAnalyzer::analyzeOddSymmetry(*ltf);
+    auto curveResult = SymmetryAnalyzer::analyzeOddSymmetry(curveData);
+
+    EXPECT_NEAR(ltfResult.score, curveResult.score, 0.02);
+    EXPECT_EQ(ltfResult.classification, curveResult.classification);
+}

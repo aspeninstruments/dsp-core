@@ -716,4 +716,146 @@ TEST_F(LaneMixerScanTest, Serialization_PreservesMixerMode) {
     EXPECT_EQ(restored->getMixerMode(), dsp_core::LaneMixer::MixerMode::Scan);
 }
 
+// ============================================================================
+// DuplicateLane Tests
+// ============================================================================
+
+class LaneMixerDuplicateTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        mixer = std::make_unique<dsp_core::LaneMixer>();
+    }
+    std::unique_ptr<dsp_core::LaneMixer> mixer;
+};
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_CopiesCurveData) {
+    // Default mixer has 11 lanes. Duplicate lane 0.
+    const auto& srcCurve = mixer->getLane(0).curveData;
+    ASSERT_FALSE(srcCurve.empty());
+
+    const int newIdx = mixer->duplicateLane(0);
+    EXPECT_EQ(newIdx, 1);
+    EXPECT_EQ(mixer->getNumLanes(), 12);
+
+    const auto& newCurve = mixer->getLane(newIdx).curveData;
+    ASSERT_EQ(newCurve.size(), srcCurve.size());
+    // Source lane 0 is now still at index 0 (new lane inserted at 1)
+    const auto& srcCurveAfter = mixer->getLane(0).curveData;
+    for (size_t i = 0; i < newCurve.size(); ++i) {
+        EXPECT_DOUBLE_EQ(newCurve[i], srcCurveAfter[i]) << "at index " << i;
+    }
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_CopiesContentTypeAndMetadata) {
+    const auto& src = mixer->getLane(0);
+    const auto srcType = src.contentType;
+    const auto srcHarmonic = src.harmonicNumber;
+    const auto srcSymmetry = src.oddSymmetryEnabled;
+
+    const int newIdx = mixer->duplicateLane(0);
+    const auto& dup = mixer->getLane(newIdx);
+
+    EXPECT_EQ(dup.contentType, srcType);
+    EXPECT_EQ(dup.harmonicNumber, srcHarmonic);
+    EXPECT_EQ(dup.oddSymmetryEnabled, srcSymmetry);
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_AssignsNewLaneId) {
+    const uint32_t srcId = mixer->getLaneId(0);
+    const int newIdx = mixer->duplicateLane(0);
+    EXPECT_NE(mixer->getLaneId(newIdx), srcId);
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_AmplitudeIsZero) {
+    // Set source amplitude to 0.8, duplicate should still be 0.0
+    mixer->setLaneAmplitude(0, 0.8);
+    const int newIdx = mixer->duplicateLane(0);
+    EXPECT_DOUBLE_EQ(mixer->getLane(newIdx).amplitude.load(), 0.0);
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_PreservesAdjacentLanes) {
+    // Record lane 1's ID before duplicating lane 0
+    const uint32_t lane1Id = mixer->getLaneId(1);
+    mixer->duplicateLane(0);
+    // Old lane 1 should now be at index 2
+    EXPECT_EQ(mixer->getLaneId(2), lane1Id);
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_LastLane_AppendsAtEnd) {
+    const int lastIdx = mixer->getNumLanes() - 1;
+    const uint32_t lastId = mixer->getLaneId(lastIdx);
+    const int newIdx = mixer->duplicateLane(lastIdx);
+    EXPECT_EQ(newIdx, lastIdx + 1);
+    // Original last lane still at same index
+    EXPECT_EQ(mixer->getLaneId(lastIdx), lastId);
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_InvalidIndex_ReturnsNeg1) {
+    EXPECT_EQ(mixer->duplicateLane(-1), -1);
+    EXPECT_EQ(mixer->duplicateLane(999), -1);
+}
+
+TEST_F(LaneMixerDuplicateTest, DuplicateLane_IncrementsVersion) {
+    const auto v0 = mixer->getVersion();
+    mixer->duplicateLane(0);
+    EXPECT_GT(mixer->getVersion(), v0);
+}
+
+// ============================================================================
+// DuplicateLane Scan Position Adjustment Tests
+// ============================================================================
+
+TEST_F(LaneMixerDuplicateTest, ScanAdjust_ExactlyOnLane_InsertAfter_NoShift) {
+    // 11 lanes, scan at 0.5 → f = 0.5 * 10 = 5.0 (exactly lane 5)
+    // Duplicate lane 5 → insert at 6. Since 6 > ceil(5.0) = 5, no shift.
+    // New scan = 5.0 / 11 ≈ 0.4545
+    mixer->setScanPosition(0.5);
+    mixer->duplicateLane(5);
+    const double expected = 5.0 / 11.0;
+    EXPECT_NEAR(mixer->getScanPosition(), expected, 1e-10);
+}
+
+TEST_F(LaneMixerDuplicateTest, ScanAdjust_BetweenLanes_InsertInBlendRange_Shifts) {
+    // 11 lanes, scan at 0.55 → f = 0.55 * 10 = 5.5 (between 5 and 6)
+    // Duplicate lane 5 → insert at 6. ceil(5.5) = 6, 6 <= 6 → shift.
+    // f_new = 6.5, scan = 6.5 / 11
+    mixer->setScanPosition(0.55);
+    mixer->duplicateLane(5);
+    const double expected = 6.5 / 11.0;
+    EXPECT_NEAR(mixer->getScanPosition(), expected, 1e-10);
+}
+
+TEST_F(LaneMixerDuplicateTest, ScanAdjust_InsertBeforeScan_Shifts) {
+    // 11 lanes, scan at 0.5 → f = 5.0 (exactly lane 5)
+    // Duplicate lane 2 → insert at 3. ceil(5.0) = 5, 3 <= 5 → shift.
+    // f_new = 6.0, scan = 6.0 / 11
+    mixer->setScanPosition(0.5);
+    mixer->duplicateLane(2);
+    const double expected = 6.0 / 11.0;
+    EXPECT_NEAR(mixer->getScanPosition(), expected, 1e-10);
+}
+
+TEST_F(LaneMixerDuplicateTest, ScanAdjust_InsertAfterScan_NoShift) {
+    // 11 lanes, scan at 0.3 → f = 3.0
+    // Duplicate lane 8 → insert at 9. ceil(3.0) = 3, 9 > 3 → no shift.
+    // f_new = 3.0, scan = 3.0 / 11
+    mixer->setScanPosition(0.3);
+    mixer->duplicateLane(8);
+    const double expected = 3.0 / 11.0;
+    EXPECT_NEAR(mixer->getScanPosition(), expected, 1e-10);
+}
+
+TEST_F(LaneMixerDuplicateTest, ScanAdjust_SingleLane_NoAdjustment) {
+    // Remove all but one lane
+    while (mixer->getNumLanes() > 1) {
+        mixer->removeLane(mixer->getNumLanes() - 1);
+    }
+    ASSERT_EQ(mixer->getNumLanes(), 1);
+    mixer->setScanPosition(0.5);
+    mixer->duplicateLane(0);
+    // With 1 lane, scan adjustment is skipped (activeLaneCount was 1)
+    // After duplication we have 2 lanes. Position stays at 0.5.
+    EXPECT_DOUBLE_EQ(mixer->getScanPosition(), 0.5);
+}
+
 } // namespace dsp_core_test

@@ -103,6 +103,23 @@ class SymmetryAnalyzer {
      */
     static Result analyzeOddSymmetry(const LayeredTransferFunction& ltf);
 
+    /**
+     * Analyze odd symmetry directly from lane curve data
+     *
+     * @param curveData Raw curve samples (e.g., Lane::curveData)
+     * @param config Analysis configuration
+     * @return Symmetry analysis result
+     */
+    static Result analyzeOddSymmetry(const std::vector<double>& curveData, const Config& config);
+
+    /**
+     * Analyze odd symmetry directly from lane curve data with default configuration
+     *
+     * @param curveData Raw curve samples (e.g., Lane::curveData)
+     * @return Symmetry analysis result
+     */
+    static Result analyzeOddSymmetry(const std::vector<double>& curveData);
+
   private:
     SymmetryAnalyzer() = delete; // Pure static service
 
