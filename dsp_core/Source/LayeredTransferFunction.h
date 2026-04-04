@@ -41,7 +41,7 @@ enum class RenderingMode {
  *   Output[i] = normalizationScalar × UnNormMix[i]
  *
  * Critical: Layers (baseTable, harmonic evaluations) are NEVER modified by normalization.
- * This allows seamless coefficient mixing in TransferFunctionController.
+ * This allows seamless coefficient mixing in CurveEditorController.
  *
  * THREADING CONTRACT
  * ==================

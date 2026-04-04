@@ -68,7 +68,7 @@ void HarmonicLayer::precomputeBasisFunctions(int tableSize, double minVal, doubl
     lastTableSize = tableSize;
 }
 
-// Static helper functions - trig-based evaluation (copied from TransferFunctionController.cpp)
+// Static helper functions - trig-based evaluation (copied from CurveEditorController.cpp)
 double HarmonicLayer::evaluateChebyshevTrig(double x, const std::vector<double>& coeffs) {
     double result = 0.0;
     const int N = static_cast<int>(coeffs.size());

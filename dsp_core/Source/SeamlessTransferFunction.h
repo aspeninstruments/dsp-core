@@ -52,7 +52,7 @@ class SeamlessTransferFunction {
      *    - AudioEngine initialized to identity LUTs
      *    - Worker/poller NOT started yet
      *
-     * 2. Create controller: new TransferFunctionController(stf.getEditingModel())
+     * 2. Create controller: new CurveEditorController(stf.getEditingModel())
      *    - Controller can now mutate editing model
      *    - Still no async updates happening
      *
@@ -75,7 +75,7 @@ class SeamlessTransferFunction {
      *
      *   // Constructor (message thread):
      *   transferFunction = std::make_unique<SeamlessTransferFunction>();
-     *   controller = std::make_unique<TransferFunctionController>(
+     *   controller = std::make_unique<CurveEditorController>(
      *       transferFunction->getEditingModel()
      *   );
      *   transferFunction->startSeamlessUpdates();  // NOW safe to start
