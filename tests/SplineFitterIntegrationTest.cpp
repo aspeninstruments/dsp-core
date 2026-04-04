@@ -75,7 +75,7 @@ class SplineFitterIntegrationTest : public ::testing::Test {
     }
 
     /**
-     * Helper: Bake spline layer to base layer (simulates SplineMode behavior)
+     * Helper: Bake spline layer to base layer (simulates SplineTool behavior)
      *
      * What it does:
      *   1. Evaluates spline at all table indices
@@ -888,7 +888,7 @@ TEST_F(SplineFitterIntegrationTest, SymmetricFitting_CompareAutoVsNever_Demonstr
  *   2. No spurious zero-crossing anchor at (0,0)
  *   3. Curve shape preserved (drooping asymmetric, NOT straight line)
  */
-TEST_F(SplineFitterIntegrationTest, RegressionTest_ReenterSplineMode_FitsCorrectCurve) {
+TEST_F(SplineFitterIntegrationTest, RegressionTest_ReenterSplineTool_FitsCorrectCurve) {
     auto config = SplineFitConfig::tight();
     config.maxAnchors = 24;
     config.positionTolerance = 0.01;

@@ -508,7 +508,7 @@ TEST_F(SplineFitterTest, TanhCurves_VariousSteepness) {
 
 /**
  * Test all 40 trigonometric harmonic basis functions
- * These are the functions used in HarmonicMode:
+ * These are the functions used in LaneMixerPanel:
  * - Even harmonics: cos(n * acos(x))
  * - Odd harmonics: sin(n * asin(x))
  */
@@ -1021,7 +1021,7 @@ TEST_F(FeatureBasedFittingTest, TangentAlgorithmComparison_TanhQualityVsSpeed) {
 
 //==============================================================================
 // Harmonic Waveshaper Tests (Chebyshev-style trig functions)
-// Tests spline fitting for all 40 harmonics used in HarmonicMode
+// Tests spline fitting for all 40 harmonics used in LaneMixerPanel
 //==============================================================================
 
 /**
