@@ -150,6 +150,7 @@ void LaneMixer::setLaneAmplitude(int index, double amplitude) {
     if (!isValidIndex(index))
         return;
     lanes_[static_cast<size_t>(index)].amplitude.store(amplitude, std::memory_order_release);
+    incrementMixVersionIfNotBatching();
     incrementVersionIfNotBatching();
 }
 
@@ -226,6 +227,7 @@ void LaneMixer::setLaneCurveValue(int laneIndex, int sampleIndex, double value) 
 
 void LaneMixer::incrementVersion() {
     versionCounter_.fetch_add(1, std::memory_order_release);
+    if (onVersionChanged_) onVersionChanged_();
 }
 
 void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber) {
@@ -407,6 +409,7 @@ void LaneMixer::setMixerMode(MixerMode mode) {
 
 void LaneMixer::setScanPosition(double position) {
     scanPosition_.store(std::clamp(position, 0.0, 1.0), std::memory_order_release);
+    incrementMixVersionIfNotBatching();
     incrementVersionIfNotBatching();
 }
 
@@ -446,11 +449,17 @@ void LaneMixer::clearLaneCurveData(int index) {
 
 void LaneMixer::beginBatchUpdate() {
     batchUpdateActive_ = true;
+    batchHasMixChange_ = false;
 }
 
 void LaneMixer::endBatchUpdate() {
     batchUpdateActive_ = false;
     versionCounter_.fetch_add(1, std::memory_order_release);
+    if (batchHasMixChange_) {
+        mixVersionCounter_.fetch_add(1, std::memory_order_release);
+        batchHasMixChange_ = false;
+    }
+    if (onVersionChanged_) onVersionChanged_();
 }
 
 // ============================================================================

@@ -739,6 +739,31 @@ endif()
 
 add_test(NAME HysteresisProcessorTests COMMAND hysteresis_processor_tests)
 
+# EventDrivenRenderer tests
+add_executable(event_driven_renderer_tests
+    EventDrivenRendererTest.cpp
+)
+
+target_include_directories(event_driven_renderer_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(event_driven_renderer_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(event_driven_renderer_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(event_driven_renderer_tests)
+endif()
+
+add_test(NAME EventDrivenRendererTests COMMAND event_driven_renderer_tests)
+
 # HysteresisStage tests
 add_executable(hysteresis_stage_tests
     HysteresisStageTest.cpp

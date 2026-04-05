@@ -8,24 +8,24 @@ namespace dsp_core {
  * SeamlessTransferFunction::Impl - Private implementation with all components
  *
  * Components:
- *   - editingModel: LayeredTransferFunction (message thread only)
- *   - audioEngine: AudioEngine (audio thread)
- *   - renderer: LUTRendererThread (worker thread, DSP LUT only)
- *   - lutRenderTimer: LUTRenderTimer (20Hz, enqueues DSP render jobs)
- *   - visualizerTimer: VisualizerUpdateTimer (60Hz, direct model reads)
- *   - visualizerLUT: UI-owned LUT buffer (message thread only)
- *   - visualizerCallback: Callback for visualizer repaint (message thread)
+ *   - laneMixer: LaneMixer (message thread only — authoritative curve data)
+ *   - audioEngine: AudioEngine (audio thread — triple-buffered LUT playback)
+ *   - eventRenderer: EventDrivenRenderer (replaces LUTRenderTimer + LUTRendererThread)
+ *   - visualizerTimer: VisualizerUpdateTimer (120Hz, direct model reads)
  *
- * Two-Timer Architecture:
- *   - VisualizerUpdateTimer (60Hz): Samples model directly, updates visualizer
- *   - LUTRenderTimer (20Hz): Enqueues render jobs, guaranteed final delivery
+ * Event-Driven Architecture:
+ *   - LaneMixer::onVersionChanged callback triggers EventDrivenRenderer
+ *   - EventDrivenRenderer writes directly to triple-buffered LUT (no worker thread)
+ *   - Mix-only changes (amplitude, scan) render immediately
+ *   - Curve changes rate-limited to 60Hz with 5Hz safety timer fallback
+ *   - 5ms crossfade with interruption support for snappy automation response
  *
  * Lifecycle:
- *   1. Constructor: Creates editingModel and audioEngine (both initialized to identity)
- *   2. startSeamlessUpdates(): Creates renderer and both timers, triggers initial render
+ *   1. Constructor: Creates laneMixer and audioEngine (both initialized to identity)
+ *   2. startSeamlessUpdates(): Creates EventDrivenRenderer + visualizer timer
  *   3. prepareToPlay(): Configures audioEngine crossfade duration
  *   4. processBlock(): Audio thread processes samples with crossfade
- *   5. stopSeamlessUpdates(): Stops timers and renderer
+ *   5. stopSeamlessUpdates(): Stops renderer and timers
  *   6. Destructor: Ensures synchronous cleanup
  */
 class SeamlessTransferFunction::Impl {
@@ -33,7 +33,7 @@ class SeamlessTransferFunction::Impl {
     Impl() {
         // laneMixer initialized to defaults (H1=1.0 → y=x)
         // audioEngine initialized to identity LUTs (in AudioEngine constructor)
-        // renderer and timers are null (created in startSeamlessUpdates)
+        // eventRenderer and timers are null (created in startSeamlessUpdates)
 
         // Initialize visualizer LUT to identity (1024 samples)
         for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
@@ -48,17 +48,13 @@ class SeamlessTransferFunction::Impl {
     // Audio engine (audio thread)
     AudioEngine audioEngine;
 
-    // Worker thread (DSP LUT only, created in startSeamlessUpdates)
-    std::unique_ptr<LUTRendererThread> renderer;
+    // Event-driven renderer (replaces LUTRenderTimer + LUTRendererThread)
+    std::unique_ptr<EventDrivenRenderer> eventRenderer;
 
-    // Two separate timers for decoupled update rates
-    std::unique_ptr<LUTRenderTimer> lutRenderTimer;        // 20Hz, DSP LUT (guaranteed delivery)
-    std::unique_ptr<VisualizerUpdateTimer> visualizerTimer; // 60Hz, direct model reads
+    // Visualizer timer (120Hz, direct LaneMixer reads — independent of DSP rendering)
+    std::unique_ptr<VisualizerUpdateTimer> visualizerTimer;
 
     // Visualizer state (message thread only)
-    // NOTE: Visualizer shows the editing model directly (may be slightly ahead
-    // of audio during crossfade, but user sees their edit immediately).
-    // VISUALIZER_LUT_SIZE = 1024 samples
     std::array<double, VISUALIZER_LUT_SIZE> visualizerLUT;
     std::function<void()> visualizerCallback;
 
@@ -77,18 +73,19 @@ SeamlessTransferFunction::SeamlessTransferFunction()
 SeamlessTransferFunction::~SeamlessTransferFunction() {
     // Stop async operations before destruction
 
-    // Stop timers first (no more jobs enqueued, no more visualizer updates)
+    // Stop visualizer timer
     if (pimpl->visualizerTimer) {
         pimpl->visualizerTimer->stopTimer();
     }
-    if (pimpl->lutRenderTimer) {
-        pimpl->lutRenderTimer->stopTimer();
+
+    // Stop event-driven renderer (cancels async updates + stops safety timer)
+    if (pimpl->eventRenderer) {
+        pimpl->eventRenderer->cancelPendingUpdate();
+        pimpl->eventRenderer->stopTimer();
     }
 
-    // Stop worker thread (finish current job, then exit)
-    if (pimpl->renderer) {
-        pimpl->renderer->stopThread(2000); // 2 second timeout
-    }
+    // Clear the version change callback to prevent dangling references
+    pimpl->laneMixer.setOnVersionChanged(nullptr);
 
     // pimpl destruction handles the rest
 }
@@ -138,53 +135,47 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     // VERIFY: Not already started
-    jassert(pimpl->renderer == nullptr && pimpl->lutRenderTimer == nullptr);
+    jassert(pimpl->eventRenderer == nullptr);
 
-    // Create worker thread (DSP LUT only, no visualizer callback)
-    pimpl->renderer = std::make_unique<LUTRendererThread>(
-        pimpl->audioEngine,
-        pimpl->audioEngine.getWorkerTargetIndexReference(),
-        pimpl->audioEngine.getNewLUTReadyFlag());
+    // Create event-driven renderer (writes directly to triple buffer, no worker thread)
+    pimpl->eventRenderer = std::make_unique<EventDrivenRenderer>(
+        pimpl->laneMixer, pimpl->audioEngine);
 
-    // Pass LUT buffers pointer to worker thread (for direct writes)
-    pimpl->renderer->setLUTBuffersPointer(pimpl->audioEngine.getLUTBuffers());
+    // Wire the version change callback to trigger async rendering
+    pimpl->laneMixer.setOnVersionChanged([this]() {
+        if (pimpl->eventRenderer) {
+            pimpl->eventRenderer->triggerAsyncUpdate();
+        }
+    });
 
-    // Start worker thread
-    pimpl->renderer->startThread(juce::Thread::Priority::normal);
-
-    // Create LUT render timer (20Hz, guaranteed delivery via two-version tracking)
-    pimpl->lutRenderTimer = std::make_unique<LUTRenderTimer>(pimpl->laneMixer, *pimpl->renderer);
-    // Timer starts automatically in constructor at 20Hz
-
-    // Create visualizer timer (60Hz, direct LaneMixer reads)
+    // Create visualizer timer (120Hz, direct LaneMixer reads)
     pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->laneMixer);
     pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
     pimpl->visualizerTimer->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
-    // Timer starts automatically in constructor at 60Hz
+    // Timer starts automatically in constructor at 120Hz
 
     // Trigger initial render for both (ensures correct state immediately)
-    pimpl->lutRenderTimer->forceRender();
+    pimpl->eventRenderer->forceRender();
     pimpl->visualizerTimer->forceUpdate();
 }
 
 void SeamlessTransferFunction::stopSeamlessUpdates() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    // Stop timers first (no more jobs enqueued, no more visualizer updates)
+    // Clear callback first (prevent triggering after renderer destroyed)
+    pimpl->laneMixer.setOnVersionChanged(nullptr);
+
+    // Stop visualizer timer
     if (pimpl->visualizerTimer) {
         pimpl->visualizerTimer->stopTimer();
         pimpl->visualizerTimer.reset();
     }
 
-    if (pimpl->lutRenderTimer) {
-        pimpl->lutRenderTimer->stopTimer();
-        pimpl->lutRenderTimer.reset();
-    }
-
-    // Stop worker thread
-    if (pimpl->renderer) {
-        pimpl->renderer->stopThread(1000); // 1 second timeout
-        pimpl->renderer.reset();
+    // Stop event-driven renderer
+    if (pimpl->eventRenderer) {
+        pimpl->eventRenderer->cancelPendingUpdate();
+        pimpl->eventRenderer->stopTimer();
+        pimpl->eventRenderer.reset();
     }
 }
 
@@ -218,15 +209,23 @@ void SeamlessTransferFunction::setSelectedVisualizerLane(int laneIndex) {
     pimpl->selectedVisualizerLane = laneIndex;
 }
 
+juce::AsyncUpdater* SeamlessTransferFunction::getRenderTrigger() const {
+    return pimpl->eventRenderer.get();
+}
+
 void SeamlessTransferFunction::renderLUTImmediate() {
     // VERIFY: Called on message thread
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     auto& mixer = pimpl->laneMixer;
 
-    // Compute the mixed sum
+    // Compute the output curve based on mixer mode
     std::array<double, TABLE_SIZE> sumBuffer{};
-    mixer.computeSum(sumBuffer.data(), TABLE_SIZE);
+    if (mixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+        mixer.computeScan(sumBuffer.data(), TABLE_SIZE);
+    } else {
+        mixer.computeSum(sumBuffer.data(), TABLE_SIZE);
+    }
 
     // Get the worker target buffer (where we'll write the LUT)
     const int targetIdx = pimpl->audioEngine.getWorkerTargetIndexReference().load(std::memory_order_relaxed);

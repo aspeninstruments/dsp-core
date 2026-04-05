@@ -858,4 +858,148 @@ TEST_F(LaneMixerDuplicateTest, ScanAdjust_SingleLane_NoAdjustment) {
     EXPECT_DOUBLE_EQ(mixer->getScanPosition(), 0.5);
 }
 
+// ============================================================================
+// Mix Version Counter Tests (Phase A — Event-Driven Rendering)
+// ============================================================================
+
+TEST_F(LaneMixerTest, MixVersion_IncrementedOnSetLaneAmplitude) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setLaneAmplitude(1, 0.5);
+    EXPECT_GT(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_IncrementedOnSetScanPosition) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setScanPosition(0.5);
+    EXPECT_GT(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_NotIncrementedOnSetLaneCurveData) {
+    const auto mv0 = mixer->getMixVersion();
+    std::vector<double> data(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
+    mixer->setLaneCurveData(0, data);
+    // Full version should increment, but mix version should NOT
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_NotIncrementedOnAddLane) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->addLane();
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_NotIncrementedOnRemoveLane) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->removeLane(mixer->getNumLanes() - 1);
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_NotIncrementedOnContentTypeChange) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setLaneContentType(0, dsp_core::LaneContentType::Paint);
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_DeferredDuringBatchUpdate) {
+    const auto mv0 = mixer->getMixVersion();
+    {
+        dsp_core::LaneMixerBatchUpdateGuard guard(*mixer);
+        mixer->setLaneAmplitude(0, 0.5);
+        mixer->setLaneAmplitude(1, 0.3);
+        // During batch, mix version should not have incremented
+        EXPECT_EQ(mixer->getMixVersion(), mv0);
+    }
+    // After batch ends, should have incremented exactly once
+    EXPECT_EQ(mixer->getMixVersion(), mv0 + 1);
+}
+
+TEST_F(LaneMixerTest, MixVersion_FullVersionAlwaysIncrementsWithMix) {
+    // When amplitude changes, BOTH counters should increment
+    const auto fv0 = mixer->getVersion();
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setLaneAmplitude(1, 0.5);
+    const auto fv1 = mixer->getVersion();
+    const auto mv1 = mixer->getMixVersion();
+    EXPECT_GT(fv1, fv0);
+    EXPECT_GT(mv1, mv0);
+
+    // When curve data changes, only full version increments
+    std::vector<double> data(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
+    mixer->setLaneCurveData(0, data);
+    EXPECT_GT(mixer->getVersion(), fv1);
+    EXPECT_EQ(mixer->getMixVersion(), mv1);
+}
+
+TEST_F(LaneMixerTest, MixVersion_GetMixVersionCounterReturnsReference) {
+    // Verify that getMixVersionCounter() returns a reference to the internal counter
+    auto& counter = mixer->getMixVersionCounter();
+    const auto mv0 = counter.load(std::memory_order_acquire);
+    mixer->setLaneAmplitude(1, 0.5);
+    EXPECT_GT(counter.load(std::memory_order_acquire), mv0);
+}
+
+// ============================================================================
+// Version Changed Callback Tests (Phase A — Event-Driven Rendering)
+// ============================================================================
+
+TEST_F(LaneMixerTest, OnVersionChanged_CalledOnAmplitudeChange) {
+    int callCount = 0;
+    mixer->setOnVersionChanged([&]() { callCount++; });
+    mixer->setLaneAmplitude(1, 0.5);
+    EXPECT_EQ(callCount, 1);
+}
+
+TEST_F(LaneMixerTest, OnVersionChanged_CalledOnCurveDataChange) {
+    int callCount = 0;
+    mixer->setOnVersionChanged([&]() { callCount++; });
+    std::vector<double> data(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
+    mixer->setLaneCurveData(0, data);
+    EXPECT_EQ(callCount, 1);
+}
+
+TEST_F(LaneMixerTest, OnVersionChanged_NotCalledDuringBatch) {
+    int callCount = 0;
+    mixer->setOnVersionChanged([&]() { callCount++; });
+    {
+        dsp_core::LaneMixerBatchUpdateGuard guard(*mixer);
+        mixer->setLaneAmplitude(0, 0.5);
+        mixer->setLaneAmplitude(1, 0.3);
+        mixer->setLaneAmplitude(2, 0.7);
+        EXPECT_EQ(callCount, 0) << "Callback should not fire during batch";
+    }
+    // endBatchUpdate fires the callback once
+    EXPECT_EQ(callCount, 1);
+}
+
+TEST_F(LaneMixerTest, OnVersionChanged_CalledOnEndBatchUpdate) {
+    int callCount = 0;
+    mixer->setOnVersionChanged([&]() { callCount++; });
+    mixer->beginBatchUpdate();
+    mixer->setLaneAmplitude(0, 0.5);
+    EXPECT_EQ(callCount, 0);
+    mixer->endBatchUpdate();
+    EXPECT_EQ(callCount, 1);
+}
+
+TEST_F(LaneMixerTest, OnVersionChanged_NullCallbackSafe) {
+    // Default state: no callback set. Should not crash.
+    mixer->setLaneAmplitude(1, 0.5);
+    // Also test explicitly setting nullptr
+    mixer->setOnVersionChanged(nullptr);
+    mixer->setLaneAmplitude(1, 0.3);
+    // No crash = pass
+}
+
+TEST_F(LaneMixerTest, OnVersionChanged_CalledOnStructuralChanges) {
+    int callCount = 0;
+    mixer->setOnVersionChanged([&]() { callCount++; });
+
+    mixer->addLane();
+    EXPECT_GE(callCount, 1) << "Callback should fire at least once for addLane";
+    const int afterAdd = callCount;
+
+    mixer->removeLane(mixer->getNumLanes() - 1);
+    EXPECT_GT(callCount, afterAdd) << "Callback should fire at least once for removeLane";
+}
+
 } // namespace dsp_core_test

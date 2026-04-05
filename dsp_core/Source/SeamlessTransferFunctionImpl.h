@@ -11,9 +11,7 @@
 namespace dsp_core {
 
 // Forward declarations
-struct RenderJob;
-class LUTRendererThread;
-class LUTRenderTimer;
+class EventDrivenRenderer;
 class VisualizerUpdateTimer;
 
 /**
@@ -24,7 +22,7 @@ struct SeamlessConfig {
     static constexpr int VISUALIZER_LUT_SIZE = 1024;
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
-    static constexpr double CROSSFADE_DURATION_MS = 50.0;
+    static constexpr double CROSSFADE_DURATION_MS = 5.0;
     static constexpr int DSP_TIMER_HZ = 20;
     static constexpr int VISUALIZER_TIMER_HZ = 120;
 };
@@ -234,228 +232,53 @@ class AudioEngine {
 };
 
 /**
- * RenderJob - Self-contained transfer function state for worker thread rendering
+ * EventDrivenRenderer - Event-driven DSP LUT renderer with rate limiting
  *
- * Design Principle: NO ContentStore dependency
- *   - Full base layer data copied (128KB memcpy - acceptable at 25Hz)
- *   - Spline anchors copied (not referenced)
- *   - Preserves dsp-core module purity
+ * Replaces LUTRenderTimer + LUTRendererThread with a single class that:
+ *   - Triggers renders immediately via AsyncUpdater (no polling delay)
+ *   - Rate-limits expensive curve changes (60Hz max)
+ *   - Renders mix-only changes (amplitude, scan) without rate limiting
+ *   - Writes directly to the triple-buffered LUT (no worker thread needed)
+ *   - Falls back to a 5Hz safety timer as a guaranteed delivery net
  *
- * Paint Stroke Normalization Handling:
- *   - paintStrokeActive = true: Use frozenNormalizationScalar directly
- *   - paintStrokeActive = false: Recompute scalar during rendering
- *   - This distinction is CRITICAL for correct paint stroke rendering
+ * THREADING:
+ *   - triggerAsyncUpdate() called from any thread (message or audio via AutomationSlot)
+ *   - handleAsyncUpdate() runs on message thread (JUCE guarantee)
+ *   - timerCallback() runs on message thread (JUCE Timer contract)
+ *   - doRender() writes to triple buffer atomics (safe from message thread)
  *
- * Interpolation/Extrapolation Modes:
- *   - Version-tracked even though they only affect lookup (not LUT contents)
- *   - Changing these modes triggers full LUT re-render for simplicity
- *   - Acceptable because: modes rarely change, 25Hz coalescing minimizes thrashing
- *   - Intentional simplicity trade-off vs distinguishing "shape" vs "lookup" changes
+ * Two-Tier Version Tracking:
+ *   - Full version (versionCounter_): incremented on ANY change
+ *   - Mix version (mixVersionCounter_): incremented only for amplitude/scan changes
+ *   - If only mix version changed: render immediately (cheap computeSum)
+ *   - If curve content changed: rate-limited to 60Hz
  */
-struct RenderJob {
-    // Pre-computed sum from LaneMixer (or legacy LTF evaluation)
-    // This is the final transfer function curve, ready to be copied into the audio LUT.
-    // Normalization has already been applied by LaneMixer::computeSum().
-    std::array<double, TABLE_SIZE> sumData;
-
-    // Extrapolation mode (affects LUT boundary behavior in AudioEngine)
-    LaneMixer::ExtrapolationMode extrapolationMode{
-        LaneMixer::ExtrapolationMode::Clamp};
-
-    // Version stamp
-    uint64_t version{0};
-};
-
-/**
- * LUTRendererThread - Background worker thread that renders DSP LUTs from RenderJobs
- *
- * Architecture:
- *   - Lock-free job queue (AbstractFifo, 4 slots - sufficient for 20Hz polling)
- *   - Job coalescing: drains queue, renders only latest job
- *   - Worker-owned LayeredTransferFunction for isolated rendering
- *   - Writes to lutBuffers[workerTargetIndex] (safe from audio thread)
- *   - DSP LUT ONLY (visualizer handled separately by VisualizerUpdateTimer)
- *
- * Queue Overflow:
- *   - Silently drops jobs if queue full (acceptable - next poll will retry)
- *   - Debug logging for overflow events
- *   - We only care about the most recent version
- *
- * Thread Safety:
- *   - Worker thread: reads from job queue, writes to workerTargetIndex buffer
- *   - Audio thread: never touches workerTargetIndex buffer (safe isolation)
- *
- * Self-Contained RenderJobs:
- *   - No ContentStore dependency (preserves dsp-core module boundary)
- *   - Full state snapshot (base layer, coefficients, spline anchors)
- *   - Renders into temporary LayeredTransferFunction
- */
-class LUTRendererThread : public juce::Thread {
+class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
   public:
-    /**
-     * Construct worker thread
-     *
-     * @param audioEngine Reference to AudioEngine (to check crossfade state)
-     * @param workerTargetIdx Reference to atomic index (where to write LUT)
-     * @param readyFlag Reference to atomic flag (signals audio thread)
-     */
-    LUTRendererThread(AudioEngine& audioEngine,
-                      std::atomic<int>& workerTargetIdx,
-                      std::atomic<bool>& readyFlag);
+    EventDrivenRenderer(LaneMixer& mixer, AudioEngine& engine);
+    ~EventDrivenRenderer() override;
 
-    /**
-     * Worker thread main loop
-     *
-     * Waits for jobs, processes with coalescing, renders LUTs.
-     * Runs until stopThread() is called.
-     */
-    void run() override;
-
-    /**
-     * Enqueue render job from message thread
-     *
-     * Lock-free enqueue with overflow protection.
-     * If queue is full, silently drops job (next poll will capture latest state).
-     *
-     * @param job RenderJob to enqueue (copied into queue)
-     */
-    void enqueueJob(const RenderJob& job);
-
-    /**
-     * Set LUT buffers pointer (for direct worker writes)
-     *
-     * Worker thread writes to lutBuffers[workerTargetIndex].
-     *
-     * @param buffers Pointer to LUT buffer array (from AudioEngine)
-     */
-    void setLUTBuffersPointer(LUTBuffer* buffers);
-
-  private:
-    /**
-     * Process all pending jobs with coalescing
-     *
-     * Drains entire queue, keeping only the latest job.
-     * Renders that job into workerTargetIndex buffer.
-     */
-    void processJobs();
-
-    /**
-     * Write pre-computed sum data to audio LUT buffer
-     *
-     * The RenderJob already contains the final transfer function curve
-     * (computed by LaneMixer::computeSum on the message thread).
-     * The worker just copies it into the triple-buffered LUT and signals
-     * the audio thread.
-     *
-     * @param job RenderJob containing pre-computed sum
-     * @param outputBuffer LUT buffer to write into (lutBuffers[workerTargetIndex])
-     */
-    void renderDSPLUT(const RenderJob& job, LUTBuffer* outputBuffer);
-
-    // Job queue (lock-free, 4 slots is sufficient given 20Hz polling + job coalescing)
-    juce::WaitableEvent wakeEvent;
-    juce::AbstractFifo jobQueue{4};
-    RenderJob jobSlots[4];
-
-    // Reference to AudioEngine (for checking crossfade state)
-    AudioEngine& audioEngine;
-
-    // Atomic references (shared with AudioEngine)
-    std::atomic<int>& workerTargetIndex;
-    std::atomic<bool>& newLUTReady;
-
-    // LUT buffers pointer (from AudioEngine)
-    LUTBuffer* lutBuffers{nullptr};
-};
-
-/**
- * LUTRenderTimer - Timer-based DSP LUT renderer with guaranteed delivery (20Hz)
- *
- * Separate from visualizer updates to optimize for crossfade timing.
- * Uses two-version tracking to guarantee final changes are never skipped.
- *
- * THREADING CONTRACT (CRITICAL):
- *   - MUST run on message thread (JUCE Timer contract)
- *   - LayeredTransferFunction is mutated from message thread (via controller)
- *   - Reads non-atomic data (coefficients vector, base layer)
- *   - Constructor asserts isThisTheMessageThread()
- *   - timerCallback() asserts message thread in debug builds
- *
- * Two-Version Tracking (GUARANTEED DELIVERY):
- *   - lastSeenVersion: What version we last observed
- *   - lastRenderedVersion: What version we last sent to worker
- *   - Invariant: Eventually lastRenderedVersion == lastSeenVersion
- *   - Render triggered when: lastRenderedVersion != lastSeenVersion
- *   - This ensures the FINAL change is never skipped
- *
- * Performance:
- *   - 20Hz update rate (50ms, matches crossfade timing)
- *   - ~3x fewer 16K LUT renders compared to 60Hz
- *   - Full snapshot capture: ~128KB memcpy
- *   - CPU overhead: <0.1%
- */
-class LUTRenderTimer : public juce::Timer {
-  public:
-    /**
-     * Construct LUT render timer (message thread only)
-     *
-     * CRITICAL: Asserts that construction happens on message thread.
-     * Starts timer at 20Hz automatically.
-     *
-     * @param mixer LaneMixer to render from (authoritative source)
-     * @param renderer LUTRendererThread to enqueue jobs to
-     */
-    LUTRenderTimer(LaneMixer& mixer, LUTRendererThread& renderer);
-
-    /**
-     * Destructor - stops timer
-     */
-    ~LUTRenderTimer();
-
-    /**
-     * Timer callback - polls version and enqueues jobs (message thread)
-     *
-     * Called at 20Hz (50ms interval).
-     * Uses two-version tracking for guaranteed delivery:
-     *   1. Update lastSeenVersion if version changed
-     *   2. If lastRenderedVersion != lastSeenVersion, render
-     *
-     * CRITICAL: Asserts message thread in debug builds.
-     */
-    void timerCallback() override;
-
-    /**
-     * Force immediate render (message thread only)
-     *
-     * Used for initial setup - ensures first LUT render happens immediately.
-     * Captures current state and enqueues job without waiting for next tick.
-     * Updates both lastSeenVersion and lastRenderedVersion.
-     */
+    /** Force synchronous render (for initialization and testing) */
     void forceRender();
 
+    /** AsyncUpdater callback — dispatched on message thread */
+    void handleAsyncUpdate() override;
+
+    /** Safety timer callback (5Hz fallback) */
+    void timerCallback() override;
+
   private:
-    /**
-     * Capture self-contained RenderJob snapshot
-     *
-     * Creates complete snapshot of LayeredTransferFunction state:
-     *   - Full base layer (128KB memcpy)
-     *   - Coefficients array
-     *   - Spline anchors vector (copy)
-     *   - Mode flags (spline, normalization, deferred)
-     *   - Frozen normalization scalar
-     *   - Interpolation/extrapolation modes
-     *   - Version stamp
-     *
-     * NO ContentStore dependency - fully self-contained.
-     *
-     * @return RenderJob containing full state snapshot
-     */
-    RenderJob captureRenderJob();
+    void doRender();
 
     LaneMixer& laneMixer;
-    LUTRendererThread& renderer;
-    uint64_t lastSeenVersion{0};
-    uint64_t lastRenderedVersion{0};  // For guaranteed final delivery
+    AudioEngine& audioEngine;
+
+    uint64_t lastRenderedFullVersion{0};
+    uint64_t lastRenderedMixVersion{0};
+    double lastCurveRenderTimeMs{0.0};
+
+    static constexpr double CURVE_RENDER_MIN_INTERVAL_MS = 16.7;  // 60Hz max
+    static constexpr int SAFETY_TIMER_HZ = 5;                      // 200ms fallback
 };
 
 /**

@@ -8,27 +8,28 @@
 namespace dsp_core {
 
 /**
- * SeamlessTransferFunction - Reusable click-free transfer function with async LUT rendering
+ * SeamlessTransferFunction - Reusable click-free transfer function with event-driven LUT rendering
  *
  * GOAL: Eliminate clicks/pops during ALL transfer function edits while maintaining
- *       <50ms latency for interactive operations.
+ *       <10ms latency for automation and interactive operations.
  *
- * ARCHITECTURE: Three-thread design with 25Hz polling
- *   - Message thread: UI/controller mutates editing model, 25Hz poller detects changes
- *   - Worker thread: Renders LUTs asynchronously from self-contained snapshots
- *   - Audio thread: Triple-buffered LUT with 10ms linear crossfade (sample-rate-adaptive)
+ * ARCHITECTURE: Event-driven two-thread design
+ *   - Message thread: UI/controller mutates LaneMixer, onVersionChanged triggers render
+ *   - Audio thread: Triple-buffered LUT with 5ms smoothstep crossfade (sample-rate-adaptive)
  *
  * KEY DESIGN DECISIONS:
- *   - Self-contained RenderJobs with NO ContentStore dependency (preserves dsp-core module purity)
- *   - Triple buffering prevents data race during crossfade
- *   - Job coalescing (only renders latest version)
+ *   - Event-driven via AsyncUpdater (no polling delay — renders within 1ms of mutation)
+ *   - Two-tier version counter: mix-only changes (amplitude, scan) render immediately,
+ *     curve content changes rate-limited to 60Hz
+ *   - Direct triple-buffer writes from message thread (no worker thread needed)
+ *   - 5ms crossfade with interruption support for rapid automation
  *   - Hardcoded constants (16384 table size, -1.0 to 1.0 range) for performance
- *   - Visualizer shows latest rendered LUT (target curve audio is crossfading toward)
+ *   - Visualizer shows latest model directly at 120Hz (independent of DSP rendering)
  *
  * PERFORMANCE:
- *   - Latency: <50ms for interactive operations (harmonic sliders, paint strokes)
- *   - CPU overhead: <0.5% (25Hz polling + worker thread)
- *   - Memory overhead: ~1.4MB (393KB triple-buffered LUTs + ~1MB job queue)
+ *   - Latency: ~7-10ms for amplitude/scan automation, ~20-28ms for curve edits
+ *   - CPU overhead: <0.3% (event-driven + 5Hz safety timer)
+ *   - Memory overhead: ~400KB (393KB triple-buffered LUTs)
  *
  * REUSABILITY:
  *   - Renders the weighted sum of LaneMixer lanes into a production LUT
@@ -214,6 +215,14 @@ class SeamlessTransferFunction {
      */
     int getSelectedVisualizerLane() const;
     void setSelectedVisualizerLane(int laneIndex);
+
+    /**
+     * Get the render trigger for AutomationSlot integration.
+     * Returns the EventDrivenRenderer as an AsyncUpdater* so AutomationSlot
+     * can call triggerAsyncUpdate() from the audio thread.
+     * Returns nullptr if seamless updates haven't been started yet.
+     */
+    juce::AsyncUpdater* getRenderTrigger() const;
 
   private:
     class Impl;

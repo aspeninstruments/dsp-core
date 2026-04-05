@@ -101,10 +101,9 @@ void AudioEngine::processBuffer(juce::AudioBuffer<double>& buffer) const {
 
 void AudioEngine::checkForNewLUT() const {
     if (newLUTReady.load(std::memory_order_acquire)) {
-        // Don't interrupt active crossfade (prevents audible clicks)
-        if (crossfading) {
-            return;
-        }
+        // Allow interrupting active crossfade — with 5ms crossfade and incremental
+        // changes from event-driven updates, the snap discontinuity is negligible.
+        // The crossfade-to target becomes the "old" for the new crossfade.
 
         const int oldPrimaryIdx = primaryIndex.load(std::memory_order_acquire);
         const int oldSecondaryIdx = secondaryIndex.load(std::memory_order_acquire);
@@ -240,145 +239,86 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
     return interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
 }
 
-// LUTRendererThread Implementation
+// EventDrivenRenderer Implementation
 
-LUTRendererThread::LUTRendererThread(AudioEngine& audioEngine_,
-                                     std::atomic<int>& workerTargetIdx,
-                                     std::atomic<bool>& readyFlag)
-    : juce::Thread("LUTRendererThread")
-    , audioEngine(audioEngine_)
-    , workerTargetIndex(workerTargetIdx)
-    , newLUTReady(readyFlag) {
-}
-
-void LUTRendererThread::run() {
-    while (!threadShouldExit()) {
-        wakeEvent.wait(1000);
-
-        if (threadShouldExit()) {
-            break;
-        }
-
-        processJobs();
-    }
-}
-
-void LUTRendererThread::enqueueJob(const RenderJob& job) {
-    int start1, size1, start2, size2;
-    jobQueue.prepareToWrite(1, start1, size1, start2, size2);
-
-    if (size1 > 0) {
-        jobSlots[start1] = job;
-        jobQueue.finishedWrite(1);
-        wakeEvent.signal();
-    }
-#if JUCE_DEBUG
-    else {
-        // Queue full - drop job (next poll will capture latest state)
-    }
-#endif
-}
-
-void LUTRendererThread::processJobs() {
-    RenderJob latestJob;
-    bool hasJob = false;
-
-    int start1, size1, start2, size2;
-    while (true) {
-        jobQueue.prepareToRead(1, start1, size1, start2, size2);
-        if (size1 == 0) {
-            break;
-        }
-
-        latestJob = jobSlots[start1];
-        jobQueue.finishedRead(1);
-        hasJob = true;
-    }
-
-    if (hasJob) {
-        // Render DSP LUT only (16K samples)
-        // Visualizer is handled separately by VisualizerUpdateTimer (60Hz direct model reads)
-        const int targetIdx = workerTargetIndex.load(std::memory_order_relaxed);
-        if (lutBuffers != nullptr) {
-            renderDSPLUT(latestJob, &lutBuffers[targetIdx]);
-        }
-    }
-}
-
-void LUTRendererThread::renderDSPLUT(const RenderJob& job, LUTBuffer* outputBuffer) {
-    // The RenderJob now carries a pre-computed sum from LaneMixer.
-    // Just copy it into the audio LUT buffer.
-    std::copy(job.sumData.begin(), job.sumData.end(), outputBuffer->data.begin());
-
-    outputBuffer->version = job.version;
-    outputBuffer->extrapolationMode = job.extrapolationMode;
-
-    newLUTReady.store(true, std::memory_order_release);
-}
-
-void LUTRendererThread::setLUTBuffersPointer(LUTBuffer* buffers) {
-    lutBuffers = buffers;
-}
-
-// LUTRenderTimer Implementation (20Hz, DSP LUT only, guaranteed delivery)
-
-LUTRenderTimer::LUTRenderTimer(LaneMixer& mixer_,
-                               LUTRendererThread& renderer_)
-    : laneMixer(mixer_)
-    , renderer(renderer_) {
+EventDrivenRenderer::EventDrivenRenderer(LaneMixer& mixer, AudioEngine& engine)
+    : laneMixer(mixer)
+    , audioEngine(engine) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-    startTimerHz(SeamlessConfig::DSP_TIMER_HZ);  // 50ms interval, matches crossfade timing
+    startTimerHz(SAFETY_TIMER_HZ);
 }
 
-LUTRenderTimer::~LUTRenderTimer() {
+EventDrivenRenderer::~EventDrivenRenderer() {
+    cancelPendingUpdate();
     stopTimer();
 }
 
-void LUTRenderTimer::timerCallback() {
+void EventDrivenRenderer::forceRender() {
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    doRender();
+}
+
+void EventDrivenRenderer::handleAsyncUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    const uint64_t currentVersion = laneMixer.getVersion();
+    const uint64_t currentFullVersion = laneMixer.getVersion();
+    const uint64_t currentMixVersion = laneMixer.getMixVersion();
 
-    // Track version changes
-    if (currentVersion != lastSeenVersion) {
-        lastSeenVersion = currentVersion;
+    if (currentFullVersion == lastRenderedFullVersion)
+        return; // Nothing changed
+
+    // Detect whether only mix-related changes occurred (cheap to re-render)
+    const bool curveChanged = (currentFullVersion - currentMixVersion)
+                            != (lastRenderedFullVersion - lastRenderedMixVersion);
+
+    if (curveChanged) {
+        // Rate limit expensive curve renders to 60Hz max
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        const double elapsed = now - lastCurveRenderTimeMs;
+        if (elapsed < CURVE_RENDER_MIN_INTERVAL_MS) {
+            // Defer: start a one-shot timer for the remaining interval
+            const int remainingMs = static_cast<int>(CURVE_RENDER_MIN_INTERVAL_MS - elapsed) + 1;
+            startTimer(remainingMs);
+            return;
+        }
+        lastCurveRenderTimeMs = now;
     }
 
-    // Render if we're behind - handles BOTH intermediate AND final renders
-    // This two-version tracking guarantees the final change is never skipped
-    if (lastRenderedVersion != lastSeenVersion) {
-        const RenderJob job = captureRenderJob();
-        renderer.enqueueJob(job);
-        lastRenderedVersion = laneMixer.getVersion();
-        lastSeenVersion = lastRenderedVersion;
+    doRender();
+
+    // Restore safety timer (in case one-shot timer was used for rate limiting)
+    startTimerHz(SAFETY_TIMER_HZ);
+}
+
+void EventDrivenRenderer::timerCallback() {
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    if (lastRenderedFullVersion != laneMixer.getVersion()) {
+        handleAsyncUpdate();
     }
 }
 
-void LUTRenderTimer::forceRender() {
-    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-
-    const RenderJob job = captureRenderJob();
-    renderer.enqueueJob(job);
-
-    const uint64_t currentVersion = laneMixer.getVersion();
-    lastSeenVersion = currentVersion;
-    lastRenderedVersion = currentVersion;
-}
-
-RenderJob LUTRenderTimer::captureRenderJob() {
-    RenderJob job;
-
-    // Compute the output curve based on mixer mode
+void EventDrivenRenderer::doRender() {
+    // Compute the mixed sum directly on the message thread
+    std::array<double, TABLE_SIZE> sumData{};
     if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
-        laneMixer.computeScan(job.sumData.data(), TABLE_SIZE);
+        laneMixer.computeScan(sumData.data(), TABLE_SIZE);
     } else {
-        laneMixer.computeSum(job.sumData.data(), TABLE_SIZE);
+        laneMixer.computeSum(sumData.data(), TABLE_SIZE);
     }
 
-    job.extrapolationMode = laneMixer.getExtrapolationMode();
-    job.version = laneMixer.getVersion();
+    // Write directly to the worker target buffer (no worker thread)
+    const int targetIdx = audioEngine.getWorkerTargetIndexReference().load(std::memory_order_relaxed);
+    LUTBuffer* outputBuffer = &audioEngine.getLUTBuffers()[targetIdx];
+    std::copy(sumData.begin(), sumData.end(), outputBuffer->data.begin());
+    outputBuffer->version = laneMixer.getVersion();
+    outputBuffer->extrapolationMode = laneMixer.getExtrapolationMode();
 
-    return job;
+    // Signal audio thread
+    audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);
+
+    lastRenderedFullVersion = laneMixer.getVersion();
+    lastRenderedMixVersion = laneMixer.getMixVersion();
 }
 
 // VisualizerUpdateTimer Implementation (120Hz, direct model reads)

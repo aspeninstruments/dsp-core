@@ -6,6 +6,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 #include <array>
 #include <atomic>
+#include <functional>
 #include <memory>
 
 namespace dsp_core {
@@ -238,6 +239,29 @@ class LaneMixer {
         return versionCounter_.load(std::memory_order_acquire);
     }
 
+    /**
+     * Get the mix-only version counter.
+     * Incremented only for amplitude and scan position changes (cheap re-mix).
+     * NOT incremented for curve data, structural, or content type changes.
+     */
+    uint64_t getMixVersion() const {
+        return mixVersionCounter_.load(std::memory_order_acquire);
+    }
+
+    /**
+     * Get a reference to the mix version counter atomic (for AutomationSlot).
+     */
+    std::atomic<uint64_t>& getMixVersionCounter() { return mixVersionCounter_; }
+
+    /**
+     * Set a callback invoked whenever the version counter increments.
+     * Called from incrementVersionIfNotBatching() and endBatchUpdate().
+     * Must be safe to call from the message thread (the only thread that mutates LaneMixer).
+     */
+    void setOnVersionChanged(std::function<void()> callback) {
+        onVersionChanged_ = std::move(callback);
+    }
+
     void beginBatchUpdate();
     void endBatchUpdate();
 
@@ -303,11 +327,23 @@ class LaneMixer {
 
     // Version tracking (same pattern as LayeredTransferFunction)
     std::atomic<uint64_t> versionCounter_{0};
+    std::atomic<uint64_t> mixVersionCounter_{0};  // Incremented only for amplitude/scan changes
     bool batchUpdateActive_ = false;
+    bool batchHasMixChange_ = false;  // Track if batch contains amplitude/scan changes
+    std::function<void()> onVersionChanged_;  // Callback for event-driven rendering
 
     void incrementVersionIfNotBatching() {
         if (!batchUpdateActive_) {
             versionCounter_.fetch_add(1, std::memory_order_release);
+            if (onVersionChanged_) onVersionChanged_();
+        }
+    }
+
+    void incrementMixVersionIfNotBatching() {
+        if (!batchUpdateActive_) {
+            mixVersionCounter_.fetch_add(1, std::memory_order_release);
+        } else {
+            batchHasMixChange_ = true;
         }
     }
 
