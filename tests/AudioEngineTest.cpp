@@ -607,4 +607,52 @@ TEST_F(AudioEngineTest, CrossfadeInterruption_TripleBufferSafety) {
         << "After rapid updates, should converge to latest LUT value";
 }
 
+TEST_F(AudioEngineTest, CrossfadeInterruption_NoContinuityGap) {
+    engine->prepareToPlay(44100.0, 512);
+    dsp_core::LUTBuffer* buffers = engine->getLUTBuffers();
+
+    // Identity LUT is in buffer 0 (primary). Set up first new LUT: constant 0.5
+    for (int i = 0; i < dsp_core::TABLE_SIZE; ++i) {
+        buffers[2].data[i] = 0.5;
+    }
+    buffers[2].version = 1;
+    engine->getNewLUTReadyFlag().store(true, std::memory_order_release);
+
+    // Process halfway through the crossfade (identity → 0.5)
+    const int crossfadeSamples = static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
+    const int halfCrossfade = crossfadeSamples / 2;
+    juce::AudioBuffer<double> partial(1, halfCrossfade);
+    partial.clear(); // x = 0.0: identity gives 0.0, constant gives 0.5
+    engine->processBuffer(partial);
+
+    // Record the last sample output before interruption
+    const double lastSampleBeforeInterrupt = partial.getSample(0, halfCrossfade - 1);
+    // At ~50% through crossfade of (0.0 → 0.5), should be ~0.25
+    EXPECT_GT(lastSampleBeforeInterrupt, 0.1) << "Should be mid-crossfade, not at start";
+    EXPECT_LT(lastSampleBeforeInterrupt, 0.4) << "Should be mid-crossfade, not at end";
+
+    // Now interrupt with a second LUT: constant 0.8
+    const int workerIdx = engine->getWorkerTargetIndexReference().load(std::memory_order_acquire);
+    for (int i = 0; i < dsp_core::TABLE_SIZE; ++i) {
+        buffers[workerIdx].data[i] = 0.8;
+    }
+    buffers[workerIdx].version = 2;
+    engine->getNewLUTReadyFlag().store(true, std::memory_order_release);
+
+    // Process one sample after interruption
+    juce::AudioBuffer<double> firstAfter(1, 1);
+    firstAfter.clear(); // x = 0.0
+    engine->processBuffer(firstAfter);
+    const double firstSampleAfterInterrupt = firstAfter.getSample(0, 0);
+
+    // The first sample after interruption should be close to the last sample before.
+    // With blend snapshot, the new crossfade starts from the blended state (~0.25),
+    // NOT from the crossfade target (0.5). The gap should be tiny.
+    const double gap = std::abs(firstSampleAfterInterrupt - lastSampleBeforeInterrupt);
+    EXPECT_LT(gap, 0.05) << "Continuity gap should be < 0.05. "
+        << "Before=" << lastSampleBeforeInterrupt
+        << " After=" << firstSampleAfterInterrupt
+        << " Gap=" << gap;
+}
+
 } // namespace dsp_core_test

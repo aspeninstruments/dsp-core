@@ -101,20 +101,45 @@ void AudioEngine::processBuffer(juce::AudioBuffer<double>& buffer) const {
 
 void AudioEngine::checkForNewLUT() const {
     if (newLUTReady.load(std::memory_order_acquire)) {
-        // Allow interrupting active crossfade — with 5ms crossfade and incremental
-        // changes from event-driven updates, the snap discontinuity is negligible.
-        // The crossfade-to target becomes the "old" for the new crossfade.
-
         const int oldPrimaryIdx = primaryIndex.load(std::memory_order_acquire);
         const int oldSecondaryIdx = secondaryIndex.load(std::memory_order_acquire);
         const int workerIdx = workerTargetIndex.load(std::memory_order_acquire);
 
-        primaryIndex.store(workerIdx, std::memory_order_release);
-        secondaryIndex.store(oldPrimaryIdx, std::memory_order_release);
-        workerTargetIndex.store(oldSecondaryIdx, std::memory_order_release);
+        if (crossfading) {
+            // Blend snapshot: merge the current crossfade state into the secondary
+            // buffer so the new crossfade starts from exactly where the audio is,
+            // not from the crossfade target. Eliminates pops on fast automation.
+            //
+            // Buffer roles before: B=secondary (oldLUT), A=primary (newLUT), C=workerTarget (incoming)
+            // We write blend(B, A, position) into B, then rotate: primary=C, secondary=B, workerTarget=A
+            const double t = static_cast<double>(crossfadePosition) / crossfadeSamples;
+            const double alpha = smoothstep(t);
+            const double gainNew = alpha;
+            const double gainOld = 1.0 - alpha;
 
-        oldLUT = &lutBuffers[oldPrimaryIdx];
-        newLUT = &lutBuffers[workerIdx];
+            auto& secData = lutBuffers[oldSecondaryIdx].data;
+            const auto& priData = lutBuffers[oldPrimaryIdx].data;
+            for (int i = 0; i < TABLE_SIZE; ++i) {
+                secData[static_cast<size_t>(i)] = gainOld * secData[static_cast<size_t>(i)]
+                                                + gainNew * priData[static_cast<size_t>(i)];
+            }
+
+            // Rotate: secondary stays as blend snapshot, old primary becomes workerTarget
+            primaryIndex.store(workerIdx, std::memory_order_release);
+            // secondaryIndex stays at oldSecondaryIdx (now holds blend snapshot)
+            workerTargetIndex.store(oldPrimaryIdx, std::memory_order_release);
+
+            oldLUT = &lutBuffers[oldSecondaryIdx]; // blend snapshot
+            newLUT = &lutBuffers[workerIdx];        // new incoming LUT
+        } else {
+            // Normal rotation: no crossfade in progress
+            primaryIndex.store(workerIdx, std::memory_order_release);
+            secondaryIndex.store(oldPrimaryIdx, std::memory_order_release);
+            workerTargetIndex.store(oldSecondaryIdx, std::memory_order_release);
+
+            oldLUT = &lutBuffers[oldPrimaryIdx];
+            newLUT = &lutBuffers[workerIdx];
+        }
 
         newLUTReady.store(false, std::memory_order_release);
         crossfading = true;

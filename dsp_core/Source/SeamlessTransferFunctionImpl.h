@@ -214,7 +214,7 @@ class AudioEngine {
     // TRIPLE BUFFERING (prevents data race during crossfade):
     // - lutBuffers[0,1]: Used for crossfading (audio thread reads)
     // - lutBuffers[2]: Worker thread writes here (safe from audio thread)
-    LUTBuffer lutBuffers[3];
+    mutable LUTBuffer lutBuffers[3];  // mutable: blend snapshot writes in checkForNewLUT()
 
     // Atomics are mutable because they're modified in const methods (thread-safe state)
     mutable std::atomic<int> primaryIndex{static_cast<int>(BufferRole::Primary)};      // Active LUT for playback
