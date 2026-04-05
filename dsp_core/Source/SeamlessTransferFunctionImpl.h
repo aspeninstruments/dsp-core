@@ -275,6 +275,7 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
 
     uint64_t lastRenderedFullVersion{0};
     uint64_t lastRenderedMixVersion{0};
+    double lastRenderedScanPosition{0.0};
     double lastCurveRenderTimeMs{0.0};
 
     static constexpr double CURVE_RENDER_MIN_INTERVAL_MS = 16.7;  // 60Hz max

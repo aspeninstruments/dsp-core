@@ -296,6 +296,17 @@ void EventDrivenRenderer::handleAsyncUpdate() {
     const bool curveChanged = (currentFullVersion - currentMixVersion)
                             != (lastRenderedFullVersion - lastRenderedMixVersion);
 
+    // In scan mode, amplitude changes don't affect the output (computeScan ignores amplitudes).
+    // Skip the render to avoid unnecessary crossfade artifacts from stale buffer data.
+    if (!curveChanged && laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+        const double currentScanPos = laneMixer.getScanPosition();
+        if (currentScanPos == lastRenderedScanPosition) {
+            lastRenderedFullVersion = currentFullVersion;
+            lastRenderedMixVersion = currentMixVersion;
+            return;
+        }
+    }
+
     if (curveChanged) {
         // Rate limit expensive curve renders to 60Hz max
         const double now = juce::Time::getMillisecondCounterHiRes();
@@ -344,6 +355,7 @@ void EventDrivenRenderer::doRender() {
 
     lastRenderedFullVersion = laneMixer.getVersion();
     lastRenderedMixVersion = laneMixer.getMixVersion();
+    lastRenderedScanPosition = laneMixer.getScanPosition();
 }
 
 // VisualizerUpdateTimer Implementation (120Hz, direct model reads)

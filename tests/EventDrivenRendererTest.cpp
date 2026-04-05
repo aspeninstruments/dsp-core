@@ -123,6 +123,39 @@ TEST_F(EventDrivenRendererTest, ScanChange_MixVersionIncremented) {
         << "Scan position change should increment mix version";
 }
 
+TEST_F(EventDrivenRendererTest, ScanMode_AmplitudeChange_DoesNotAffectAudio) {
+    auto& mixer = stf->getLaneMixer();
+
+    // Set up two distinct lanes for scan mode
+    mixer.setLaneAmplitude(1, 1.0); // H1 = identity
+    mixer.setLaneAmplitude(2, 0.0); // H3 off initially
+
+    // Switch to scan mode at position 0 (100% lane 0)
+    mixer.setMixerMode(dsp_core::LaneMixer::MixerMode::Scan);
+    mixer.setScanPosition(0.5);
+    renderAndFlushCrossfade();
+
+    // Record baseline output
+    const double baselineAt05 = evaluateAt(0.5);
+    const double baselineAt03 = evaluateAt(0.3);
+
+    // Change a lane amplitude — should have NO effect in scan mode
+    mixer.setLaneAmplitude(2, 1.0);
+    renderAndFlushCrossfade();
+
+    EXPECT_NEAR(evaluateAt(0.5), baselineAt05, 1e-10)
+        << "Amplitude change in scan mode should not affect audio output";
+    EXPECT_NEAR(evaluateAt(0.3), baselineAt03, 1e-10)
+        << "Amplitude change in scan mode should not affect audio output";
+
+    // Change another amplitude
+    mixer.setLaneAmplitude(1, 0.0);
+    renderAndFlushCrossfade();
+
+    EXPECT_NEAR(evaluateAt(0.5), baselineAt05, 1e-10)
+        << "Zeroing amplitude in scan mode should not affect audio output";
+}
+
 // ============================================================================
 // Version Tracking Tests
 // ============================================================================
