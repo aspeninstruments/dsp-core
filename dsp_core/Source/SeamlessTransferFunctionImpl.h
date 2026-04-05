@@ -46,6 +46,8 @@ struct LUTBuffer {
     uint64_t version{0};
     LaneMixer::ExtrapolationMode extrapolationMode{
         LaneMixer::ExtrapolationMode::Clamp};
+    double leftSlope{0.0};   // Precomputed, clamped slope at left edge (for Linear extrapolation)
+    double rightSlope{0.0};  // Precomputed, clamped slope at right edge (for Linear extrapolation)
 };
 
 /**

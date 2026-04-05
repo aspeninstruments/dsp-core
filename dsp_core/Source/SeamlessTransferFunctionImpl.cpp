@@ -117,12 +117,17 @@ void AudioEngine::checkForNewLUT() const {
             const double gainNew = alpha;
             const double gainOld = 1.0 - alpha;
 
-            auto& secData = lutBuffers[oldSecondaryIdx].data;
-            const auto& priData = lutBuffers[oldPrimaryIdx].data;
+            auto& secBuf = lutBuffers[oldSecondaryIdx];
+            const auto& priBuf = lutBuffers[oldPrimaryIdx];
             for (int i = 0; i < TABLE_SIZE; ++i) {
-                secData[static_cast<size_t>(i)] = gainOld * secData[static_cast<size_t>(i)]
-                                                + gainNew * priData[static_cast<size_t>(i)];
+                secBuf.data[static_cast<size_t>(i)] = gainOld * secBuf.data[static_cast<size_t>(i)]
+                                                    + gainNew * priBuf.data[static_cast<size_t>(i)];
             }
+
+            // Blend edge slopes for Linear extrapolation continuity
+            secBuf.leftSlope = gainOld * secBuf.leftSlope + gainNew * priBuf.leftSlope;
+            secBuf.rightSlope = gainOld * secBuf.rightSlope + gainNew * priBuf.rightSlope;
+            secBuf.extrapolationMode = lutBuffers[workerIdx].extrapolationMode;
 
             // Rotate: secondary stays as blend snapshot, old primary becomes workerTarget
             primaryIndex.store(workerIdx, std::memory_order_release);
@@ -170,14 +175,15 @@ double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
         // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
     }
 
+    // Linear extrapolation using precomputed, clamped edge slopes
+    constexpr double OUTPUT_LIMIT = 15.848931924611134; // +24dB
+
     auto getSample = [lut](int i) -> double {
         if (i < 0) {
-            const double slope = lut->data[1] - lut->data[0];
-            return lut->data[0] + slope * i;
+            return lut->data[0] + lut->leftSlope * i;
         }
         if (i >= TABLE_SIZE) {
-            const double slope = lut->data[TABLE_SIZE - 1] - lut->data[TABLE_SIZE - 2];
-            return lut->data[TABLE_SIZE - 1] + slope * (i - TABLE_SIZE + 1);
+            return lut->data[TABLE_SIZE - 1] + lut->rightSlope * (i - TABLE_SIZE + 1);
         }
         return lut->data[i];
     };
@@ -189,9 +195,12 @@ double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
 
     // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
     // Standard Catmull-Rom interpolation formula
-    return 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
-                  (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
+    double result = 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
+                           (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
     // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
+
+    if (std::isnan(result) || std::isinf(result)) return 0.0;
+    return std::clamp(result, -OUTPUT_LIMIT, OUTPUT_LIMIT);
 }
 
 double AudioEngine::interpolateCatmullRom(double y0, double y1, double y2, double y3, double t) {
@@ -234,14 +243,15 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
         return interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
     }
 
+    // Linear extrapolation using precomputed, clamped edge slopes
+    constexpr double OUTPUT_LIMIT = 15.848931924611134; // +24dB
+
     auto getSample = [](const LUTBuffer* lut, int i) -> double {
         if (i < 0) {
-            const double slope = lut->data[1] - lut->data[0];
-            return lut->data[0] + slope * i;
+            return lut->data[0] + lut->leftSlope * i;
         }
         if (i >= TABLE_SIZE) {
-            const double slope = lut->data[TABLE_SIZE - 1] - lut->data[TABLE_SIZE - 2];
-            return lut->data[TABLE_SIZE - 1] + slope * (i - TABLE_SIZE + 1);
+            return lut->data[TABLE_SIZE - 1] + lut->rightSlope * (i - TABLE_SIZE + 1);
         }
         return lut->data[i];
     };
@@ -261,7 +271,10 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
     const double mixed_y2 = gainOld * old_y2 + gainNew * new_y2;
     const double mixed_y3 = gainOld * old_y3 + gainNew * new_y3;
 
-    return interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
+    double result = interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
+
+    if (std::isnan(result) || std::isinf(result)) return 0.0;
+    return std::clamp(result, -OUTPUT_LIMIT, OUTPUT_LIMIT);
 }
 
 // EventDrivenRenderer Implementation
@@ -349,6 +362,18 @@ void EventDrivenRenderer::doRender() {
     std::copy(sumData.begin(), sumData.end(), outputBuffer->data.begin());
     outputBuffer->version = laneMixer.getVersion();
     outputBuffer->extrapolationMode = laneMixer.getExtrapolationMode();
+
+    // Precompute and clamp edge slopes for Linear extrapolation
+    if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear) {
+        constexpr double MAX_SLOPE = 16.0;
+        const double leftSlope = outputBuffer->data[1] - outputBuffer->data[0];
+        const double rightSlope = outputBuffer->data[TABLE_SIZE - 1] - outputBuffer->data[TABLE_SIZE - 2];
+        outputBuffer->leftSlope = std::clamp(leftSlope, -MAX_SLOPE, MAX_SLOPE);
+        outputBuffer->rightSlope = std::clamp(rightSlope, -MAX_SLOPE, MAX_SLOPE);
+    } else {
+        outputBuffer->leftSlope = 0.0;
+        outputBuffer->rightSlope = 0.0;
+    }
 
     // Signal audio thread
     audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);
