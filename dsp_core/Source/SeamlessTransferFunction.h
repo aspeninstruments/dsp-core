@@ -115,6 +115,22 @@ class SeamlessTransferFunction {
     void processBuffer(juce::AudioBuffer<double>& buffer) const;
 
     /**
+     * Check for new LUT at the start of a processing block (audio thread)
+     *
+     * Must be called once per block when using applyTransferFunction() per-sample
+     * instead of processBuffer(). processBuffer() calls this internally.
+     */
+    void beginBlock() const;
+
+    /**
+     * Advance crossfade position by one sample (audio thread)
+     *
+     * Must be called once per sample when using applyTransferFunction() per-sample
+     * instead of processBuffer(). processBuffer() calls this internally.
+     */
+    void advanceCrossfadeSample() const;
+
+    /**
      * Prepare for playback (audio thread)
      *
      * Calculates sample-rate-adaptive crossfade duration.

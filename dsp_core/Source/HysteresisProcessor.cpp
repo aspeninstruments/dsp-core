@@ -111,6 +111,13 @@ void HysteresisProcessor::setWidth(double width) {
     updateDerivedParams();
 }
 
+void HysteresisProcessor::setOperatingPoint(double Ms) {
+    M_s_ = Ms;
+    a_ = Ms;              // Q = H/Ms — normalizes input to operating range
+    scaleOverride_ = 1.0; // LUT sees normalized signal directly
+    updateDerivedParams();
+}
+
 // =============================================================================
 // Core Math
 // =============================================================================
@@ -187,9 +194,10 @@ void HysteresisProcessor::updateDerivedParams() {
     M_s_oa_ = M_s_ / a_;
     M_s_oa_tc_ = c_ * M_s_oa_;
 
-    // Scale for input mapping: tune so typical Q values use full [-1,1] range
-    // Higher a_ means Q values are smaller, so scale down
-    scale_ = a_ * 4.0;
+    // Scale for input mapping: maps Q values into SoftClippingSolver range
+    // When operating point is set, scale is fixed at 1.0 (LUT sees raw signal)
+    // Otherwise, use ChowTape-style scaling (a*4) for standard Langevin
+    scale_ = (scaleOverride_ >= 0.0) ? scaleOverride_ : a_ * 4.0;
 }
 
 double HysteresisProcessor::standardLangevin(double x) {

@@ -8,6 +8,7 @@ HysteresisStage::HysteresisStage(const dsp_core::SeamlessTransferFunction& tf)
 void HysteresisStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
     for (int ch = 0; ch < 2; ++ch) {
         processors_[ch].prepareToPlay(sampleRate);
+        processors_[ch].setOperatingPoint(1.0); // Audio-range: LUT sees raw signal
         processors_[ch].setNonlinearity([this](double x) {
             return transferFunction_->applyTransferFunction(x);
         });
@@ -27,13 +28,18 @@ void HysteresisStage::process(juce::AudioBuffer<double>& buffer) {
         return;
     }
 
-    // Per-channel, per-sample hysteresis processing with makeup gain
+    // Check for new LUT at block start (crossfade lifecycle)
+    transferFunction_->beginBlock();
+
+    // Per-sample, per-channel hysteresis processing with makeup gain
+    // Sample-outer loop ensures crossfade advances once per sample (stereo consistency)
     const int channelsToProcess = std::min(numChannels, 2);
-    for (int ch = 0; ch < channelsToProcess; ++ch) {
-        auto* data = buffer.getWritePointer(ch);
-        for (int i = 0; i < numSamples; ++i) {
+    for (int i = 0; i < numSamples; ++i) {
+        for (int ch = 0; ch < channelsToProcess; ++ch) {
+            auto* data = buffer.getWritePointer(ch);
             data[i] = processors_[ch].process(data[i]) * makeupGain_;
         }
+        transferFunction_->advanceCrossfadeSample();
     }
 }
 
@@ -67,6 +73,12 @@ void HysteresisStage::setWidth(double width) {
 
 void HysteresisStage::setMakeupGain(double gain) {
     makeupGain_ = gain;
+}
+
+void HysteresisStage::setOperatingPoint(double Ms) {
+    for (auto& proc : processors_) {
+        proc.setOperatingPoint(Ms);
+    }
 }
 
 } // namespace dsp_core::audio_pipeline

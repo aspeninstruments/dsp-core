@@ -42,6 +42,18 @@ class HysteresisProcessor {
     void setSaturation(double sat);   // 0-1
     void setWidth(double width);      // 0-1
 
+    /**
+     * Set fixed operating point for audio-range signals.
+     * Ms controls the scaling between audio range and internal J-A dynamics:
+     *   - a = Ms, so Q = H/Ms (normalize input to operating range)
+     *   - LUT sees normalized signal directly (scale fixed at 1.0)
+     *   - Output M tends toward Ms·L(Q), so Ms=1.0 keeps output in [-1,1]
+     *
+     * For audio plugins: call setOperatingPoint(1.0) — all scaling is identity.
+     * Bypasses setDrive/setSaturation. Width (c) remains independently controllable.
+     */
+    void setOperatingPoint(double Ms);
+
     // Public for testing — these implement the core math
     double langevin(double Q) const;
     double langevinDeriv(double Q) const;
@@ -89,6 +101,9 @@ class HysteresisProcessor {
     double dcY_n1_ = 0.0;
     double dcR_ = 0.995;  // Updated dynamically in prepareToPlay()
     double dcBlock(double x);
+
+    // Operating point override (-1 = use auto scale a*4, >= 0 = fixed)
+    double scaleOverride_ = -1.0;
 
     // Derived parameter cache
     double M_s_oa_ = 0.0;      // M_s / a

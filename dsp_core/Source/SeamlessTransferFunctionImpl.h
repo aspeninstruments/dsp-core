@@ -138,6 +138,26 @@ class AudioEngine {
     }
 
     /**
+     * Check for new LUT at block start (audio thread)
+     * Call once per block when using applyTransferFunction() per-sample.
+     */
+    void beginBlock() const {
+        checkForNewLUT();
+    }
+
+    /**
+     * Advance crossfade by one sample (audio thread)
+     * Call once per sample when using applyTransferFunction() per-sample.
+     */
+    void advanceCrossfadeSample() const {
+        if (crossfading) {
+            if (++crossfadePosition >= crossfadeSamples) {
+                crossfading = false;
+            }
+        }
+    }
+
+    /**
      * Check if audio engine is currently crossfading (for worker thread)
      *
      * Worker thread uses this to decide whether to render DSP LUT:

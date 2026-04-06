@@ -108,6 +108,14 @@ void SeamlessTransferFunction::processBuffer(juce::AudioBuffer<double>& buffer) 
     pimpl->audioEngine.processBuffer(buffer);
 }
 
+void SeamlessTransferFunction::beginBlock() const {
+    pimpl->audioEngine.beginBlock();
+}
+
+void SeamlessTransferFunction::advanceCrossfadeSample() const {
+    pimpl->audioEngine.advanceCrossfadeSample();
+}
+
 void SeamlessTransferFunction::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // Can be called from audio thread - no message thread check
     pimpl->audioEngine.prepareToPlay(sampleRate, samplesPerBlock);

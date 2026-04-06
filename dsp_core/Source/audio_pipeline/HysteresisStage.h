@@ -38,6 +38,7 @@ class HysteresisStage : public AudioProcessingStage {
     void setSaturation(double sat);
     void setWidth(double width);
     void setMakeupGain(double gain);
+    void setOperatingPoint(double Ms);
 
   private:
     const dsp_core::SeamlessTransferFunction* transferFunction_;
