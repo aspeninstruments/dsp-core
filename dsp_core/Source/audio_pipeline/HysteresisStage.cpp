@@ -13,6 +13,8 @@ void HysteresisStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) 
             return transferFunction_->applyTransferFunction(x);
         });
     }
+
+    smoothedMakeupGain_.reset(sampleRate, 0.01); // 10ms ramp
 }
 
 void HysteresisStage::process(juce::AudioBuffer<double>& buffer) {
@@ -35,9 +37,11 @@ void HysteresisStage::process(juce::AudioBuffer<double>& buffer) {
     // Sample-outer loop ensures crossfade advances once per sample (stereo consistency)
     const int channelsToProcess = std::min(numChannels, 2);
     for (int i = 0; i < numSamples; ++i) {
+        const double gain = smoothedMakeupGain_.getNextValue();
+
         for (int ch = 0; ch < channelsToProcess; ++ch) {
             auto* data = buffer.getWritePointer(ch);
-            data[i] = processors_[ch].process(data[i]) * makeupGain_;
+            data[i] = processors_[ch].process(data[i]) * gain;
         }
         transferFunction_->advanceCrossfadeSample();
     }
@@ -72,7 +76,7 @@ void HysteresisStage::setWidth(double width) {
 }
 
 void HysteresisStage::setMakeupGain(double gain) {
-    makeupGain_ = gain;
+    smoothedMakeupGain_.setTargetValue(gain);
 }
 
 void HysteresisStage::setOperatingPoint(double Ms) {

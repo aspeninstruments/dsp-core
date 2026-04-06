@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio_pipeline/SoftClippingStage.h"
+#include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
 #include <functional>
 
@@ -104,6 +105,9 @@ class HysteresisProcessor {
 
     // Operating point override (-1 = use auto scale a*4, >= 0 = fixed)
     double scaleOverride_ = -1.0;
+
+    // Smoothed c parameter (prevents clicks on width changes)
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedC_{0.17};
 
     // Derived parameter cache
     double M_s_oa_ = 0.0;      // M_s / a

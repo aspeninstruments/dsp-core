@@ -16,6 +16,8 @@ void HysteresisProcessor::prepareToPlay(double sampleRate) {
     constexpr double dcCutoffHz = 20.0;
     dcR_ = 1.0 - 2.0 * 3.14159265358979323846 * dcCutoffHz / sampleRate;
 
+    smoothedC_.reset(sampleRate, 0.01); // 10ms ramp
+
     reset();
 }
 
@@ -48,6 +50,10 @@ double HysteresisProcessor::process(double inputH) {
             muteCountdown_ = static_cast<int>(sampleRate_ * 0.1);
         return 0.0;
     }
+
+    // Smooth c parameter toward target (~10ms ramp)
+    c_ = smoothedC_.getNextValue();
+    M_s_oa_tc_ = c_ * M_s_oa_;
 
     // Input clamping
     double H = std::clamp(inputH, -inputLimit_, inputLimit_);
@@ -106,15 +112,19 @@ void HysteresisProcessor::setSaturation(double sat) {
 
 void HysteresisProcessor::setWidth(double width) {
     width = std::clamp(width, 0.0, 1.0);
-    c_ = std::sqrt(1.0 - width) - 0.01;
-    c_ = std::max(c_, 0.001);  // prevent negative/zero
-    updateDerivedParams();
+    smoothedC_.setTargetValue(std::max(1.0 - width, 0.001));
 }
 
 void HysteresisProcessor::setOperatingPoint(double Ms) {
     M_s_ = Ms;
     a_ = Ms;              // Q = H/Ms — normalizes input to operating range
     scaleOverride_ = 1.0; // LUT sees normalized signal directly
+
+    // Scale k to preserve effective loop width (k/a ratio).
+    // ChowTape reference: a=M_s/(0.01+6*0.5)≈0.415, k=0.47875 → k/a≈1.154
+    // With a=Ms, need k=1.154*Ms to maintain the same ratio.
+    k_ = 1.154 * Ms;
+
     updateDerivedParams();
 }
 

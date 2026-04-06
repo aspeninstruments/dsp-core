@@ -44,7 +44,7 @@ class HysteresisStage : public AudioProcessingStage {
     const dsp_core::SeamlessTransferFunction* transferFunction_;
     std::array<dsp_core::HysteresisProcessor, 2> processors_; // stereo
     std::atomic<bool> hysteresisEnabled_{true};
-    double makeupGain_{1.0};
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedMakeupGain_{1.0};
 };
 
 } // namespace dsp_core::audio_pipeline
