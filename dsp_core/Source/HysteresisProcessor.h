@@ -58,13 +58,22 @@ class HysteresisProcessor {
     // Public for testing — these implement the core math
     double langevin(double Q) const;
     double langevinDeriv(double Q) const;
-    double dMdt(double M, double H, double H_d) const;
+
+    /**
+     * Compute dM/dt for the J-A model.
+     * @param M      Current magnetization
+     * @param H      Current field (may be RK4-interpolated)
+     * @param dH_dt  Field derivative — constant across all RK4 stages (linear H interpolation)
+     * @param delta   Branch direction (+1 ascending, -1 descending) — constant per sample
+     */
+    double dMdt(double M, double H, double dH_dt, double delta) const;
 
   private:
     // Jiles-Atherton state
     double M_n1_ = 0.0;      // previous magnetization
     double H_n1_ = 0.0;      // previous field
-    double H_d_n1_ = 0.0;    // previous field derivative
+    double H_d_n1_ = 0.0;    // previous field derivative (legacy, kept for reset/tests)
+    double lastDelta_ = 1.0;  // branch direction with deadband hold
 
     // Parameters (normalized, from ChowTape)
     double M_s_ = 1.0;

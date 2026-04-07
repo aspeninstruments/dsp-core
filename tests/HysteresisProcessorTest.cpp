@@ -135,7 +135,7 @@ TEST_F(HysteresisProcessorTest, DMdt_ReturnsFinite_ForAllParameterExtremes) {
                 proc_.setDrive(drive);
                 proc_.setSaturation(sat);
                 proc_.setWidth(width);
-                double result = proc_.dMdt(0.5, 0.5, 1000.0);
+                double result = proc_.dMdt(0.5, 0.5, 1000.0, 1.0);
                 EXPECT_TRUE(std::isfinite(result))
                     << "dMdt not finite at drive=" << drive
                     << " sat=" << sat << " width=" << width;
@@ -147,8 +147,8 @@ TEST_F(HysteresisProcessorTest, DMdt_ReturnsFinite_ForAllParameterExtremes) {
 TEST_F(HysteresisProcessorTest, DMdt_SignFollowsFieldDirection) {
     // When field is increasing (H_d > 0) and M < M_anhysteretic,
     // dM/dt should generally be positive (magnetization increasing toward equilibrium)
-    double result_positive_Hd = proc_.dMdt(0.0, 1.0, 10000.0);
-    double result_negative_Hd = proc_.dMdt(0.0, 1.0, -10000.0);
+    double result_positive_Hd = proc_.dMdt(0.0, 1.0, 10000.0, 1.0);
+    double result_negative_Hd = proc_.dMdt(0.0, 1.0, -10000.0, -1.0);
     // They should differ in sign or magnitude
     EXPECT_NE(std::signbit(result_positive_Hd), std::signbit(result_negative_Hd));
 }
@@ -212,27 +212,28 @@ TEST_F(HysteresisProcessorTest, CustomNL_ProducesDifferentLoop) {
 TEST_F(HysteresisProcessorTest, GoldenTest_MatchesPythonReference) {
     // First 20 reference samples from generate_reference.py
     // Uses same normalized parameters and alpha-transform derivative
+    // Regenerated after fix: unified raw derivative for both t1 and t2, delta with deadband
     static const double kReferenceM[] = {
         0.000000000000000000e+00,
-        3.100352212472069248e-04,
-        6.991803963515725315e-04,
-        1.032774984958771203e-03,
-        1.412482992802132666e-03,
-        1.761528288336377613e-03,
-        2.137858763332708967e-03,
-        2.497711381241880628e-03,
-        2.874105255052884257e-03,
-        3.242100124941552693e-03,
-        3.620503745947429870e-03,
-        3.995104833193729478e-03,
-        4.376611810808931149e-03,
-        4.756927232181540691e-03,
-        5.142144801541461210e-03,
-        5.527650082785785443e-03,
-        5.916908161629243212e-03,
-        6.307288341513762886e-03,
-        6.700758787364844565e-03,
-        7.095818358000376136e-03,
+        1.862820783428839500e-04,
+        3.741089222468699100e-04,
+        5.634769726238643000e-04,
+        7.543826640926138600e-04,
+        9.468224250339505800e-04,
+        1.140792677629677000e-03,
+        1.336289837908787500e-03,
+        1.533310315790437200e-03,
+        1.731850515127762600e-03,
+        1.931906833752000300e-03,
+        2.133475663517463300e-03,
+        2.336553390345533100e-03,
+        2.541136394269726100e-03,
+        2.747221049480261700e-03,
+        2.954803724369233200e-03,
+        3.163880781575850900e-03,
+        3.374448578031558800e-03,
+        3.586503465005659800e-03,
+        3.800041788150730500e-03,
     };
 
     // Generate same 100 Hz sine at 768 kHz
@@ -484,5 +485,189 @@ TEST_F(HysteresisProcessorTest, Stress_RapidParameterSweep_Stable) {
             << "Non-finite output during parameter sweep at sample " << n;
         EXPECT_LE(std::abs(out), 2.0)
             << "Unbounded output during parameter sweep at sample " << n;
+    }
+}
+
+// =============================================================================
+// Layer 6: Hysteresis Loop Shape (operating point mode)
+//
+// These tests verify correct physical behavior of the J-A model at the
+// audio-range operating point (Ms=1.0). The key invariants:
+//   - Loop area increases monotonically as width increases (c decreases)
+//   - At width=0 (c=1, fully reversible), loop area should be near zero
+//   - At width=1 (c≈0, fully irreversible), loop area should be maximal
+//   - The loop should never be "inside out" (counterclockwise for magnetic)
+// =============================================================================
+
+class HysteresisLoopTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        proc_.prepareToPlay(sampleRate_);
+        proc_.setOperatingPoint(1.0);
+    }
+
+    // Generate multiple cycles of sine, discard first cycle (transient),
+    // return the last full cycle for loop measurement
+    struct LoopData {
+        std::vector<double> H;
+        std::vector<double> M;
+    };
+
+    LoopData measureLoop(double width, double freq = 20.0, double amplitude = 1.0, int settleCycles = 3) {
+        proc_.reset();
+        proc_.setWidth(width);
+
+        const int samplesPerCycle = static_cast<int>(sampleRate_ / freq);
+        const int totalSamples = samplesPerCycle * (settleCycles + 1);
+
+        // Skip smoothing transient by processing enough samples for SmoothedValue to settle
+        // (10ms ramp at 768kHz = 7680 samples, much less than one cycle at 20Hz = 38400 samples)
+
+        // Process settle cycles (discard output)
+        for (int n = 0; n < samplesPerCycle * settleCycles; ++n) {
+            double H = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * n / sampleRate_);
+            proc_.process(H);
+        }
+
+        // Capture the final cycle
+        LoopData data;
+        data.H.resize(samplesPerCycle);
+        data.M.resize(samplesPerCycle);
+        for (int n = 0; n < samplesPerCycle; ++n) {
+            int globalN = samplesPerCycle * settleCycles + n;
+            data.H[n] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * globalN / sampleRate_);
+            data.M[n] = proc_.process(data.H[n]);
+        }
+        return data;
+    }
+
+    // Compute signed loop area using shoelace formula
+    // Positive = counterclockwise (correct for magnetic hysteresis)
+    double signedLoopArea(const std::vector<double>& H, const std::vector<double>& M) {
+        double area = 0.0;
+        int n = static_cast<int>(H.size());
+        for (int i = 0; i < n; ++i) {
+            int j = (i + 1) % n;
+            area += H[i] * M[j] - H[j] * M[i];
+        }
+        return area / 2.0;
+    }
+
+    double absLoopArea(const std::vector<double>& H, const std::vector<double>& M) {
+        return std::abs(signedLoopArea(H, M));
+    }
+
+    static constexpr double sampleRate_ = 48000.0 * 16.0;
+    HysteresisProcessor proc_;
+};
+
+TEST_F(HysteresisLoopTest, FullyReversible_NoLoop) {
+    // width=0 → c=1.0: fully reversible, should follow anhysteretic with no loop
+    auto [H, M] = measureLoop(0.0);
+    double area = absLoopArea(H, M);
+
+    // Area should be negligible (< 1% of max possible area, which is ~π for unit circle)
+    EXPECT_LT(area, 0.03)
+        << "width=0 (c=1.0, fully reversible) should produce near-zero loop area, got " << area;
+}
+
+TEST_F(HysteresisLoopTest, FullyIrreversible_MaxLoop) {
+    // width=1 → c≈0: fully irreversible, should produce wide loop
+    auto [H, M] = measureLoop(1.0);
+    double area = absLoopArea(H, M);
+
+    EXPECT_GT(area, 0.01)
+        << "width=1 (c≈0, fully irreversible) should produce significant loop area, got " << area;
+}
+
+TEST_F(HysteresisLoopTest, LoopAreaMonotonicallyIncreasesWithWidth) {
+    // As width increases (c decreases), loop area should increase monotonically
+    // This is the core invariant: more width = more hysteresis
+    std::vector<double> widths = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0};
+    std::vector<double> areas;
+
+    for (double w : widths) {
+        auto [H, M] = measureLoop(w);
+        areas.push_back(absLoopArea(H, M));
+    }
+
+    for (size_t i = 1; i < areas.size(); ++i) {
+        EXPECT_GE(areas[i], areas[i - 1])
+            << "Loop area not monotonically increasing: width=" << widths[i]
+            << " area=" << areas[i] << " < width=" << widths[i - 1]
+            << " area=" << areas[i - 1];
+    }
+}
+
+TEST_F(HysteresisLoopTest, MidWidth_HasModeratLoop) {
+    // width=0.5 → c=0.5: should have a clearly visible loop, not near-zero
+    auto [H, M] = measureLoop(0.5);
+    double area = absLoopArea(H, M);
+
+    // At mid-width, area should be meaningfully nonzero
+    // (using 10% of the max-width area as a floor)
+    auto [H_max, M_max] = measureLoop(1.0);
+    double maxArea = absLoopArea(H_max, M_max);
+
+    EXPECT_GT(area, maxArea * 0.1)
+        << "width=0.5 loop area (" << area << ") is too small relative to width=1.0 (" << maxArea << ")";
+}
+
+TEST_F(HysteresisLoopTest, AllWidths_ProduceFiniteOutput) {
+    for (double w = 0.0; w <= 1.0; w += 0.1) {
+        auto [H, M] = measureLoop(w);
+        for (size_t i = 0; i < M.size(); ++i) {
+            ASSERT_TRUE(std::isfinite(M[i]))
+                << "Non-finite output at width=" << w << " sample=" << i;
+            ASSERT_LE(std::abs(M[i]), 2.0)
+                << "Unbounded output at width=" << w << " sample=" << i << " value=" << M[i];
+        }
+    }
+}
+
+TEST_F(HysteresisLoopTest, SignalLevel_ConsistentAcrossWidthRange) {
+    auto peakOf = [](const std::vector<double>& M) {
+        double peak = 0.0;
+        for (double m : M) peak = std::max(peak, std::abs(m));
+        return peak;
+    };
+
+    auto [H0, M0] = measureLoop(0.0);
+    auto [H1, M1] = measureLoop(0.01);
+
+    double peak0 = peakOf(M0);
+    double peak1 = peakOf(M1);
+
+    double ratio = peak0 / peak1;
+    EXPECT_GT(ratio, 0.9) << "width=0 peak (" << peak0 << ") much lower than width=0.01 (" << peak1 << ")";
+    EXPECT_LT(ratio, 1.1) << "width=0 peak (" << peak0 << ") much higher than width=0.01 (" << peak1 << ")";
+}
+
+TEST_F(HysteresisLoopTest, NoDCBias_AcrossWidthRange) {
+    for (double w : {0.0, 0.01, 0.1, 0.5, 1.0}) {
+        auto [H, M] = measureLoop(w);
+        double mean = 0.0;
+        for (double m : M) mean += m;
+        mean /= static_cast<double>(M.size());
+
+        EXPECT_LT(std::abs(mean), 0.01)
+            << "DC bias at width=" << w << ": mean=" << mean;
+    }
+}
+
+TEST_F(HysteresisLoopTest, FineResolution_SmallWidthIncrements) {
+    std::vector<double> widths = {0.005, 0.01, 0.02, 0.05, 0.1};
+    std::vector<double> areas;
+
+    for (double w : widths) {
+        auto [H, M] = measureLoop(w);
+        areas.push_back(absLoopArea(H, M));
+    }
+
+    for (size_t i = 1; i < areas.size(); ++i) {
+        EXPECT_GE(areas[i], areas[i - 1])
+            << "Loop area not monotonic at fine resolution: width=" << widths[i]
+            << " area=" << areas[i] << " < width=" << widths[i - 1]
+            << " area=" << areas[i - 1];
     }
 }

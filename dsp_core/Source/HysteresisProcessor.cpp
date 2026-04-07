@@ -58,17 +58,21 @@ double HysteresisProcessor::process(double inputH) {
     // Input clamping
     double H = std::clamp(inputH, -inputLimit_, inputLimit_);
 
-    // H derivative (alpha-transform)
-    double H_d = computeHDerivative(H);
+    // Field derivative: constant across the timestep (linear interpolation of H between samples)
+    double dH_dt = (H - H_n1_) / T_;
+    dH_dt = std::clamp(dH_dt, -hdLimit_, hdLimit_);
 
-    // H_d clamping
-    H_d = std::clamp(H_d, -hdLimit_, hdLimit_);
+    // Branch direction with deadband (hold last direction when dH is negligible)
+    double dH_raw = H - H_n1_;
+    constexpr double eps = 1e-12;
+    if (dH_raw > eps) lastDelta_ = 1.0;
+    else if (dH_raw < -eps) lastDelta_ = -1.0;
 
-    // RK4 integration
-    double k1 = T_ * dMdt(M_n1_, H_n1_, H_d_n1_);
-    double k2 = T_ * dMdt(M_n1_ + k1 / 2.0, (H + H_n1_) / 2.0, (H_d + H_d_n1_) / 2.0);
-    double k3 = T_ * dMdt(M_n1_ + k2 / 2.0, (H + H_n1_) / 2.0, (H_d + H_d_n1_) / 2.0);
-    double k4 = T_ * dMdt(M_n1_ + k3, H, H_d);
+    // RK4 integration — dH_dt and delta are constant across all stages
+    double k1 = T_ * dMdt(M_n1_, H_n1_, dH_dt, lastDelta_);
+    double k2 = T_ * dMdt(M_n1_ + k1 / 2.0, (H + H_n1_) / 2.0, dH_dt, lastDelta_);
+    double k3 = T_ * dMdt(M_n1_ + k2 / 2.0, (H + H_n1_) / 2.0, dH_dt, lastDelta_);
+    double k4 = T_ * dMdt(M_n1_ + k3, H, dH_dt, lastDelta_);
 
     double M = M_n1_ + k1 / 6.0 + k2 / 3.0 + k3 / 3.0 + k4 / 6.0;
 
@@ -87,7 +91,6 @@ double HysteresisProcessor::process(double inputH) {
     // Update state
     M_n1_ = M;
     H_n1_ = H;
-    H_d_n1_ = H_d;
 
     // Output clamping
     return std::clamp(M, -outputLimit_, outputLimit_);
@@ -112,7 +115,13 @@ void HysteresisProcessor::setSaturation(double sat) {
 
 void HysteresisProcessor::setWidth(double width) {
     width = std::clamp(width, 0.0, 1.0);
-    smoothedC_.setTargetValue(std::max(1.0 - width, 0.001));
+    // Map width [0, 1] → c [0.999, 0.05]
+    // Above c≈0.05 (old width=0.95) the loop becomes unusable,
+    // and c=1.0 is a degenerate regime. This compresses the useful
+    // range into the full knob travel.
+    constexpr double cMax = 0.999;
+    constexpr double cMin = 0.05;
+    smoothedC_.setTargetValue(cMax - width * (cMax - cMin));
 }
 
 void HysteresisProcessor::setOperatingPoint(double Ms) {
@@ -151,36 +160,27 @@ double HysteresisProcessor::langevinDeriv(double Q) const {
     return standardLangevinDeriv(Q);
 }
 
-double HysteresisProcessor::dMdt(double M, double H, double H_d) const {
+double HysteresisProcessor::dMdt(double M, double H, double dH_dt, double delta) const {
     double Q = (H + alpha_ * M) / a_;
     double M_diff = M_s_ * langevin(Q) - M;
-    double delta = (H_d > 0.0) ? 1.0 : -1.0;
-    double delta_M = (std::signbit(delta) == std::signbit(M_diff)) ? 0.0 : 1.0;
-    // delta_M = 1 when sign(delta) == sign(M_diff)
-    // But signbit returns true for negative, so equal signbits means same sign
-    // Actually: sign(delta) == sign(M_diff) → delta_M = 1
-    // signbit(a) == signbit(b) means same sign
-    // So delta_M = 1 when signbit(delta) == signbit(M_diff)
-    delta_M = (std::signbit(delta) == std::signbit(M_diff)) ? 1.0 : 0.0;
+    double delta_M = (std::signbit(delta) == std::signbit(M_diff)) ? 1.0 : 0.0;
 
     double L_prime = langevinDeriv(Q);
-
     double denominator = 1.0 - c_ * alpha_ * M_s_oa_ * L_prime;
 
-    // Prevent division by zero
     if (std::abs(denominator) < 1e-15)
         return 0.0;
 
+    // Irreversible term
     double t1_den = (1.0 - c_) * delta * k_ - alpha_ * M_diff;
-
-    // Prevent division by zero in t1
     if (std::abs(t1_den) < 1e-15)
-        return (c_ * M_s_oa_ * H_d * L_prime) / denominator;
+        return (c_ * M_s_oa_ * dH_dt * L_prime) / denominator;
 
     double t1_num = (1.0 - c_) * delta_M * M_diff;
-    double t1 = (t1_num / t1_den) * H_d;
+    double t1 = (t1_num / t1_den) * dH_dt;
 
-    double t2 = c_ * M_s_oa_ * H_d * L_prime;
+    // Reversible term — same dH_dt as t1, no mixed-derivative artifacts
+    double t2 = c_ * M_s_oa_ * dH_dt * L_prime;
 
     return (t1 + t2) / denominator;
 }
