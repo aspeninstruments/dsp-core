@@ -163,6 +163,12 @@ TEST_F(HysteresisStageTest, HysteresisDisabled_OutputMatchesTransferFunction) {
     // each sample should pass through applyTransferFunction(x) which is identity.
     stage_->setHysteresisEnabled(false);
 
+    // Settle the crossfade-out triggered by default enabled=true → false
+    for (int b = 0; b < 40; ++b) {
+        auto buf = makeConstantBuffer(2, 512, 0.0);
+        stage_->process(buf);
+    }
+
     const int numSamples = 256;
     auto buffer = makeSineBuffer(2, numSamples, 100.0, 48000.0 * 16.0, 0.5);
 
@@ -382,9 +388,251 @@ TEST_F(HysteresisStageTest, MakeupGain_HighSaturation_CompensatesLevelDrop) {
         << " With: " << peakWithMakeup;
 }
 
+// =============================================================================
+// Layer 7 — Crossfade Smoothness (click-free enable/disable)
+// =============================================================================
+
+TEST_F(HysteresisStageTest, EnableHysteresis_MidSignal_NoCrossfadeClick) {
+    // Simulate enabling hysteresis while a signal is playing.
+    // Two-phase transition: 25ms warmup + 25ms crossfade = 50ms total.
+    // Collect a continuous output stream across the transition and measure
+    // the maximum sample-to-sample jump. A click manifests as a delta that
+    // far exceeds what a smooth crossfade should produce.
+
+    const double sampleRate = 48000.0 * 16.0;
+    const double freq = 100.0;
+    const double amplitude = 0.5;
+    const int blockSize = 512;
+    // 50ms total at 768kHz = 38400 samples. Need ~80 blocks of 512 to cover it.
+    const int blocksAfterEnable = 80;
+
+    // Start with hysteresis disabled
+    stage_->setHysteresisEnabled(false);
+
+    // Process a few blocks to reach steady state in the waveshaping path
+    for (int b = 0; b < 4; ++b) {
+        auto buf = makeSineBuffer(1, blockSize, freq, sampleRate, amplitude);
+        stage_->process(buf);
+    }
+
+    // Collect output: a few blocks before enable, then enable, then blocks after
+    std::vector<double> output;
+    int sinePhase = 4 * blockSize; // continue the sine phase
+
+    // 2 blocks before enable
+    for (int b = 0; b < 2; ++b) {
+        juce::AudioBuffer<double> buf(1, blockSize);
+        auto* data = buf.getWritePointer(0);
+        for (int i = 0; i < blockSize; ++i) {
+            data[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (sinePhase + i) / sampleRate);
+        }
+        stage_->process(buf);
+        for (int i = 0; i < blockSize; ++i) {
+            output.push_back(buf.getSample(0, i));
+        }
+        sinePhase += blockSize;
+    }
+
+    // Enable hysteresis between blocks
+    stage_->setHysteresisEnabled(true);
+
+    // Blocks after enable — covers full warmup + crossfade + settling
+    for (int b = 0; b < blocksAfterEnable; ++b) {
+        juce::AudioBuffer<double> buf(1, blockSize);
+        auto* data = buf.getWritePointer(0);
+        for (int i = 0; i < blockSize; ++i) {
+            data[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (sinePhase + i) / sampleRate);
+        }
+        stage_->process(buf);
+        for (int i = 0; i < blockSize; ++i) {
+            output.push_back(buf.getSample(0, i));
+        }
+        sinePhase += blockSize;
+    }
+
+    // Measure max sample-to-sample delta
+    double maxDelta = 0.0;
+    int maxDeltaIdx = 0;
+    for (size_t i = 1; i < output.size(); ++i) {
+        double delta = std::abs(output[i] - output[i - 1]);
+        if (delta > maxDelta) {
+            maxDelta = delta;
+            maxDeltaIdx = static_cast<int>(i);
+        }
+    }
+
+    // For a 100Hz sine at 768kHz, the max natural slope is:
+    // 2*pi*f*A / sampleRate ≈ 2*pi*100*0.5/768000 ≈ 0.0004
+    // Allow some headroom for hysteresis nonlinearity but a click would be >>0.01
+    double maxNaturalDelta = 2.0 * juce::MathConstants<double>::pi * freq * amplitude / sampleRate;
+    double clickThreshold = maxNaturalDelta * 50.0; // generous: 50x natural slope
+
+    EXPECT_LT(maxDelta, clickThreshold)
+        << "Click detected at sample " << maxDeltaIdx
+        << ": delta=" << maxDelta
+        << " threshold=" << clickThreshold
+        << " (natural max delta=" << maxNaturalDelta << ")";
+}
+
+TEST_F(HysteresisStageTest, EnableHysteresis_MidSignal_DiagnosticDeltas) {
+    // Diagnostic: print sample-to-sample deltas around the enable transition
+    // to understand where the click comes from.
+
+    const double sampleRate = 48000.0 * 16.0;
+    const double freq = 100.0;
+    const double amplitude = 0.5;
+    const int blockSize = 512;
+
+    stage_->setHysteresisEnabled(false);
+
+    // Steady state
+    for (int b = 0; b < 4; ++b) {
+        auto buf = makeSineBuffer(1, blockSize, freq, sampleRate, amplitude);
+        stage_->process(buf);
+    }
+
+    std::vector<double> output;
+    int sinePhase = 4 * blockSize;
+
+    // 1 block before enable
+    {
+        juce::AudioBuffer<double> buf(1, blockSize);
+        auto* data = buf.getWritePointer(0);
+        for (int i = 0; i < blockSize; ++i) {
+            data[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (sinePhase + i) / sampleRate);
+        }
+        stage_->process(buf);
+        for (int i = 0; i < blockSize; ++i) {
+            output.push_back(buf.getSample(0, i));
+        }
+        sinePhase += blockSize;
+    }
+
+    // Enable
+    stage_->setHysteresisEnabled(true);
+
+    // 80 blocks after enable (covers full 25ms warmup + 25ms crossfade + settling)
+    for (int b = 0; b < 80; ++b) {
+        juce::AudioBuffer<double> buf(1, blockSize);
+        auto* data = buf.getWritePointer(0);
+        for (int i = 0; i < blockSize; ++i) {
+            data[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (sinePhase + i) / sampleRate);
+        }
+        stage_->process(buf);
+        for (int i = 0; i < blockSize; ++i) {
+            output.push_back(buf.getSample(0, i));
+        }
+        sinePhase += blockSize;
+    }
+
+    // Find and print top 10 largest deltas
+    struct DeltaInfo { double delta; int idx; double prevSample; double curSample; };
+    std::vector<DeltaInfo> deltas;
+    for (size_t i = 1; i < output.size(); ++i) {
+        double d = std::abs(output[i] - output[i - 1]);
+        deltas.push_back({d, static_cast<int>(i), output[i-1], output[i]});
+    }
+    std::sort(deltas.begin(), deltas.end(), [](auto& a, auto& b) { return a.delta > b.delta; });
+
+    double maxNaturalDelta = 2.0 * juce::MathConstants<double>::pi * freq * amplitude / sampleRate;
+    std::cout << "\n=== Enable Hysteresis Crossfade Diagnostic ===" << std::endl;
+    std::cout << "Max natural delta for " << freq << "Hz sine at " << sampleRate << "Hz: " << maxNaturalDelta << std::endl;
+    std::cout << "Transition starts at sample " << blockSize << std::endl;
+    std::cout << "Top 10 largest sample-to-sample deltas:" << std::endl;
+    for (int i = 0; i < std::min(10, static_cast<int>(deltas.size())); ++i) {
+        std::cout << "  [" << deltas[i].idx << "] delta=" << deltas[i].delta
+                  << " prev=" << deltas[i].prevSample
+                  << " cur=" << deltas[i].curSample
+                  << " (ratio to natural: " << deltas[i].delta / maxNaturalDelta << "x)"
+                  << std::endl;
+    }
+    std::cout << "===============================================\n" << std::endl;
+
+    // Still assert no click
+    double clickThreshold = maxNaturalDelta * 50.0;
+    EXPECT_LT(deltas[0].delta, clickThreshold)
+        << "Click detected at sample " << deltas[0].idx;
+}
+
+TEST_F(HysteresisStageTest, DisableHysteresis_MidSignal_NoCrossfadeClick) {
+    const double sampleRate = 48000.0 * 16.0;
+    const double freq = 100.0;
+    const double amplitude = 0.5;
+    const int blockSize = 512;
+    // 25ms crossfade at 768kHz = 19200 samples. Need ~40 blocks of 512.
+    const int blocksAfterDisable = 40;
+
+    // Start with hysteresis enabled, process enough to reach steady state
+    stage_->setHysteresisEnabled(true);
+    for (int b = 0; b < 10; ++b) {
+        auto buf = makeSineBuffer(1, blockSize, freq, sampleRate, amplitude);
+        stage_->process(buf);
+    }
+
+    std::vector<double> output;
+    int sinePhase = 10 * blockSize;
+
+    // 2 blocks before disable
+    for (int b = 0; b < 2; ++b) {
+        juce::AudioBuffer<double> buf(1, blockSize);
+        auto* data = buf.getWritePointer(0);
+        for (int i = 0; i < blockSize; ++i) {
+            data[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (sinePhase + i) / sampleRate);
+        }
+        stage_->process(buf);
+        for (int i = 0; i < blockSize; ++i) {
+            output.push_back(buf.getSample(0, i));
+        }
+        sinePhase += blockSize;
+    }
+
+    // Disable hysteresis between blocks
+    stage_->setHysteresisEnabled(false);
+
+    // Blocks after disable — covers full 25ms crossfade + settling
+    for (int b = 0; b < blocksAfterDisable; ++b) {
+        juce::AudioBuffer<double> buf(1, blockSize);
+        auto* data = buf.getWritePointer(0);
+        for (int i = 0; i < blockSize; ++i) {
+            data[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (sinePhase + i) / sampleRate);
+        }
+        stage_->process(buf);
+        for (int i = 0; i < blockSize; ++i) {
+            output.push_back(buf.getSample(0, i));
+        }
+        sinePhase += blockSize;
+    }
+
+    double maxDelta = 0.0;
+    int maxDeltaIdx = 0;
+    for (size_t i = 1; i < output.size(); ++i) {
+        double delta = std::abs(output[i] - output[i - 1]);
+        if (delta > maxDelta) {
+            maxDelta = delta;
+            maxDeltaIdx = static_cast<int>(i);
+        }
+    }
+
+    double maxNaturalDelta = 2.0 * juce::MathConstants<double>::pi * freq * amplitude / sampleRate;
+    double clickThreshold = maxNaturalDelta * 50.0;
+
+    EXPECT_LT(maxDelta, clickThreshold)
+        << "Click detected at sample " << maxDeltaIdx
+        << ": delta=" << maxDelta
+        << " threshold=" << clickThreshold
+        << " (natural max delta=" << maxNaturalDelta << ")";
+}
+
 TEST_F(HysteresisStageTest, MakeupGain_HysteresisDisabled_NoMakeup) {
     // When hysteresis is disabled (waveshaping fallback), makeup gain should not apply
     stage_->setHysteresisEnabled(false);
+
+    // Settle the crossfade-out triggered by default enabled=true → false
+    for (int b = 0; b < 40; ++b) {
+        auto buf = makeConstantBuffer(2, 512, 0.0);
+        stage_->process(buf);
+    }
+
     stage_->setMakeupGain(2.0); // Deliberately large to detect if it's applied
 
     auto buffer = makeSineBuffer(2, 512, 100.0, 48000.0 * 16.0, 0.5);

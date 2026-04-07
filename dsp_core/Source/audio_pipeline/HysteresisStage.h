@@ -41,10 +41,25 @@ class HysteresisStage : public AudioProcessingStage {
     void setOperatingPoint(double Ms);
 
   private:
+    enum class CrossfadeState { Inactive, WarmingUp, CrossfadingIn, CrossfadingOut };
+
+    static double smoothstep(double t) { return t * t * (3.0 - 2.0 * t); }
+
+    void processWarmup(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
+    void processCrossfadeIn(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
+    void processCrossfadeOut(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
+    void processSteadyHysteresis(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
+    void processSteadyWaveshaping(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
+
     const dsp_core::SeamlessTransferFunction* transferFunction_;
     std::array<dsp_core::HysteresisProcessor, 2> processors_; // stereo
     std::atomic<bool> hysteresisEnabled_{true};
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedMakeupGain_{1.0};
+
+    CrossfadeState crossfadeState_{CrossfadeState::Inactive};
+    int crossfadePosition_{0};
+    int phaseSamples_{480};
+    bool previousEnabled_{false};
 };
 
 } // namespace dsp_core::audio_pipeline
