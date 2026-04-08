@@ -24,7 +24,7 @@ The core innovation of TotalHarmonicControl is a **four-layer model** that separ
    │             │          │ (Coeffs[41]) │         │ (Anchors)    │
    │ User draws  │          │ WT Mix + 40  │  XOR    │ Direct PCHIP │
    │ here with   │          │ harmonics    │         │ evaluation   │
-   │ DrawMode    │          │              │         │              │
+   │ PaintTool    │          │              │         │              │
    └─────────────┘          └──────────────┘         └──────────────┘
          │                          │                        │
          │                          │ Mutually Exclusive     │
@@ -64,7 +64,7 @@ std::vector<std::atomic<double>> baseTable;  // 16384 points
 ```
 
 **Purpose**: User-drawn wavetable
-**Modified By**: DrawMode painting, EquationMode expressions, SplineMode curves
+**Modified By**: PaintTool painting, EquationTool expressions, SplineTool curves
 **Initially**: Linear (y = x)
 
 **Thread Safety**:
@@ -83,7 +83,7 @@ std::vector<double> coefficients;  // 41 coefficients
 ```
 
 **Purpose**: Additive harmonic synthesis using Chebyshev polynomial basis
-**Modified By**: HarmonicMode sliders
+**Modified By**: LaneMixerPanel sliders
 
 **Coefficients**:
 - `coefficients[0]` = Wavetable (WT) mix (0.0 to 1.0)
@@ -108,7 +108,7 @@ std::atomic<bool> splineLayerEnabled;
 ```
 
 **Purpose**: PCHIP (Piecewise Cubic Hermite Interpolating Polynomial) spline interpolation for smooth curve editing
-**Modified By**: SplineMode anchor dragging, curve fitting
+**Modified By**: SplineTool anchor dragging, curve fitting
 **Mutually Exclusive With**: Harmonic Layer (controlled by `splineLayerEnabled` flag)
 
 **Architecture**:
@@ -581,7 +581,7 @@ controller.applyExpression("sin(x * pi)");  // Internally uses ApplyFunctionComm
 When switching between editing modes (Harmonic ↔ Spline ↔ Paint), the mode coordinator enforces a strict **exit-then-entry** contract to maintain data integrity across the layered architecture:
 
 ```cpp
-// ModeCoordinator::setEditingMode() enforces this contract
+// ToolCoordinator::setEditingMode() enforces this contract
 void setEditingMode(EditingMode newMode) {
     // 1. MODE EXIT: Bake current mode state to base layer
     if (oldMode == EditingMode::Harmonic && newMode != EditingMode::Harmonic) {
@@ -592,7 +592,7 @@ void setEditingMode(EditingMode newMode) {
     transitionToMode(newMode);
 
     // 3. MODE ENTRY: New mode reads baked base layer
-    // (e.g., SplineMode::activate() fits anchors to base layer)
+    // (e.g., SplineTool::activate() fits anchors to base layer)
 }
 ```
 
@@ -672,21 +672,21 @@ void LayeredTransferFunction::bakeCompositeToBase() {
 
 **Root Cause**: Duplicate fitting logic violated the mode transition contract:
 
-1. ✅ **Correct Path**: `ModeCoordinator::setEditingMode()` → bake harmonics → `SplineMode::activate()` → fit curve
-2. ❌ **Wrong Path**: `TransferFunctionController::enterSplineModeInternal()` → manual bake + manual fit
+1. ✅ **Correct Path**: `ToolCoordinator::setEditingMode()` → bake harmonics → `SplineTool::activate()` → fit curve
+2. ❌ **Wrong Path**: `CurveEditorController::enterSplineToolInternal()` → manual bake + manual fit
 
 **Problem**: The second baking happened AFTER the correct baking, overwriting the base layer with un-normalized harmonics.
 
-**Fix**: Gutted `enterSplineModeInternal()` to only set model flags:
+**Fix**: Gutted `enterSplineToolInternal()` to only set model flags:
 
 ```cpp
 // BEFORE (lines 770-887): Manual baking + fitting
-void TransferFunctionController::enterSplineModeInternal(...) {
+void CurveEditorController::enterSplineToolInternal(...) {
     // ... 100+ lines of duplicate baking and fitting logic ...
 }
 
 // AFTER (lines 770-809): Flag-setting only
-void TransferFunctionController::enterSplineModeInternal(...) {
+void CurveEditorController::enterSplineToolInternal(...) {
     // Enable spline layer (sets RenderingMode::Spline)
     layeredTransferFunction.setSplineLayerEnabled(true);
 
@@ -698,7 +698,7 @@ void TransferFunctionController::enterSplineModeInternal(...) {
 ```
 
 **Lesson**: Enforce separation of concerns:
-- **ModeCoordinator**: Enforces mode-exit baking contract
+- **ToolCoordinator**: Enforces mode-exit baking contract
 - **Mode::activate()**: Performs mode-entry setup (fitting, UI initialization)
 - **Controller internal methods**: Only set model flags, no side effects
 

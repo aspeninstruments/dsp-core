@@ -67,19 +67,19 @@ TangentAlgorithm tangentAlgorithm = TangentAlgorithm::FritschCarlson;
 - Algorithm combo box (`InlineComboBoxFactory::makeAlgorithmCombo()` - preserved but commented for reference)
 - Spline mode settings panel (`TransferFunctionPanel::splineModeSettingsPanel`)
 - Processor state persistence (`PluginAudioProcessor::currentTangentAlgorithm`)
-- Wiring methods (`TransferFunctionPanel::wireSplineModeToProcessor()`)
+- Wiring methods (`TransferFunctionPanel::wireSplineToolToProcessor()`)
 
 ---
 
 ## Pattern: Panel Within Editor Mode (Preserved for Future Reference)
 
-**Use Case:** When an editor mode (like SplineMode) needs its own settings panel that appears/disappears with mode activation.
+**Use Case:** When an editor mode (like SplineTool) needs its own settings panel that appears/disappears with mode activation.
 
 ### Architecture
 
 ```
 TransferFunctionPanel (owner)
-└── SplineMode (child component, overlay on visualizer)
+└── SplineTool (child component, overlay on visualizer)
     └── Settings Panel (HorizontalStrip with controls)
         └── Combo Box / Sliders / Buttons
 ```
@@ -95,7 +95,7 @@ private:
     ui_core::InlineComboBox* algorithmComboPtr = nullptr;  // Raw pointer for callbacks
 
 // TransferFunctionPanel.cpp constructor
-void TransferFunctionPanel::setupSplineModeSettingsPanel()
+void TransferFunctionPanel::setupSplineToolSettingsPanel()
 {
     // Create panel
     splineModeSettingsPanel = std::make_unique<ui_panels::HorizontalStrip>();
@@ -108,7 +108,7 @@ void TransferFunctionPanel::setupSplineModeSettingsPanel()
     // Wire up callback
     algorithmComboPtr->onChange = [this](int selectedId) {
         // Update mode state via controller
-        // Note: Direct mode access (getSplineMode) was removed.
+        // Note: Direct mode access (getSplineTool) was removed.
         // Use controller methods for mode-specific operations.
         controller->setSplineAlgorithm(selectedId);
     };
@@ -126,7 +126,7 @@ void TransferFunctionPanel::setupSplineModeSettingsPanel()
 ```cpp
 void TransferFunctionPanel::updateModeComponentsVisibility()
 {
-    if (editingMode == ModeCoordinator::EditingMode::Spline)
+    if (editingMode == ToolCoordinator::EditingTool::Spline)
     {
         // Show panel and sync state
         if (splineModeSettingsPanel)
@@ -134,7 +134,7 @@ void TransferFunctionPanel::updateModeComponentsVisibility()
             splineModeSettingsPanel->setVisible(true);
 
             // Sync controls with mode state via controller
-            // Note: Direct mode access (getSplineMode) was removed.
+            // Note: Direct mode access (getSplineTool) was removed.
             // Query state through controller or model instead.
             auto value = controller->getSplineAlgorithm();
 
@@ -194,7 +194,7 @@ Use this pattern when:
 - ✅ Settings are mode-specific, not global
 
 Don't use when:
-- ❌ Mode is purely interactive (like DrawMode - no settings needed)
+- ❌ Mode is purely interactive (like PaintTool - no settings needed)
 - ❌ Settings are global (use bottom panel or top panel instead)
 - ❌ Only one or two buttons (use mode button bar instead)
 

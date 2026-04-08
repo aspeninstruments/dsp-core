@@ -309,7 +309,7 @@ case RenderingMode::Paint:
 
 **Performance**: ~10-15% faster than full composite path due to skipping wtCoeff multiplication and normalization.
 
-**Contract**: Previous mode MUST bake on exit (enforced by ModeCoordinator).
+**Contract**: Previous mode MUST bake on exit (enforced by ToolCoordinator).
 
 #### Harmonic Mode → Base + Harmonics (WITH normalization)
 
@@ -374,38 +374,38 @@ case RenderingMode::Spline:
 
 ### 8. Mode Transition Contract (CRITICAL)
 
-**File**: [`modules/transfer_function_editor/transfer_function_editor/Source/ModeCoordinator.cpp`](../../modules/transfer_function_editor/transfer_function_editor/Source/ModeCoordinator.cpp)
+**File**: [`modules/transfer_function_editor/transfer_function_editor/Source/ToolCoordinator.cpp`](../../modules/transfer_function_editor/transfer_function_editor/Source/ToolCoordinator.cpp)
 
-The seamless architecture depends on a **strict mode transition contract** enforced by ModeCoordinator:
+The seamless architecture depends on a **strict mode transition contract** enforced by ToolCoordinator:
 
 ```cpp
-void ModeCoordinator::setEditingMode(EditingMode newMode) {
+void ToolCoordinator::setEditingTool(EditingTool newMode) {
     // 1. MODE EXIT: Bake current mode to base layer
-    if (oldMode == EditingMode::Harmonic && newMode != EditingMode::Harmonic) {
+    if (oldMode == EditingTool::Harmonic && newMode != EditingTool::Harmonic) {
         controller.bakeHarmonicsToBase();  // Normalize + write to base
     }
 
     // 2. MODE TRANSITION: Deactivate old, activate new
     transitionToMode(newMode);
-        → deactivateEditingMode(oldMode)   // Cleanup callbacks
-        → activateEditingMode(newMode)      // Setup callbacks, trigger fit
+        → deactivateEditingTool(oldMode)   // Cleanup callbacks
+        → activateEditingTool(newMode)      // Setup callbacks, trigger fit
 }
 ```
 
 **The Contract**:
 
-1. **Mode EXIT** (ModeCoordinator responsibility):
+1. **Mode EXIT** (ToolCoordinator responsibility):
    - Previous mode MUST bake its state to base layer
    - Harmonic mode: `bakeHarmonicsToBase()` writes normalized composite → base
-   - Spline mode: `exitSplineModeInternal()` writes evaluated spline → base
+   - Spline mode: `exitSplineToolInternal()` writes evaluated spline → base
    - Paint mode: No-op (already in base layer)
 
 2. **Mode ENTRY** (Mode's activate() responsibility):
-   - New mode performs initial setup (e.g., SplineMode::activate() fits curve)
+   - New mode performs initial setup (e.g., SplineTool::activate() fits curve)
    - Assumes base layer contains correct baked curve from previous mode
    - Sets up callbacks, UI state, performs mode-specific initialization
 
-3. **Controller's enterSplineModeInternal()** (Model state only):
+3. **Controller's enterSplineToolInternal()** (Model state only):
    - Sets `splineLayerEnabled = true` (changes RenderingMode)
    - Fires `onSplineLayerStateChanged` callback for UI sync
    - Does NOT bake (already done by mode exit)
@@ -416,30 +416,30 @@ void ModeCoordinator::setEditingMode(EditingMode newMode) {
 ```cpp
 // State: H3=1.0, WT=0.0, base=y=x
 
-// 1. ModeCoordinator::setEditingMode(Spline) line 58-62
+// 1. ToolCoordinator::setEditingTool(Spline) line 58-62
 controller.bakeHarmonicsToBase();
    → updateNormalizationScalar()  // Find max of (0.0*y=x + H3)
    → for i: base[i] = normalize(0.0*y=x + H3)  // Write normalized H3 to base
    → Set WT=1.0, zero all harmonics
    → Base layer now contains normalized H3 curve ✅
 
-// 2. ModeCoordinator::transitionToMode(Spline)
-deactivateEditingMode(Harmonic);  // Cleanup callbacks
-activateEditingMode(Spline);
-   → SplineMode::activate()
+// 2. ToolCoordinator::transitionToMode(Spline)
+deactivateEditingTool(Harmonic);  // Cleanup callbacks
+activateEditingTool(Spline);
+   → SplineTool::activate()
       → fitCurveToSpline()  // Fit anchors to base layer (normalized H3)
       → Creates beautiful anchor fit ✅
 
-// 3. enterSplineModeInternal() [called by perform()]
+// 3. enterSplineToolInternal() [called by perform()]
 setSplineLayerEnabled(true);  // Just sets flag, no baking/fitting
 onSplineLayerStateChanged(true);  // UI sync
 ```
 
 **Why Two Entry Points?**
 
-- `ModeCoordinator::setEditingMode()`: User-initiated mode switch (enforces exit contract)
-- `controller.enterSplineMode()`: Undoable wrapper (calls setEditingMode + creates undo entry)
-- `enterSplineModeInternal()`: Model state only (called by perform(), no side effects)
+- `ToolCoordinator::setEditingTool()`: User-initiated mode switch (enforces exit contract)
+- `controller.enterSplineTool()`: Undoable wrapper (calls setEditingTool + creates undo entry)
+- `enterSplineToolInternal()`: Model state only (called by perform(), no side effects)
 
 ### 7. RenderJob (Data Structure)
 
@@ -580,8 +580,8 @@ MyAudioProcessor::MyAudioProcessor() {
     transferFunction = std::make_unique<dsp_core::SeamlessTransferFunction>();
 
     // CRITICAL: Create controller BEFORE starting seamless updates
-    controller = std::make_unique<TransferFunctionController>(
-        transferFunction->getEditingModel()
+    controller = std::make_unique<CurveEditorController>(
+        transferFunction->getEditingTooll()
     );
 
     // Start seamless updates after controller is created
@@ -634,7 +634,7 @@ MyAudioProcessorEditor::MyAudioProcessorEditor(MyAudioProcessor& p)
 
 ```cpp
 void onUserPaint(double x, double y) {
-    auto& editingModel = transferFunction->getEditingModel();
+    auto& editingModel = transferFunction->getEditingTooll();
     editingModel.setSplineAnchor(index, {x, y});
     // Version change detected by internal timers:
     // - Visualizer: within ~17ms (60Hz)
@@ -681,12 +681,12 @@ MyAudioProcessorEditor::MyAudioProcessorEditor(MyAudioProcessor& p) {
 ```cpp
 // ❌ WRONG (audio thread mutation)
 void processBlock(...) {
-    transferFunction->getEditingModel().setCoefficient(0, 0.5);  // CRASH!
+    transferFunction->getEditingTooll().setCoefficient(0, 0.5);  // CRASH!
 }
 
 // ✅ CORRECT (message thread mutation)
 void buttonClicked(juce::Button*) override {
-    transferFunction->getEditingModel().setCoefficient(0, 0.5);  // Safe
+    transferFunction->getEditingTooll().setCoefficient(0, 0.5);  // Safe
 }
 ```
 
@@ -697,7 +697,7 @@ void buttonClicked(juce::Button*) override {
 ```cpp
 // ❌ WRONG (causes flicker)
 controller.onSomeCallback = [this]() {
-    visualizer->setData(sampleEditingModel());  // Competes with worker thread!
+    visualizer->setData(sampleEditingTooll());  // Competes with worker thread!
 };
 
 // ✅ CORRECT (single update path)
