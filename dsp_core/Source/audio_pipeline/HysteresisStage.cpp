@@ -238,6 +238,17 @@ void HysteresisStage::setHysteresisEnabled(bool enabled) {
     hysteresisEnabled_.store(enabled, std::memory_order_release);
 }
 
+void HysteresisStage::requestWarmup() {
+    if (hysteresisEnabled_.load(std::memory_order_acquire)) {
+        crossfadeState_ = CrossfadeState::WarmingUp;
+        crossfadePosition_ = 0;
+        previousEnabled_ = false; // so the transition detection sees enabled && !previousEnabled_
+        for (auto& proc : processors_) {
+            proc.reset();
+        }
+    }
+}
+
 void HysteresisStage::setDrive(double drive) {
     for (auto& proc : processors_) {
         proc.setDrive(drive);

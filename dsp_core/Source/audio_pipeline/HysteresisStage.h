@@ -34,6 +34,7 @@ class HysteresisStage : public AudioProcessingStage {
     juce::String getName() const override { return "Hysteresis"; }
 
     void setHysteresisEnabled(bool enabled);
+    void requestWarmup();
     void setDrive(double drive);
     void setSaturation(double sat);
     void setWidth(double width);
