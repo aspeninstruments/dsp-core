@@ -109,4 +109,16 @@ void TransferFunctionOperations::smoother(std::vector<double>& curveData) {
     applyBoxFilter(curveData, 300);
 }
 
+void TransferFunctionOperations::linearize(std::vector<double>& curveData) {
+    if (curveData.empty()) {
+        return;
+    }
+    const auto size = curveData.size();
+    for (size_t i = 0; i < size; ++i) {
+        const double linear = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(size - 1);
+        curveData[i] = 0.5 * curveData[i] + 0.5 * linear;
+    }
+    normalize(curveData);
+}
+
 } // namespace dsp_core::Services

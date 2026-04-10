@@ -149,7 +149,12 @@ int LaneMixer::findLaneById(uint32_t laneId) const {
 void LaneMixer::setLaneAmplitude(int index, double amplitude) {
     if (!isValidIndex(index))
         return;
-    lanes_[static_cast<size_t>(index)].amplitude.store(amplitude, std::memory_order_release);
+    auto& slot = lanes_[static_cast<size_t>(index)];
+    const double current = slot.amplitude.load(std::memory_order_acquire);
+    if (current == amplitude) {
+        return; // Early-return guard: avoid spamming the LUT remix path under static automation.
+    }
+    slot.amplitude.store(amplitude, std::memory_order_release);
     incrementMixVersionIfNotBatching();
     incrementVersionIfNotBatching();
 }
@@ -158,6 +163,26 @@ double LaneMixer::getLaneAmplitude(int index) const {
     if (!isValidIndex(index))
         return 0.0;
     return lanes_[static_cast<size_t>(index)].amplitude.load(std::memory_order_acquire);
+}
+
+void LaneMixer::setLaneBlendDepth(int index, double depth) {
+    if (!isValidIndex(index))
+        return;
+    const double clamped = std::clamp(depth, -1.0, 1.0);
+    auto& slot = lanes_[static_cast<size_t>(index)];
+    const double current = slot.blendDepth.load(std::memory_order_acquire);
+    if (current == clamped) {
+        return; // Early-return guard: same rationale as setLaneAmplitude.
+    }
+    slot.blendDepth.store(clamped, std::memory_order_release);
+    incrementMixVersionIfNotBatching();
+    incrementVersionIfNotBatching();
+}
+
+double LaneMixer::getLaneBlendDepth(int index) const {
+    if (!isValidIndex(index))
+        return 0.0;
+    return lanes_[static_cast<size_t>(index)].blendDepth.load(std::memory_order_acquire);
 }
 
 void LaneMixer::setLaneContentType(int index, LaneContentType type) {
@@ -289,18 +314,28 @@ void LaneMixer::computeSum(double* outputBuffer, int size) const {
     // Zero the output buffer
     std::fill(outputBuffer, outputBuffer + numSamples, 0.0);
 
-    // Accumulate weighted contributions from all active lanes
+    // Hoist the global blend amount once outside the per-lane loop.
+    const double macro = blendAmount_.load(std::memory_order_acquire);
+
+    // Accumulate weighted contributions from all lanes whose effective amplitude is non-zero.
+    // Effective amplitude = base + macro * depth (no per-lane clamp — post-sum normalize bounds output).
+    // NB: Do NOT use Lane::isActive() here — that only checks `amplitude`, missing the case
+    // amplitude=0, depth=±1, blendAmount>0 where the lane *is* audibly contributing.
     for (int laneIdx = 0; laneIdx < activeLaneCount_; ++laneIdx) {
         const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
-        if (!lane.isActive())
-            continue;
+        const double base = lane.amplitude.load(std::memory_order_acquire);
+        const double depth = lane.blendDepth.load(std::memory_order_acquire);
+        const double effective = base + macro * depth;
 
-        const double amp = lane.amplitude.load(std::memory_order_acquire);
+        if (std::abs(effective) <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
+            continue;
+        }
+
         const auto& curve = lane.curveData;
         const int curveSize = std::min(static_cast<int>(curve.size()), numSamples);
 
         for (int i = 0; i < curveSize; ++i) {
-            outputBuffer[i] += amp * curve[static_cast<size_t>(i)];
+            outputBuffer[i] += effective * curve[static_cast<size_t>(i)];
         }
     }
 
@@ -382,16 +417,22 @@ double LaneMixer::evaluateSumAt(double x) const {
     double sum0 = 0.0;
     double sum1 = 0.0;
 
+    const double macro = blendAmount_.load(std::memory_order_acquire);
+
     for (int laneIdx = 0; laneIdx < activeLaneCount_; ++laneIdx) {
         const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
-        if (!lane.isActive())
-            continue;
+        const double base = lane.amplitude.load(std::memory_order_acquire);
+        const double depth = lane.blendDepth.load(std::memory_order_acquire);
+        const double effective = base + macro * depth;
 
-        const double amp = lane.amplitude.load(std::memory_order_acquire);
+        if (std::abs(effective) <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
+            continue;
+        }
+
         const auto& curve = lane.curveData;
         if (static_cast<int>(curve.size()) > idx1) {
-            sum0 += amp * curve[static_cast<size_t>(idx0)];
-            sum1 += amp * curve[static_cast<size_t>(idx1)];
+            sum0 += effective * curve[static_cast<size_t>(idx0)];
+            sum1 += effective * curve[static_cast<size_t>(idx1)];
         }
     }
 
@@ -408,7 +449,23 @@ void LaneMixer::setMixerMode(MixerMode mode) {
 }
 
 void LaneMixer::setScanPosition(double position) {
-    scanPosition_.store(std::clamp(position, 0.0, 1.0), std::memory_order_release);
+    const double clamped = std::clamp(position, 0.0, 1.0);
+    const double current = scanPosition_.load(std::memory_order_acquire);
+    if (current == clamped) {
+        return; // Early-return guard: prevents per-block LUT remix under static automation.
+    }
+    scanPosition_.store(clamped, std::memory_order_release);
+    incrementMixVersionIfNotBatching();
+    incrementVersionIfNotBatching();
+}
+
+void LaneMixer::setBlendAmount(double amount) {
+    const double clamped = std::clamp(amount, 0.0, 1.0);
+    const double current = blendAmount_.load(std::memory_order_acquire);
+    if (current == clamped) {
+        return; // Early-return guard: same rationale as setScanPosition.
+    }
+    blendAmount_.store(clamped, std::memory_order_release);
     incrementMixVersionIfNotBatching();
     incrementVersionIfNotBatching();
 }
@@ -538,11 +595,12 @@ void LaneMixer::initializeDefaults() {
 
 juce::ValueTree LaneMixer::toValueTree() const {
     juce::ValueTree vt("LaneMixer");
-    vt.setProperty("formatVersion", 3, nullptr);
+    vt.setProperty("formatVersion", 4, nullptr);
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
     vt.setProperty("mixerMode", static_cast<int>(mixerMode_), nullptr);
+    vt.setProperty("blendAmount", blendAmount_.load(std::memory_order_acquire), nullptr);
 
     for (int i = 0; i < activeLaneCount_; ++i) {
         const auto& lane = lanes_[static_cast<size_t>(i)];
@@ -551,6 +609,7 @@ juce::ValueTree LaneMixer::toValueTree() const {
         laneVT.setProperty("index", i, nullptr);
         laneVT.setProperty("laneId", static_cast<int>(lane.laneId), nullptr);
         laneVT.setProperty("amplitude", lane.amplitude.load(std::memory_order_acquire), nullptr);
+        laneVT.setProperty("blendDepth", lane.blendDepth.load(std::memory_order_acquire), nullptr);
         laneVT.setProperty("contentType", static_cast<int>(lane.contentType), nullptr);
         laneVT.setProperty("harmonicNumber", lane.harmonicNumber, nullptr);
 
@@ -615,6 +674,11 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
     mixerMode_ = static_cast<MixerMode>(
         static_cast<int>(vt.getProperty("mixerMode", 0)));
 
+    // formatVersion 4+ adds blendAmount; default 0 for older versions.
+    blendAmount_.store(
+        static_cast<double>(vt.getProperty("blendAmount", 0.0)),
+        std::memory_order_release);
+
     if (formatVersion >= 3) {
         // Dynamic format: read lane count, IDs, nextLaneId
         activeLaneCount_ = juce::jlimit(1, MAX_LANES,
@@ -649,6 +713,10 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
 
         lane.amplitude.store(
             static_cast<double>(laneVT.getProperty("amplitude", 0.0)),
+            std::memory_order_release);
+        // formatVersion 4+ adds per-lane blendDepth; default 0 for older versions.
+        lane.blendDepth.store(
+            static_cast<double>(laneVT.getProperty("blendDepth", 0.0)),
             std::memory_order_release);
         lane.contentType = static_cast<LaneContentType>(
             static_cast<int>(laneVT.getProperty("contentType", 0)));

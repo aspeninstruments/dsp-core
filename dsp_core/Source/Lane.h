@@ -45,6 +45,11 @@ struct Lane {
 
     std::atomic<double> amplitude{0.0}; // Mix amount [-1, 1], negative = phase inversion
 
+    // Per-lane modulation depth from the global Blend Amount macro [-1, 1].
+    // Effective amplitude in Blend mode = amplitude + blendAmount * blendDepth.
+    // Default 0 means the lane is inert with respect to the Morph knob in Blend mode.
+    std::atomic<double> blendDepth{0.0};
+
     LaneContentType contentType = LaneContentType::Harmonic;
     int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
 
@@ -66,6 +71,7 @@ struct Lane {
     Lane(Lane&& other) noexcept
         : curveData(std::move(other.curveData)),
           amplitude(other.amplitude.load(std::memory_order_relaxed)),
+          blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
           splineAnchors(std::move(other.splineAnchors)),
@@ -78,6 +84,8 @@ struct Lane {
         curveData = std::move(other.curveData);
         amplitude.store(other.amplitude.load(std::memory_order_relaxed),
                         std::memory_order_relaxed);
+        blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
+                         std::memory_order_relaxed);
         contentType = other.contentType;
         harmonicNumber = other.harmonicNumber;
         splineAnchors = std::move(other.splineAnchors);
@@ -92,6 +100,7 @@ struct Lane {
     Lane(const Lane& other)
         : curveData(other.curveData),
           amplitude(other.amplitude.load(std::memory_order_relaxed)),
+          blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
           splineAnchors(other.splineAnchors),
@@ -105,6 +114,8 @@ struct Lane {
             curveData = other.curveData;
             amplitude.store(other.amplitude.load(std::memory_order_relaxed),
                             std::memory_order_relaxed);
+            blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
+                             std::memory_order_relaxed);
             contentType = other.contentType;
             harmonicNumber = other.harmonicNumber;
             splineAnchors = other.splineAnchors;

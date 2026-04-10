@@ -116,6 +116,16 @@ class LaneMixer {
     void setLaneAmplitude(int index, double amplitude);
     double getLaneAmplitude(int index) const;
 
+    /**
+     * Per-lane blend depth [-1, 1]. Modulated by the global blend amount in Blend mode:
+     *     effectiveAmplitude = amplitude + blendAmount * blendDepth
+     * Default 0 means the lane is inert with respect to the Morph knob in Blend mode.
+     * Increments both mix and full version counters (amplitude-class change).
+     * Out-of-range values are clamped to [-1, 1].
+     */
+    void setLaneBlendDepth(int index, double depth);
+    double getLaneBlendDepth(int index) const;
+
     void setLaneContentType(int index, LaneContentType type);
     LaneContentType getLaneContentType(int index) const;
 
@@ -208,6 +218,16 @@ class LaneMixer {
      */
     void setScanPosition(double position);
     double getScanPosition() const { return scanPosition_.load(std::memory_order_acquire); }
+
+    /**
+     * Global blend amount [0, 1] driving per-lane depth modulation in Blend mode.
+     * Effective lane amplitude = amplitude + blendAmount * blendDepth (no per-lane clamp;
+     * computeSum's post-sum normalize bounds the output). Increments both counters.
+     * In Scan mode this should remain 0 — invariant: at most one of scanPosition/blendAmount
+     * is non-zero at any time, enforced by PluginAudioProcessor::setMixerMode.
+     */
+    void setBlendAmount(double amount);
+    double getBlendAmount() const { return blendAmount_.load(std::memory_order_acquire); }
 
     // ========================================================================
     // Extrapolation Mode
@@ -319,6 +339,7 @@ class LaneMixer {
 
     MixerMode mixerMode_ = MixerMode::Blend;
     std::atomic<double> scanPosition_{0.0};
+    std::atomic<double> blendAmount_{0.0};
 
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
 

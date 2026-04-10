@@ -1002,4 +1002,260 @@ TEST_F(LaneMixerTest, OnVersionChanged_CalledOnStructuralChanges) {
     EXPECT_GT(callCount, afterAdd) << "Callback should fire at least once for removeLane";
 }
 
+// ============================================================================
+// Blend Depth + Blend Amount (Phase 1: per-lane macro modulation)
+// ============================================================================
+
+TEST_F(LaneMixerTest, LaneBlendDepth_DefaultsToZero) {
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(0), 0.0);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(1), 0.0);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(mixer->getNumLanes() - 1), 0.0);
+}
+
+TEST_F(LaneMixerTest, LaneBlendDepth_SetGet_RoundTrips) {
+    mixer->setLaneBlendDepth(2, 0.5);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(2), 0.5);
+    mixer->setLaneBlendDepth(2, -0.75);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(2), -0.75);
+    mixer->setLaneBlendDepth(2, 0.0);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(2), 0.0);
+}
+
+TEST_F(LaneMixerTest, LaneBlendDepth_ClampedToRange) {
+    mixer->setLaneBlendDepth(1, 2.5);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(1), 1.0);
+    mixer->setLaneBlendDepth(1, -2.5);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(1), -1.0);
+}
+
+TEST_F(LaneMixerTest, BlendAmount_DefaultsToZero) {
+    EXPECT_DOUBLE_EQ(mixer->getBlendAmount(), 0.0);
+}
+
+TEST_F(LaneMixerTest, BlendAmount_SetGet_ClampedToUnitRange) {
+    mixer->setBlendAmount(0.5);
+    EXPECT_DOUBLE_EQ(mixer->getBlendAmount(), 0.5);
+    mixer->setBlendAmount(2.0);
+    EXPECT_DOUBLE_EQ(mixer->getBlendAmount(), 1.0);
+    mixer->setBlendAmount(-0.5);
+    EXPECT_DOUBLE_EQ(mixer->getBlendAmount(), 0.0);
+}
+
+TEST_F(LaneMixerTest, ComputeSum_BlendAmountZero_BehavesLikeBaseAmplitude) {
+    // Set some non-zero depths but leave blendAmount=0 — depths should be inert.
+    mixer->setLaneAmplitude(1, 0.8);
+    mixer->setLaneAmplitude(2, 0.3);
+    mixer->setLaneBlendDepth(1, 0.7);   // would normally pull lane 1 up
+    mixer->setLaneBlendDepth(2, -0.5);  // would normally pull lane 2 down
+    // blendAmount is still 0, so depths should have no effect.
+    const auto withDepths = computeSum();
+
+    // Reset depths and compare — buffers must be identical.
+    mixer->setLaneBlendDepth(1, 0.0);
+    mixer->setLaneBlendDepth(2, 0.0);
+    const auto withoutDepths = computeSum();
+
+    ASSERT_EQ(withDepths.size(), withoutDepths.size());
+    for (size_t i = 0; i < withDepths.size(); ++i) {
+        EXPECT_DOUBLE_EQ(withDepths[i], withoutDepths[i]);
+    }
+}
+
+TEST_F(LaneMixerTest, ComputeSum_PositiveDepthAddsToAmplitude) {
+    // Lane 1 = identity. base=0.4, depth=+0.5, blendAmount=1.0 → effective=0.9.
+    // Compare against a fresh mixer with base=0.9, no depth.
+    mixer->setLaneAmplitude(1, 0.4);
+    mixer->setLaneBlendDepth(1, 0.5);
+    mixer->setBlendAmount(1.0);
+    const auto modulated = computeSum();
+
+    auto fresh = std::make_unique<dsp_core::LaneMixer>();
+    fresh->setLaneAmplitude(1, 0.9);
+    std::vector<double> expected(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
+    fresh->computeSum(expected.data(), dsp_core::LaneMixer::TABLE_SIZE);
+
+    ASSERT_EQ(modulated.size(), expected.size());
+    for (size_t i = 0; i < modulated.size(); ++i) {
+        EXPECT_NEAR(modulated[i], expected[i], 1e-12);
+    }
+}
+
+TEST_F(LaneMixerTest, ComputeSum_NegativeDepthSubtracts) {
+    // base=0.8, depth=-0.5, blendAmount=1.0 → effective=0.3.
+    mixer->setLaneAmplitude(1, 0.8);
+    mixer->setLaneBlendDepth(1, -0.5);
+    mixer->setBlendAmount(1.0);
+    const auto modulated = computeSum();
+
+    auto fresh = std::make_unique<dsp_core::LaneMixer>();
+    fresh->setLaneAmplitude(1, 0.3);
+    std::vector<double> expected(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
+    fresh->computeSum(expected.data(), dsp_core::LaneMixer::TABLE_SIZE);
+
+    for (size_t i = 0; i < modulated.size(); ++i) {
+        EXPECT_NEAR(modulated[i], expected[i], 1e-12);
+    }
+}
+
+TEST_F(LaneMixerTest, ComputeSum_BaseAmplitudeZero_DepthStillContributes) {
+    // Regression guard for the old isActive() skip bug. Lane with amp=0 used to be
+    // dropped before depth was even consulted. Now it must contribute.
+    mixer->setLaneAmplitude(1, 0.0);   // zero base → would have been skipped before
+    mixer->setLaneBlendDepth(1, 0.5);  // but depth × macro = 0.5 effective
+    mixer->setBlendAmount(1.0);
+    // Zero out the H1=1.0 default by also setting all other lanes to 0:
+    for (int i = 0; i < mixer->getNumLanes(); ++i) {
+        if (i != 1) mixer->setLaneAmplitude(i, 0.0);
+    }
+    const auto buffer = computeSum();
+    // Lane 1 is identity (H1) — sum should be non-zero (specifically, ±1 after normalize).
+    EXPECT_GT(maxAbs(buffer), 0.5) << "Lane with amp=0 but depth*blendAmount != 0 must contribute";
+}
+
+TEST_F(LaneMixerTest, ComputeSum_EffectiveAmplitudeLinearInBlendAmount) {
+    // For fixed base and depth, effective(a) - effective(b) == (a - b) * depth.
+    // We can't observe effective directly through computeSum (post-normalize destroys
+    // the linear relationship), so verify against the documented formula by comparing
+    // pre-normalization sums via a single-lane setup where the normalize divisor is
+    // known to be |effective| * peak(curve). With identity curve (lane 1) and a single
+    // active lane, the post-normalize output equals sign(effective) * curve / peak(curve),
+    // i.e. independent of |effective|. So instead, assert linearity at the formula level
+    // by reading getLaneBlendDepth/getLaneAmplitude/getBlendAmount and computing effective
+    // explicitly — this catches accidental clamping or non-linear shaping in the setters.
+    mixer->setLaneAmplitude(3, 0.4);
+    mixer->setLaneBlendDepth(3, 0.6);
+
+    auto effectiveAt = [&](double macro) {
+        mixer->setBlendAmount(macro);
+        return mixer->getLaneAmplitude(3) + mixer->getBlendAmount() * mixer->getLaneBlendDepth(3);
+    };
+
+    const double e0 = effectiveAt(0.0);
+    const double e1 = effectiveAt(0.25);
+    const double e2 = effectiveAt(0.5);
+    const double e3 = effectiveAt(0.75);
+
+    EXPECT_NEAR(e1 - e0, 0.25 * 0.6, 1e-12);
+    EXPECT_NEAR(e2 - e1, 0.25 * 0.6, 1e-12);
+    EXPECT_NEAR(e3 - e2, 0.25 * 0.6, 1e-12);
+}
+
+TEST_F(LaneMixerTest, MixVersion_IncrementedOnSetBlendAmount) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setBlendAmount(0.5);
+    EXPECT_GT(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_IncrementedOnSetLaneBlendDepth) {
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setLaneBlendDepth(1, 0.5);
+    EXPECT_GT(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_UnchangedBlendAmount_DoesNotIncrement) {
+    mixer->setBlendAmount(0.5);
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setBlendAmount(0.5); // same value
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_UnchangedBlendDepth_DoesNotIncrement) {
+    mixer->setLaneBlendDepth(1, 0.3);
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setLaneBlendDepth(1, 0.3); // same value
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_UnchangedScanPosition_DoesNotIncrement) {
+    // Pre-existing latent fix: setScanPosition gained the same early-return guard.
+    mixer->setScanPosition(0.4);
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setScanPosition(0.4); // same value
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+TEST_F(LaneMixerTest, MixVersion_UnchangedLaneAmplitude_DoesNotIncrement) {
+    // Same early-return guard added to setLaneAmplitude for consistency.
+    mixer->setLaneAmplitude(1, 0.7);
+    const auto mv0 = mixer->getMixVersion();
+    mixer->setLaneAmplitude(1, 0.7); // same value
+    EXPECT_EQ(mixer->getMixVersion(), mv0);
+}
+
+// ============================================================================
+// Serialization round-trip for blendDepth + blendAmount (Phase 2)
+// ============================================================================
+
+TEST_F(LaneMixerTest, Serialization_RoundTripsBlendDepth) {
+    mixer->setLaneBlendDepth(0, 0.25);
+    mixer->setLaneBlendDepth(1, -0.5);
+    mixer->setLaneBlendDepth(5, 1.0);
+    mixer->setLaneBlendDepth(7, -1.0);
+
+    const auto vt = mixer->toValueTree();
+    dsp_core::LaneMixer restored;
+    restored.fromValueTree(vt);
+
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(0), 0.25);
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(1), -0.5);
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(5), 1.0);
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(7), -1.0);
+    // Untouched lanes should round-trip as 0.
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(2), 0.0);
+}
+
+TEST_F(LaneMixerTest, Serialization_RoundTripsBlendAmount) {
+    mixer->setBlendAmount(0.42);
+    const auto vt = mixer->toValueTree();
+    dsp_core::LaneMixer restored;
+    restored.fromValueTree(vt);
+    EXPECT_DOUBLE_EQ(restored.getBlendAmount(), 0.42);
+}
+
+TEST_F(LaneMixerTest, Serialization_FormatVersionIs4) {
+    const auto vt = mixer->toValueTree();
+    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 4);
+}
+
+TEST_F(LaneMixerTest, Deserialization_MissingBlendFields_DefaultsToZero) {
+    // Hand-build a v3 ValueTree with no blendDepth / blendAmount keys.
+    juce::ValueTree v3("LaneMixer");
+    v3.setProperty("formatVersion", 3, nullptr);
+    v3.setProperty("numLanes", 2, nullptr);
+    v3.setProperty("nextLaneId", 2, nullptr);
+    v3.setProperty("tableSize", dsp_core::LaneMixer::TABLE_SIZE, nullptr);
+    v3.setProperty("mixerMode", 0, nullptr);
+
+    juce::ValueTree lane0("Lane");
+    lane0.setProperty("index", 0, nullptr);
+    lane0.setProperty("laneId", 0, nullptr);
+    lane0.setProperty("amplitude", 0.5, nullptr);
+    lane0.setProperty("contentType", static_cast<int>(dsp_core::LaneContentType::Harmonic), nullptr);
+    lane0.setProperty("harmonicNumber", 1, nullptr);
+    v3.appendChild(lane0, nullptr);
+
+    juce::ValueTree lane1("Lane");
+    lane1.setProperty("index", 1, nullptr);
+    lane1.setProperty("laneId", 1, nullptr);
+    lane1.setProperty("amplitude", 0.7, nullptr);
+    lane1.setProperty("contentType", static_cast<int>(dsp_core::LaneContentType::Harmonic), nullptr);
+    lane1.setProperty("harmonicNumber", 3, nullptr);
+    v3.appendChild(lane1, nullptr);
+
+    // Pre-poison: write some non-zero state into a fresh mixer to make sure
+    // deserialization actively zeros (rather than relying on default state).
+    dsp_core::LaneMixer restored;
+    restored.setBlendAmount(0.9);
+    restored.setLaneBlendDepth(0, 0.7);
+    restored.setLaneBlendDepth(1, -0.4);
+
+    restored.fromValueTree(v3);
+
+    EXPECT_DOUBLE_EQ(restored.getBlendAmount(), 0.0)
+        << "v3 ValueTree had no blendAmount key — restored mixer should default to 0";
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(0), 0.0)
+        << "v3 ValueTree had no per-lane blendDepth — should default to 0";
+    EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(1), 0.0);
+}
+
 } // namespace dsp_core_test

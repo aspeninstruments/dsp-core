@@ -39,6 +39,9 @@ class TransferFunctionOperations {
     /** Stronger smooth (3x window radius). */
     static void smoother(std::vector<double>& curveData);
 
+    /** Mix curve 50/50 with linear y=x, then normalize to [-1, 1]. */
+    static void linearize(std::vector<double>& curveData);
+
   private:
     TransferFunctionOperations() = delete; // Pure static utility
 };
