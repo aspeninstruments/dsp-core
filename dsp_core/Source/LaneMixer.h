@@ -55,7 +55,14 @@ class LaneMixer {
 
     // Extrapolation mode -- controls LUT boundary behavior in AudioEngine.
     // Defined here (not on LTF) so LaneMixer is the sole source of truth.
-    enum class ExtrapolationMode { Clamp, Linear };
+    enum class ExtrapolationMode { Clamp, Linear, Mirror };
+
+    // Mirror-wrap an index into [0, tableSize-1] by reflecting at boundaries.
+    static inline int mirrorIndex(int i, int tableSize) {
+        const int period = 2 * (tableSize - 1);
+        int wrapped = ((i % period) + period) % period;
+        return wrapped <= tableSize - 1 ? wrapped : period - wrapped;
+    }
 
     // Mixer mode -- controls how lanes are combined into the output curve.
     //   Blend: Weighted sum of all lanes (existing behavior)
@@ -237,6 +244,13 @@ class LaneMixer {
     ExtrapolationMode getExtrapolationMode() const { return extrapolationMode_; }
 
     // ========================================================================
+    // Soft Clipping (unified with extrapolation — controls LUT input bounding)
+    // ========================================================================
+
+    void setSoftClipEnabled(bool enabled);
+    bool getSoftClipEnabled() const { return softClipEnabled_; }
+
+    // ========================================================================
     // Convenience Accessors
     // ========================================================================
 
@@ -342,6 +356,7 @@ class LaneMixer {
     std::atomic<double> blendAmount_{0.0};
 
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
+    bool softClipEnabled_ = false;
 
     // Precomputed harmonic basis functions (shared across all harmonic lanes)
     std::unique_ptr<HarmonicLayer> harmonicLayer_;

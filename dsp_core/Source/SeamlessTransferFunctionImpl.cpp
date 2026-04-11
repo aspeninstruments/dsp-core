@@ -37,6 +37,7 @@ AudioEngine::AudioEngine() {
         }
         lutBuffers[bufIdx].version = 0;
         lutBuffers[bufIdx].extrapolationMode = LaneMixer::ExtrapolationMode::Clamp;
+        lutBuffers[bufIdx].softClipEnabled = false;
     }
 }
 
@@ -128,6 +129,7 @@ void AudioEngine::checkForNewLUT() const {
             secBuf.leftSlope = gainOld * secBuf.leftSlope + gainNew * priBuf.leftSlope;
             secBuf.rightSlope = gainOld * secBuf.rightSlope + gainNew * priBuf.rightSlope;
             secBuf.extrapolationMode = lutBuffers[workerIdx].extrapolationMode;
+            secBuf.softClipEnabled = lutBuffers[workerIdx].softClipEnabled;
 
             // Rotate: secondary stays as blend snapshot, old primary becomes workerTarget
             primaryIndex.store(workerIdx, std::memory_order_release);
@@ -153,6 +155,9 @@ void AudioEngine::checkForNewLUT() const {
 }
 
 double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
+    if (lut->softClipEnabled) {
+        x = softClipper_.process(x);
+    }
     const double x_proj = (x - MIN_VALUE) / (MAX_VALUE - MIN_VALUE) * (TABLE_SIZE - 1);
     const int index = static_cast<int>(x_proj);
     const double t = x_proj - index;
@@ -170,6 +175,23 @@ double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
 
         // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
         // Standard Catmull-Rom interpolation formula
+        return 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
+                      (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
+        // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
+    }
+
+    if (lut->extrapolationMode == LaneMixer::ExtrapolationMode::Mirror) {
+        const int idx0 = LaneMixer::mirrorIndex(index - 1, TABLE_SIZE);
+        const int idx1 = LaneMixer::mirrorIndex(index, TABLE_SIZE);
+        const int idx2 = LaneMixer::mirrorIndex(index + 1, TABLE_SIZE);
+        const int idx3 = LaneMixer::mirrorIndex(index + 2, TABLE_SIZE);
+
+        const double y0 = lut->data[idx0];
+        const double y1 = lut->data[idx1];
+        const double y2 = lut->data[idx2];
+        const double y3 = lut->data[idx3];
+
+        // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
         return 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
                       (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
         // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
@@ -212,6 +234,9 @@ double AudioEngine::interpolateCatmullRom(double y0, double y1, double y2, doubl
 
 double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT,
                                      double x, double gainOld, double gainNew) const {
+    if (newLUT->softClipEnabled) {
+        x = softClipper_.process(x);
+    }
     // Mix samples BEFORE interpolation (saves one polynomial eval per sample)
     const double x_proj = (x - MIN_VALUE) / (MAX_VALUE - MIN_VALUE) * (TABLE_SIZE - 1);
     const int index = static_cast<int>(x_proj);
@@ -224,6 +249,30 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
         const int idx1 = std::clamp(index, 0, TABLE_SIZE - 1);
         const int idx2 = std::clamp(index + 1, 0, TABLE_SIZE - 1);
         const int idx3 = std::clamp(index + 2, 0, TABLE_SIZE - 1);
+
+        const double old_y0 = oldLUT->data[idx0];
+        const double old_y1 = oldLUT->data[idx1];
+        const double old_y2 = oldLUT->data[idx2];
+        const double old_y3 = oldLUT->data[idx3];
+
+        const double new_y0 = newLUT->data[idx0];
+        const double new_y1 = newLUT->data[idx1];
+        const double new_y2 = newLUT->data[idx2];
+        const double new_y3 = newLUT->data[idx3];
+
+        const double mixed_y0 = gainOld * old_y0 + gainNew * new_y0;
+        const double mixed_y1 = gainOld * old_y1 + gainNew * new_y1;
+        const double mixed_y2 = gainOld * old_y2 + gainNew * new_y2;
+        const double mixed_y3 = gainOld * old_y3 + gainNew * new_y3;
+
+        return interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
+    }
+
+    if (extrapMode == LaneMixer::ExtrapolationMode::Mirror) {
+        const int idx0 = LaneMixer::mirrorIndex(index - 1, TABLE_SIZE);
+        const int idx1 = LaneMixer::mirrorIndex(index, TABLE_SIZE);
+        const int idx2 = LaneMixer::mirrorIndex(index + 1, TABLE_SIZE);
+        const int idx3 = LaneMixer::mirrorIndex(index + 2, TABLE_SIZE);
 
         const double old_y0 = oldLUT->data[idx0];
         const double old_y1 = oldLUT->data[idx1];
@@ -362,6 +411,7 @@ void EventDrivenRenderer::doRender() {
     std::copy(sumData.begin(), sumData.end(), outputBuffer->data.begin());
     outputBuffer->version = laneMixer.getVersion();
     outputBuffer->extrapolationMode = laneMixer.getExtrapolationMode();
+    outputBuffer->softClipEnabled = laneMixer.getSoftClipEnabled();
 
     // Precompute and clamp edge slopes for Linear extrapolation
     if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear) {

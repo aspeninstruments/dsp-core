@@ -245,6 +245,7 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     // Set metadata
     outputBuffer->version = mixer.getVersion();
     outputBuffer->extrapolationMode = mixer.getExtrapolationMode();
+    outputBuffer->softClipEnabled = mixer.getSoftClipEnabled();
 
     // Signal audio thread that new LUT is ready (using release to ensure LUT writes are visible)
     pimpl->audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);

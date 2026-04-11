@@ -143,10 +143,10 @@ void HysteresisProcessor::setOperatingPoint(double Ms) {
 
 double HysteresisProcessor::langevin(double Q) const {
     if (useCustomNL_) {
-        // Map Q to [-1, 1] using SoftClippingSolver, then apply custom NL
-        double mapped = inputMapper_.process(Q / scale_);
-        double result = customNL_(mapped);
-        return result;
+        // Scale Q into transfer function range; soft clipping (if enabled)
+        // is handled inside the LUT evaluation (SeamlessTransferFunction)
+        double mapped = Q / scale_;
+        return customNL_(mapped);
     }
     return standardLangevin(Q);
 }

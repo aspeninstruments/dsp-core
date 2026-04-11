@@ -409,7 +409,7 @@ class LayeredTransferFunction {
 
     // Extrapolation Mode
 
-    enum class ExtrapolationMode { Clamp, Linear };
+    enum class ExtrapolationMode { Clamp, Linear, Mirror };
 
     void setExtrapolationMode(ExtrapolationMode mode) {
         extrapMode = mode;

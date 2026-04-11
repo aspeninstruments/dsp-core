@@ -8,7 +8,7 @@ namespace dsp_core {
 
 class TransferFunction {
   public:
-    enum class ExtrapolationMode { Clamp, Linear };
+    enum class ExtrapolationMode { Clamp, Linear, Mirror };
 
     TransferFunction(int tableSize, double minSignalValue = -1.0, double maxSignalValue = 1.0);
 

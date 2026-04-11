@@ -479,6 +479,11 @@ void LaneMixer::setExtrapolationMode(ExtrapolationMode mode) {
     incrementVersionIfNotBatching();
 }
 
+void LaneMixer::setSoftClipEnabled(bool enabled) {
+    softClipEnabled_ = enabled;
+    incrementVersionIfNotBatching();
+}
+
 // ============================================================================
 // Convenience Accessors
 // ============================================================================

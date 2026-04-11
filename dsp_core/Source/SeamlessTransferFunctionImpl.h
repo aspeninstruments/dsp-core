@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LaneMixer.h"
+#include "audio_pipeline/SoftClippingStage.h"
 #include <array>
 #include <atomic>
 #include <functional>
@@ -48,6 +49,7 @@ struct LUTBuffer {
         LaneMixer::ExtrapolationMode::Clamp};
     double leftSlope{0.0};   // Precomputed, clamped slope at left edge (for Linear extrapolation)
     double rightSlope{0.0};  // Precomputed, clamped slope at right edge (for Linear extrapolation)
+    bool softClipEnabled{false}; // When true, input is soft-clipped before LUT lookup
 };
 
 /**
@@ -232,6 +234,9 @@ class AudioEngine {
      * @return Interpolated value
      */
     static double interpolateCatmullRom(double y0, double y1, double y2, double y3, double t);
+
+    // Soft clipper for input bounding (stateless, const-safe)
+    audio_pipeline::SoftClippingSolver softClipper_{0.95};
 
     // TRIPLE BUFFERING (prevents data race during crossfade):
     // - lutBuffers[0,1]: Used for crossfading (audio thread reads)

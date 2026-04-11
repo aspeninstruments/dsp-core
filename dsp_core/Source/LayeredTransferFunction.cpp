@@ -373,6 +373,24 @@ double LayeredTransferFunction::interpolateCatmullRom(double x) const {
         // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
     }
 
+    if (extrapMode == ExtrapolationMode::Mirror) {
+        auto mirrorIdx = [this](int i) -> int {
+            const int period = 2 * (tableSize - 1);
+            int wrapped = ((i % period) + period) % period;
+            return wrapped <= tableSize - 1 ? wrapped : period - wrapped;
+        };
+
+        const double y0 = computeCompositeAt(mirrorIdx(index - 1));
+        const double y1 = computeCompositeAt(mirrorIdx(index));
+        const double y2 = computeCompositeAt(mirrorIdx(index + 1));
+        const double y3 = computeCompositeAt(mirrorIdx(index + 2));
+
+        // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
+        return 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
+                      (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
+        // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
+    }
+
     // Linear extrapolation path (helper lambda for readability)
     auto getSample = [this](int i) -> double {
         if (i < 0) {
@@ -410,6 +428,26 @@ double LayeredTransferFunction::getBaseValueAt(double x) const {
         if (tableIndex >= tableSize - 1) {
             return baseTable[tableSize - 1].load(std::memory_order_relaxed);
         }
+    }
+
+    if (extrapMode == ExtrapolationMode::Mirror) {
+        // Mirror-wrap the continuous index into [0, tableSize-1]
+        const int period = 2 * (tableSize - 1);
+        auto mirrorWrap = [period, this](double ti) -> double {
+            // Fold into [0, period) then reflect upper half
+            double wrapped = std::fmod(std::fmod(ti, period) + period, static_cast<double>(period));
+            if (wrapped > tableSize - 1) {
+                wrapped = period - wrapped;
+            }
+            // Linear interpolation at the wrapped position
+            int i = static_cast<int>(wrapped);
+            i = juce::jlimit(0, tableSize - 2, i);
+            double f = wrapped - i;
+            const double a = baseTable[i].load(std::memory_order_relaxed);
+            const double b = baseTable[i + 1].load(std::memory_order_relaxed);
+            return a + f * (b - a);
+        };
+        return mirrorWrap(tableIndex);
     }
 
     // Get integer and fractional parts

@@ -72,6 +72,12 @@ double TransferFunction::getSample(int i) const {
         const double slope = table[tableSize - 1].load() - table[tableSize - 2].load();
         return table[tableSize - 1].load() + slope * (i - tableSize + 1);
     }
+    if ((isBelow || isAbove) && extrapolationMode == ExtrapolationMode::Mirror) {
+        const int period = 2 * (tableSize - 1);
+        int wrapped = ((i % period) + period) % period;
+        int idx = wrapped <= tableSize - 1 ? wrapped : period - wrapped;
+        return table[idx].load();
+    }
     const int clampedIdx = juce::jlimit(0, tableSize - 1, i);
     return table[clampedIdx].load();
 }

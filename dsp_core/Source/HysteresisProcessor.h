@@ -1,6 +1,5 @@
 #pragma once
 
-#include "audio_pipeline/SoftClippingStage.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
 #include <functional>
@@ -90,8 +89,7 @@ class HysteresisProcessor {
     static constexpr double dAlpha_ = 0.75;
     double Talpha_ = T_ / 1.9;
 
-    // Input mapping: Q → [-1, 1]
-    audio_pipeline::SoftClippingSolver inputMapper_{0.95};
+    // Input scaling: maps Q into transfer function range
     double scale_ = 1.0;
 
     // Custom nonlinearity (defaults to standard Langevin)
