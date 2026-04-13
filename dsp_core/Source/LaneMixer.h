@@ -125,8 +125,10 @@ class LaneMixer {
 
     /**
      * Per-lane blend depth [-1, 1]. Modulated by the global blend amount in Blend mode:
-     *     effectiveAmplitude = amplitude + blendAmount * blendDepth
+     *     effectiveAmplitude = max(0, amplitude + blendAmount * blendDepth)
      * Default 0 means the lane is inert with respect to the Morph knob in Blend mode.
+     * Negative depth lets the macro pull the lane *down* toward silence; the lower
+     * clamp at 0 prevents the curve from inverting.
      * Increments both mix and full version counters (amplitude-class change).
      * Out-of-range values are clamped to [-1, 1].
      */

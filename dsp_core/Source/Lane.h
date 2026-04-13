@@ -57,6 +57,7 @@ struct Lane {
     std::vector<SplineAnchor> splineAnchors;
     juce::String equationText;
     juce::String presetSourcePath;
+    juce::String customName; // User-assigned display name; empty = use index
 
     bool oddSymmetryEnabled = false; // Per-lane odd symmetry enforcement (f(-x) = -f(x))
 
@@ -77,6 +78,7 @@ struct Lane {
           splineAnchors(std::move(other.splineAnchors)),
           equationText(std::move(other.equationText)),
           presetSourcePath(std::move(other.presetSourcePath)),
+          customName(std::move(other.customName)),
           oddSymmetryEnabled(other.oddSymmetryEnabled),
           laneId(other.laneId) {}
 
@@ -91,6 +93,7 @@ struct Lane {
         splineAnchors = std::move(other.splineAnchors);
         equationText = std::move(other.equationText);
         presetSourcePath = std::move(other.presetSourcePath);
+        customName = std::move(other.customName);
         oddSymmetryEnabled = other.oddSymmetryEnabled;
         laneId = other.laneId;
         return *this;
@@ -106,6 +109,7 @@ struct Lane {
           splineAnchors(other.splineAnchors),
           equationText(other.equationText),
           presetSourcePath(other.presetSourcePath),
+          customName(other.customName),
           oddSymmetryEnabled(other.oddSymmetryEnabled),
           laneId(other.laneId) {}
 
@@ -121,6 +125,7 @@ struct Lane {
             splineAnchors = other.splineAnchors;
             equationText = other.equationText;
             presetSourcePath = other.presetSourcePath;
+            customName = other.customName;
             oddSymmetryEnabled = other.oddSymmetryEnabled;
             laneId = other.laneId;
         }

@@ -1081,7 +1081,7 @@ TEST_F(LaneMixerTest, ComputeSum_PositiveDepthAddsToAmplitude) {
 }
 
 TEST_F(LaneMixerTest, ComputeSum_NegativeDepthSubtracts) {
-    // base=0.8, depth=-0.5, blendAmount=1.0 → effective=0.3.
+    // base=0.8, depth=-0.5, blendAmount=1.0 → effective = max(0, 0.3) = 0.3.
     mixer->setLaneAmplitude(1, 0.8);
     mixer->setLaneBlendDepth(1, -0.5);
     mixer->setBlendAmount(1.0);
@@ -1095,6 +1095,21 @@ TEST_F(LaneMixerTest, ComputeSum_NegativeDepthSubtracts) {
     for (size_t i = 0; i < modulated.size(); ++i) {
         EXPECT_NEAR(modulated[i], expected[i], 1e-12);
     }
+}
+
+TEST_F(LaneMixerTest, ComputeSum_NegativeDepthClampedAtZero) {
+    // base=0.2, depth=-1.0, blendAmount=1.0 → raw = -0.8 → effective = 0.
+    // The lane should drop out entirely (no inverted-curve contribution).
+    mixer->setLaneAmplitude(1, 0.2);
+    mixer->setLaneBlendDepth(1, -1.0);
+    mixer->setBlendAmount(1.0);
+    // Zero out the H1=1.0 default and any other lanes so lane 1 is the only contributor.
+    for (int i = 0; i < mixer->getNumLanes(); ++i) {
+        if (i != 1) mixer->setLaneAmplitude(i, 0.0);
+    }
+    const auto modulated = computeSum();
+    // Lane 1 was pulled to silence — the buffer must be all zeros.
+    EXPECT_DOUBLE_EQ(maxAbs(modulated), 0.0);
 }
 
 TEST_F(LaneMixerTest, ComputeSum_BaseAmplitudeZero_DepthStillContributes) {
@@ -1200,7 +1215,6 @@ TEST_F(LaneMixerTest, Serialization_RoundTripsBlendDepth) {
     EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(1), -0.5);
     EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(5), 1.0);
     EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(7), -1.0);
-    // Untouched lanes should round-trip as 0.
     EXPECT_DOUBLE_EQ(restored.getLaneBlendDepth(2), 0.0);
 }
 

@@ -318,16 +318,18 @@ void LaneMixer::computeSum(double* outputBuffer, int size) const {
     const double macro = blendAmount_.load(std::memory_order_acquire);
 
     // Accumulate weighted contributions from all lanes whose effective amplitude is non-zero.
-    // Effective amplitude = base + macro * depth (no per-lane clamp — post-sum normalize bounds output).
+    // Effective amplitude = max(0, base + macro * depth). Negative depth lets the macro
+    // pull the lane *down* toward silence; the lower clamp at 0 prevents inverted-curve
+    // contributions, which would invert the transfer function.
     // NB: Do NOT use Lane::isActive() here — that only checks `amplitude`, missing the case
-    // amplitude=0, depth=±1, blendAmount>0 where the lane *is* audibly contributing.
+    // amplitude=0, depth>0, blendAmount>0 where the lane *is* audibly contributing.
     for (int laneIdx = 0; laneIdx < activeLaneCount_; ++laneIdx) {
         const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
         const double base = lane.amplitude.load(std::memory_order_acquire);
         const double depth = lane.blendDepth.load(std::memory_order_acquire);
-        const double effective = base + macro * depth;
+        const double effective = std::max(0.0, base + macro * depth);
 
-        if (std::abs(effective) <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
+        if (effective <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
             continue;
         }
 
@@ -423,9 +425,9 @@ double LaneMixer::evaluateSumAt(double x) const {
         const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
         const double base = lane.amplitude.load(std::memory_order_acquire);
         const double depth = lane.blendDepth.load(std::memory_order_acquire);
-        const double effective = base + macro * depth;
+        const double effective = std::max(0.0, base + macro * depth);
 
-        if (std::abs(effective) <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
+        if (effective <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
             continue;
         }
 
@@ -626,6 +628,10 @@ juce::ValueTree LaneMixer::toValueTree() const {
             laneVT.setProperty("presetSourcePath", lane.presetSourcePath, nullptr);
         }
 
+        if (!lane.customName.isEmpty()) {
+            laneVT.setProperty("customName", lane.customName, nullptr);
+        }
+
         if (lane.oddSymmetryEnabled) {
             laneVT.setProperty("oddSymmetryEnabled", true, nullptr);
         }
@@ -728,6 +734,7 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
         lane.harmonicNumber = laneVT.getProperty("harmonicNumber", 0);
         lane.equationText = laneVT.getProperty("equationText", juce::String()).toString();
         lane.presetSourcePath = laneVT.getProperty("presetSourcePath", juce::String()).toString();
+        lane.customName = laneVT.getProperty("customName", juce::String()).toString();
         lane.oddSymmetryEnabled = static_cast<bool>(laneVT.getProperty("oddSymmetryEnabled", false));
 
         // Deserialize spline anchors
