@@ -13,7 +13,7 @@ namespace dsp_core {
 
 // Forward declarations
 class EventDrivenRenderer;
-class VisualizerUpdateTimer;
+class VisualizerUpdateDispatcher;
 
 /**
  * SeamlessConfig - Configuration constants for seamless transfer function updates
@@ -310,64 +310,43 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
 };
 
 /**
- * VisualizerUpdateTimer - Fast timer for direct model sampling (60Hz)
+ * VisualizerUpdateDispatcher - Event-driven visualizer updates
  *
- * Separate from DSP LUT rendering to decouple visualizer responsiveness
- * from audio update frequency. Samples the editing model directly on the
- * message thread without using the worker thread.
+ * Mirrors the DSP EventDrivenRenderer pattern: AsyncUpdater dispatches the
+ * curve/lane compute on the message thread in response to LaneMixer version
+ * changes, rate-limited to 60Hz. A slow safety timer (5Hz) picks up any edge
+ * missed by the event path.
+ *
+ * Idle cost is zero — nothing runs until a mutation fires onVersionChanged
+ * or a lane-selection change calls triggerAsyncUpdate directly.
  *
  * Threading:
- *   - MUST run on message thread (JUCE Timer contract)
- *   - Reads from editingModel directly (safe - message thread only)
- *   - Writes to visualizerLUT directly (safe - message thread only)
- *
- * Performance:
- *   - 60Hz update rate for smooth UI
- *   - ~0.5ms per update (1024 points sampled)
- *   - No worker thread overhead
+ *   - triggerAsyncUpdate() callable from any thread (JUCE guarantee)
+ *   - handleAsyncUpdate() runs on message thread
+ *   - timerCallback() runs on message thread
  */
-class VisualizerUpdateTimer : public juce::Timer {
+class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer {
   public:
-    /**
-     * Construct visualizer timer (message thread only)
-     *
-     * @param mixer Reference to lane mixer (primary data source for sum visualization)
-     */
-    explicit VisualizerUpdateTimer(LaneMixer& mixer);
+    explicit VisualizerUpdateDispatcher(LaneMixer& mixer);
+    ~VisualizerUpdateDispatcher() override;
 
-    /**
-     * Destructor - stops timer
-     */
-    ~VisualizerUpdateTimer() override;
-
-    /**
-     * Set visualizer target buffer and callback
-     *
-     * @param lutPtr Pointer to visualizer LUT buffer
-     * @param callback Callback to invoke after update
-     */
     void setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
                              std::function<void()> callback);
 
-    /**
-     * Timer callback - samples model and updates visualizer (60Hz)
-     */
-    void timerCallback() override;
-
-    /**
-     * Force immediate update (for initialization)
-     */
-    void forceUpdate();
-
-    /**
-     * Set lane LUT target buffer and selected lane pointer
-     *
-     * @param lutPtr Pointer to lane LUT buffer (1024 samples)
-     * @param selectedLanePtr Pointer to selected lane index (-1 = none)
-     */
     void setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, int* selectedLanePtr);
 
+    /** Force synchronous update (for initialization). */
+    void forceUpdate();
+
+    /** AsyncUpdater callback — dispatched on message thread. */
+    void handleAsyncUpdate() override;
+
+    /** Safety-timer fallback callback (catches edges missed by the event path). */
+    void timerCallback() override;
+
   private:
+    void runUpdate();
+
     LaneMixer& laneMixer;
     std::array<double, VISUALIZER_LUT_SIZE>* visualizerLUTPtr{nullptr};
     std::function<void()> onVisualizerUpdate;
@@ -375,6 +354,11 @@ class VisualizerUpdateTimer : public juce::Timer {
 
     std::array<double, VISUALIZER_LUT_SIZE>* laneLUTPtr_{nullptr};
     int* selectedLanePtr_{nullptr};
+    int lastSeenSelectedLane{-1};
+
+    double lastUpdateTimeMs{0.0};
+
+    static constexpr int SAFETY_TIMER_HZ = 5;  // 200ms fallback for missed edges
 };
 
 } // namespace dsp_core

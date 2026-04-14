@@ -433,53 +433,92 @@ void EventDrivenRenderer::doRender() {
     lastRenderedScanPosition = laneMixer.getScanPosition();
 }
 
-// VisualizerUpdateTimer Implementation (120Hz, direct model reads)
+// VisualizerUpdateDispatcher Implementation (event-driven, 60Hz rate-limited)
 
-VisualizerUpdateTimer::VisualizerUpdateTimer(LaneMixer& mixer)
+VisualizerUpdateDispatcher::VisualizerUpdateDispatcher(LaneMixer& mixer)
     : laneMixer(mixer) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-    startTimerHz(SeamlessConfig::VISUALIZER_TIMER_HZ);  // 120Hz for smooth UI updates during drag
+    startTimerHz(SAFETY_TIMER_HZ);  // slow fallback; triggerAsyncUpdate() drives the hot path
 }
 
-VisualizerUpdateTimer::~VisualizerUpdateTimer() {
+VisualizerUpdateDispatcher::~VisualizerUpdateDispatcher() {
+    cancelPendingUpdate();
     stopTimer();
 }
 
-void VisualizerUpdateTimer::setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
-                                                 std::function<void()> callback) {
+void VisualizerUpdateDispatcher::setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
+                                                      std::function<void()> callback) {
     visualizerLUTPtr = lutPtr;
     onVisualizerUpdate = std::move(callback);
 }
 
-void VisualizerUpdateTimer::timerCallback() {
+void VisualizerUpdateDispatcher::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
+                                                   int* selectedLanePtr) {
+    laneLUTPtr_ = lutPtr;
+    selectedLanePtr_ = selectedLanePtr;
+}
+
+void VisualizerUpdateDispatcher::handleAsyncUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     const uint64_t currentVersion = laneMixer.getVersion();
+    const int currentSelectedLane = selectedLanePtr_ ? *selectedLanePtr_ : -1;
+    const bool curveChanged = currentVersion != lastSeenVersion;
+    const bool selectionChanged = currentSelectedLane != lastSeenSelectedLane;
+    if (!curveChanged && !selectionChanged)
+        return;
 
-    // Path 1: Conditionally update transfer function curve (only when version changes)
-    if (currentVersion != lastSeenVersion) {
-        lastSeenVersion = currentVersion;
+    // No explicit rate limit: JUCE's AsyncUpdater coalesces multiple
+    // triggerAsyncUpdate() calls between message-thread ticks into a single
+    // handleAsyncUpdate(), which already gives us ~vsync-rate updates without
+    // introducing the up-to-16ms deferral lag the previous gate caused during
+    // knob drags. The 5Hz safety timer below catches any edge missed by the
+    // event path (e.g. lane selection changed without a version bump).
+    lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
 
-        if (visualizerLUTPtr) {
-            // Compute the output curve into a temporary buffer, then downsample to visualizer resolution
-            std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
-            if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
-                laneMixer.computeScan(sumBuffer.data(), LaneMixer::TABLE_SIZE);
-            } else {
-                laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
-            }
+    runUpdate();
+    lastSeenVersion = currentVersion;
+    lastSeenSelectedLane = currentSelectedLane;
+}
 
-            // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
-            for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-                const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
-                const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
-                const int idx = static_cast<int>(srcIdx);
-                const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
-                const double t = srcIdx - idx;
-                (*visualizerLUTPtr)[static_cast<size_t>(i)] =
-                    sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
-                    sumBuffer[static_cast<size_t>(nextIdx)] * t;
-            }
+void VisualizerUpdateDispatcher::timerCallback() {
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    const int currentSelectedLane = selectedLanePtr_ ? *selectedLanePtr_ : -1;
+    if (lastSeenVersion != laneMixer.getVersion() || currentSelectedLane != lastSeenSelectedLane) {
+        handleAsyncUpdate();
+    }
+}
+
+void VisualizerUpdateDispatcher::forceUpdate() {
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    runUpdate();
+    lastSeenVersion = laneMixer.getVersion();
+    lastSeenSelectedLane = selectedLanePtr_ ? *selectedLanePtr_ : -1;
+    lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
+}
+
+void VisualizerUpdateDispatcher::runUpdate() {
+    if (visualizerLUTPtr) {
+        // Compute the output curve into a temporary buffer, then downsample to visualizer resolution
+        std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
+        if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+            laneMixer.computeScan(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+        } else {
+            laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+        }
+
+        // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
+        for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
+            const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
+            const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
+            const int idx = static_cast<int>(srcIdx);
+            const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
+            const double t = srcIdx - idx;
+            (*visualizerLUTPtr)[static_cast<size_t>(i)] =
+                sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
+                sumBuffer[static_cast<size_t>(nextIdx)] * t;
         }
     }
 
@@ -501,66 +540,9 @@ void VisualizerUpdateTimer::timerCallback() {
         }
     }
 
-    // Path 2: Unconditionally invoke callback (for amplitude trace updates)
-    // The callback handles both curve updates (when LUT changed) and amplitude trace (every frame)
     if (onVisualizerUpdate) {
         onVisualizerUpdate();
     }
-}
-
-void VisualizerUpdateTimer::forceUpdate() {
-    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-
-    if (visualizerLUTPtr) {
-        // Compute output curve and downsample (same as timerCallback path)
-        std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
-        if (laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
-            laneMixer.computeScan(sumBuffer.data(), LaneMixer::TABLE_SIZE);
-        } else {
-            laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
-        }
-
-        for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-            const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
-            const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
-            const int idx = static_cast<int>(srcIdx);
-            const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
-            const double t = srcIdx - idx;
-            (*visualizerLUTPtr)[static_cast<size_t>(i)] =
-                sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
-                sumBuffer[static_cast<size_t>(nextIdx)] * t;
-        }
-
-        // Compute selected lane's raw curve for secondary visualizer overlay
-        if (laneLUTPtr_ && selectedLanePtr_) {
-            const int laneIdx = *selectedLanePtr_;
-            if (laneIdx >= 0 && laneIdx < laneMixer.getActiveLaneCount()) {
-                const auto& lane = laneMixer.getLane(laneIdx);
-                for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-                    const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
-                    const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
-                    const int idx = static_cast<int>(srcIdx);
-                    const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
-                    const double t = srcIdx - idx;
-                    (*laneLUTPtr_)[static_cast<size_t>(i)] =
-                        lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
-                        lane.curveData[static_cast<size_t>(nextIdx)] * t;
-                }
-            }
-        }
-
-        if (onVisualizerUpdate) {
-            onVisualizerUpdate();
-        }
-    }
-
-    lastSeenVersion = laneMixer.getVersion();
-}
-
-void VisualizerUpdateTimer::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
-                                              int* selectedLanePtr) {
-    laneLUTPtr_ = lutPtr;
-    selectedLanePtr_ = selectedLanePtr;
 }
 
 } // namespace dsp_core

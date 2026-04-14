@@ -11,7 +11,7 @@ namespace dsp_core {
  *   - laneMixer: LaneMixer (message thread only — authoritative curve data)
  *   - audioEngine: AudioEngine (audio thread — triple-buffered LUT playback)
  *   - eventRenderer: EventDrivenRenderer (replaces LUTRenderTimer + LUTRendererThread)
- *   - visualizerTimer: VisualizerUpdateTimer (120Hz, direct model reads)
+ *   - visualizerDispatcher: VisualizerUpdateDispatcher (event-driven, 60Hz rate-limited)
  *
  * Event-Driven Architecture:
  *   - LaneMixer::onVersionChanged callback triggers EventDrivenRenderer
@@ -51,8 +51,8 @@ class SeamlessTransferFunction::Impl {
     // Event-driven renderer (replaces LUTRenderTimer + LUTRendererThread)
     std::unique_ptr<EventDrivenRenderer> eventRenderer;
 
-    // Visualizer timer (120Hz, direct LaneMixer reads — independent of DSP rendering)
-    std::unique_ptr<VisualizerUpdateTimer> visualizerTimer;
+    // Visualizer dispatcher (event-driven, 60Hz rate-limited — independent of DSP rendering)
+    std::unique_ptr<VisualizerUpdateDispatcher> visualizerDispatcher;
 
     // Visualizer state (message thread only)
     std::array<double, VISUALIZER_LUT_SIZE> visualizerLUT;
@@ -73,9 +73,14 @@ SeamlessTransferFunction::SeamlessTransferFunction()
 SeamlessTransferFunction::~SeamlessTransferFunction() {
     // Stop async operations before destruction
 
-    // Stop visualizer timer
-    if (pimpl->visualizerTimer) {
-        pimpl->visualizerTimer->stopTimer();
+    // Clear the version change callback first to prevent dangling references
+    // during subsequent teardown
+    pimpl->laneMixer.setOnVersionChanged(nullptr);
+
+    // Stop visualizer dispatcher (cancels async updates + stops safety timer)
+    if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->cancelPendingUpdate();
+        pimpl->visualizerDispatcher->stopTimer();
     }
 
     // Stop event-driven renderer (cancels async updates + stops safety timer)
@@ -83,9 +88,6 @@ SeamlessTransferFunction::~SeamlessTransferFunction() {
         pimpl->eventRenderer->cancelPendingUpdate();
         pimpl->eventRenderer->stopTimer();
     }
-
-    // Clear the version change callback to prevent dangling references
-    pimpl->laneMixer.setOnVersionChanged(nullptr);
 
     // pimpl destruction handles the rest
 }
@@ -149,22 +151,25 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     pimpl->eventRenderer = std::make_unique<EventDrivenRenderer>(
         pimpl->laneMixer, pimpl->audioEngine);
 
-    // Wire the version change callback to trigger async rendering
+    // Create visualizer dispatcher first so the version-changed callback can wake it
+    pimpl->visualizerDispatcher = std::make_unique<VisualizerUpdateDispatcher>(pimpl->laneMixer);
+    pimpl->visualizerDispatcher->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
+    pimpl->visualizerDispatcher->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
+
+    // Wire the version change callback to trigger both the DSP renderer and
+    // the visualizer dispatcher. Both use AsyncUpdater and are rate-limited.
     pimpl->laneMixer.setOnVersionChanged([this]() {
         if (pimpl->eventRenderer) {
             pimpl->eventRenderer->triggerAsyncUpdate();
         }
+        if (pimpl->visualizerDispatcher) {
+            pimpl->visualizerDispatcher->triggerAsyncUpdate();
+        }
     });
-
-    // Create visualizer timer (120Hz, direct LaneMixer reads)
-    pimpl->visualizerTimer = std::make_unique<VisualizerUpdateTimer>(pimpl->laneMixer);
-    pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
-    pimpl->visualizerTimer->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
-    // Timer starts automatically in constructor at 120Hz
 
     // Trigger initial render for both (ensures correct state immediately)
     pimpl->eventRenderer->forceRender();
-    pimpl->visualizerTimer->forceUpdate();
+    pimpl->visualizerDispatcher->forceUpdate();
 }
 
 void SeamlessTransferFunction::stopSeamlessUpdates() {
@@ -173,10 +178,11 @@ void SeamlessTransferFunction::stopSeamlessUpdates() {
     // Clear callback first (prevent triggering after renderer destroyed)
     pimpl->laneMixer.setOnVersionChanged(nullptr);
 
-    // Stop visualizer timer
-    if (pimpl->visualizerTimer) {
-        pimpl->visualizerTimer->stopTimer();
-        pimpl->visualizerTimer.reset();
+    // Stop visualizer dispatcher
+    if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->cancelPendingUpdate();
+        pimpl->visualizerDispatcher->stopTimer();
+        pimpl->visualizerDispatcher.reset();
     }
 
     // Stop event-driven renderer
@@ -197,10 +203,10 @@ void SeamlessTransferFunction::setVisualizerCallback(std::function<void()> callb
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     pimpl->visualizerCallback = callback;
 
-    // Route callback to visualizer timer if it exists
-    if (pimpl->visualizerTimer) {
-        pimpl->visualizerTimer->setVisualizerTarget(&pimpl->visualizerLUT, std::move(callback));
-        pimpl->visualizerTimer->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
+    // Route callback to visualizer dispatcher if it exists
+    if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->setVisualizerTarget(&pimpl->visualizerLUT, std::move(callback));
+        pimpl->visualizerDispatcher->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
     }
 }
 
@@ -214,7 +220,13 @@ int SeamlessTransferFunction::getSelectedVisualizerLane() const {
 }
 
 void SeamlessTransferFunction::setSelectedVisualizerLane(int laneIndex) {
+    if (pimpl->selectedVisualizerLane == laneIndex) {
+        return;
+    }
     pimpl->selectedVisualizerLane = laneIndex;
+    if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->triggerAsyncUpdate();
+    }
 }
 
 juce::AsyncUpdater* SeamlessTransferFunction::getRenderTrigger() const {
