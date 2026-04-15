@@ -6,9 +6,10 @@
 namespace dsp_core {
 
 namespace {
-    constexpr int kDefaultLaneCount = 11;       // Lane 0 (WT) + H1 + H3,H5,...,H19
-    // Odd harmonic numbers for default lanes 2-10
-    constexpr std::array<int, 9> kDefaultOddHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
+    constexpr int kDefaultLaneCount = 10;       // H1, H3, H5, ..., H19
+    constexpr std::array<int, 10> kDefaultHarmonics      = {1, 3, 5, 7, 9, 11, 13, 15, 17, 19};
+    constexpr std::array<double, 10> kDefaultAmplitudes  = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    constexpr std::array<double, 10> kDefaultBlendDepths = {0.0, 1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625};
     constexpr double kLaneMixerNormEpsilon = 1e-12;
 } // namespace
 
@@ -255,7 +256,7 @@ void LaneMixer::incrementVersion() {
     if (onVersionChanged_) onVersionChanged_();
 }
 
-void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber) {
+void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber, double strength) {
     if (!isValidIndex(index))
         return;
 
@@ -265,23 +266,29 @@ void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber) {
     lane.harmonicNumber = harmonicNumber;
 
     if (harmonicNumber == 0) {
-        // Harmonic 0 = WT base, fill with tanh(2x)
+        // Harmonic 0 = WT base, fill with tanh(2x). Strength doesn't apply here.
         fillLaneWithTanh2x(index);
         lane.harmonicNumber = 0;
+        lane.harmonicStrength = 1.0;
         return;
     }
+
+    const double s = std::clamp(strength, -1.0, 1.0);
+    lane.harmonicStrength = s;
 
     // Direct Chebyshev trig computation — works for any harmonic number.
     // Odd harmonics: sin(n * asin(x)), Even harmonics: cos(n * acos(x))
     for (int i = 0; i < TABLE_SIZE; ++i) {
         const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
+        double value;
         if (harmonicNumber == 1) {
-            lane.curveData[static_cast<size_t>(i)] = x;
+            value = x;
         } else if (harmonicNumber % 2 == 0) {
-            lane.curveData[static_cast<size_t>(i)] = std::cos(harmonicNumber * std::acos(x));
+            value = std::cos(harmonicNumber * std::acos(x));
         } else {
-            lane.curveData[static_cast<size_t>(i)] = std::sin(harmonicNumber * std::asin(x));
+            value = std::sin(harmonicNumber * std::asin(x));
         }
+        lane.curveData[static_cast<size_t>(i)] = value * s;
     }
 
     incrementVersionIfNotBatching();
@@ -536,53 +543,29 @@ void LaneMixer::resetToDefaults() {
 }
 
 void LaneMixer::initializeDefaults() {
-    // Lane 0: Equation mode — tanh(2x), amplitude=0.0, odd symmetry
-    {
-        auto& lane = lanes_[0];
+    // Harmonic-foldback factory layout: H1 fully on, odd harmonics H3..H19
+    // preloaded with halving blendDepth so amplitude sweeps morph toward foldback.
+    for (int laneIdx = 0; laneIdx < kDefaultLaneCount; ++laneIdx) {
+        const int n = kDefaultHarmonics[static_cast<size_t>(laneIdx)];
+        auto& lane = lanes_[static_cast<size_t>(laneIdx)];
         lane = Lane{};
-        lane.amplitude.store(0.0, std::memory_order_relaxed);
-        lane.contentType = LaneContentType::Equation;
-        lane.harmonicNumber = 0;
-        lane.equationText = "tanh(2x)";
-        lane.oddSymmetryEnabled = true;
-        lane.laneId = 0;
-        lane.curveData.resize(TABLE_SIZE);
-        for (int i = 0; i < TABLE_SIZE; ++i) {
-            const double x = normalizeIndex(i);
-            lane.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * x);
-        }
-        Services::TransferFunctionOperations::normalize(lane.curveData);
-    }
-
-    // Lane 1: H1 (identity), amplitude=1.0, odd symmetry
-    {
-        auto& lane = lanes_[1];
-        lane = Lane{};
-        lane.amplitude.store(1.0, std::memory_order_relaxed);
-        lane.contentType = LaneContentType::Harmonic;
-        lane.harmonicNumber = 1;
-        lane.oddSymmetryEnabled = true;
-        lane.laneId = 1;
-        lane.curveData.resize(TABLE_SIZE);
-        for (int i = 0; i < TABLE_SIZE; ++i) {
-            lane.curveData[static_cast<size_t>(i)] = normalizeIndex(i);
-        }
-    }
-
-    // Lanes 2-10: Odd harmonics H3,H5,H7,H9,H11,H13,H15,H17,H19, amplitude=0.0, odd symmetry
-    for (size_t laneIdx = 0; laneIdx < kDefaultOddHarmonics.size(); ++laneIdx) {
-        const int n = kDefaultOddHarmonics[laneIdx];
-        auto& lane = lanes_[laneIdx + 2];
-        lane = Lane{};
-        lane.amplitude.store(0.0, std::memory_order_relaxed);
+        lane.amplitude.store(kDefaultAmplitudes[static_cast<size_t>(laneIdx)], std::memory_order_relaxed);
+        lane.blendDepth.store(kDefaultBlendDepths[static_cast<size_t>(laneIdx)], std::memory_order_relaxed);
         lane.contentType = LaneContentType::Harmonic;
         lane.harmonicNumber = n;
         lane.oddSymmetryEnabled = true;
-        lane.laneId = static_cast<uint32_t>(laneIdx + 2);
+        lane.laneId = static_cast<uint32_t>(laneIdx);
+        lane.customName = "H" + juce::String(n);
         lane.curveData.resize(TABLE_SIZE);
-        for (int i = 0; i < TABLE_SIZE; ++i) {
-            const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
-            lane.curveData[static_cast<size_t>(i)] = std::sin(n * std::asin(x));
+        if (n == 1) {
+            for (int i = 0; i < TABLE_SIZE; ++i) {
+                lane.curveData[static_cast<size_t>(i)] = normalizeIndex(i);
+            }
+        } else {
+            for (int i = 0; i < TABLE_SIZE; ++i) {
+                const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
+                lane.curveData[static_cast<size_t>(i)] = std::sin(n * std::asin(x));
+            }
         }
     }
 
@@ -602,7 +585,7 @@ void LaneMixer::initializeDefaults() {
 
 juce::ValueTree LaneMixer::toValueTree() const {
     juce::ValueTree vt("LaneMixer");
-    vt.setProperty("formatVersion", 4, nullptr);
+    vt.setProperty("formatVersion", 5, nullptr);
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
@@ -619,6 +602,7 @@ juce::ValueTree LaneMixer::toValueTree() const {
         laneVT.setProperty("blendDepth", lane.blendDepth.load(std::memory_order_acquire), nullptr);
         laneVT.setProperty("contentType", static_cast<int>(lane.contentType), nullptr);
         laneVT.setProperty("harmonicNumber", lane.harmonicNumber, nullptr);
+        laneVT.setProperty("harmonicStrength", lane.harmonicStrength, nullptr);
 
         if (!lane.equationText.isEmpty()) {
             laneVT.setProperty("equationText", lane.equationText, nullptr);
@@ -732,6 +716,10 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
         lane.contentType = static_cast<LaneContentType>(
             static_cast<int>(laneVT.getProperty("contentType", 0)));
         lane.harmonicNumber = laneVT.getProperty("harmonicNumber", 0);
+        // formatVersion 5+ adds per-lane harmonicStrength; default 1.0 for older presets.
+        lane.harmonicStrength = juce::jlimit(
+            -1.0, 1.0,
+            static_cast<double>(laneVT.getProperty("harmonicStrength", 1.0)));
         lane.equationText = laneVT.getProperty("equationText", juce::String()).toString();
         lane.presetSourcePath = laneVT.getProperty("presetSourcePath", juce::String()).toString();
         lane.customName = laneVT.getProperty("customName", juce::String()).toString();
@@ -782,7 +770,7 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
                 if (lane.harmonicNumber == 0) {
                     fillLaneWithTanh2x(laneIndex);
                 } else {
-                    fillLaneWithHarmonic(laneIndex, lane.harmonicNumber);
+                    fillLaneWithHarmonic(laneIndex, lane.harmonicNumber, lane.harmonicStrength);
                 }
             } else {
                 lane.initCurveData(TABLE_SIZE);
@@ -992,8 +980,9 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
         }
 
         // Lanes 2-10: Odd harmonics H3,H5,...,H19, amplitude=0.0
-        for (size_t laneIdx = 0; laneIdx < kDefaultOddHarmonics.size(); ++laneIdx) {
-            const int n = kDefaultOddHarmonics[laneIdx];
+        constexpr std::array<int, 9> kLegacyOddHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
+        for (size_t laneIdx = 0; laneIdx < kLegacyOddHarmonics.size(); ++laneIdx) {
+            const int n = kLegacyOddHarmonics[laneIdx];
             auto& lane = lanes_[laneIdx + 2];
             lane.laneId = static_cast<uint32_t>(laneIdx + 2);
             lane.contentType = LaneContentType::Harmonic;
@@ -1007,8 +996,10 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
             }
         }
 
-        activeLaneCount_ = kDefaultLaneCount;
-        nextLaneId_ = static_cast<uint32_t>(kDefaultLaneCount);
+        // Legacy LTF Case C lays out lane 0 (saved) + H1 + 9 odd harmonics = 11 lanes,
+        // independent of the new factory default count.
+        activeLaneCount_ = 11;
+        nextLaneId_ = 11;
     }
 
     incrementVersionIfNotBatching();

@@ -168,8 +168,13 @@ class LaneMixer {
     /**
      * Fill a lane's curve with the Chebyshev polynomial T_n(x).
      * Uses precomputed basis functions from HarmonicLayer.
+     *
+     * @param strength Unnormalized amplitude scale in [0, 1] applied to the
+     *                 written curve values. 1.0 = full magnitude (default).
+     *                 Stored on the lane so it survives serialization and can
+     *                 be re-applied when the curve is regenerated on load.
      */
-    void fillLaneWithHarmonic(int index, int harmonicNumber);
+    void fillLaneWithHarmonic(int index, int harmonicNumber, double strength = 1.0);
 
     /**
      * Fill a lane with tanh(2x). Used by legacy migration and harmonic-0 paths.

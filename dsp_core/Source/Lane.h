@@ -52,6 +52,7 @@ struct Lane {
 
     LaneContentType contentType = LaneContentType::Harmonic;
     int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
+    double harmonicStrength = 1.0; // Unnormalized scale [-1, 1] applied to the Chebyshev curve when written.
 
     // Mode-specific state (only populated for the relevant content type)
     std::vector<SplineAnchor> splineAnchors;
@@ -75,6 +76,7 @@ struct Lane {
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
+          harmonicStrength(other.harmonicStrength),
           splineAnchors(std::move(other.splineAnchors)),
           equationText(std::move(other.equationText)),
           presetSourcePath(std::move(other.presetSourcePath)),
@@ -90,6 +92,7 @@ struct Lane {
                          std::memory_order_relaxed);
         contentType = other.contentType;
         harmonicNumber = other.harmonicNumber;
+        harmonicStrength = other.harmonicStrength;
         splineAnchors = std::move(other.splineAnchors);
         equationText = std::move(other.equationText);
         presetSourcePath = std::move(other.presetSourcePath);
@@ -106,6 +109,7 @@ struct Lane {
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
+          harmonicStrength(other.harmonicStrength),
           splineAnchors(other.splineAnchors),
           equationText(other.equationText),
           presetSourcePath(other.presetSourcePath),
@@ -122,6 +126,7 @@ struct Lane {
                              std::memory_order_relaxed);
             contentType = other.contentType;
             harmonicNumber = other.harmonicNumber;
+            harmonicStrength = other.harmonicStrength;
             splineAnchors = other.splineAnchors;
             equationText = other.equationText;
             presetSourcePath = other.presetSourcePath;

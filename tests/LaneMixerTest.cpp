@@ -42,6 +42,18 @@ class LaneMixerTest : public ::testing::Test {
         }
         return true;
     }
+
+    // Helper: blank all per-lane amplitudes/depths and the macro blendAmount.
+    // Use this in tests that need a clean slate — the factory defaults preload
+    // H1 at amp=1.0 plus halving blendDepths on H3..H19, which would otherwise
+    // contaminate single-lane assertions.
+    static void blankMixer(dsp_core::LaneMixer& m) {
+        for (int i = 0; i < m.getNumLanes(); ++i) {
+            m.setLaneAmplitude(i, 0.0);
+            m.setLaneBlendDepth(i, 0.0);
+        }
+        m.setBlendAmount(0.0);
+    }
 };
 
 // ============================================================================
@@ -49,86 +61,70 @@ class LaneMixerTest : public ::testing::Test {
 // ============================================================================
 
 TEST_F(LaneMixerTest, DefaultInitialization_HasCorrectLaneCount) {
-    EXPECT_EQ(mixer->getNumLanes(), 11);
+    EXPECT_EQ(mixer->getNumLanes(), 10);
 }
 
-TEST_F(LaneMixerTest, DefaultInitialization_Lane0IsTanh2x) {
+TEST_F(LaneMixerTest, DefaultInitialization_Lane0IsH1Identity) {
     const auto& lane = mixer->getLane(0);
-    EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Equation);
-    EXPECT_EQ(lane.harmonicNumber, 0);
-    EXPECT_DOUBLE_EQ(lane.amplitude, 0.0);
-    EXPECT_TRUE(lane.oddSymmetryEnabled);
-    EXPECT_EQ(lane.equationText, juce::String("tanh(2x)"));
-    EXPECT_EQ(static_cast<int>(lane.curveData.size()), dsp_core::LaneMixer::TABLE_SIZE);
-
-    // Verify curve is normalized tanh(2x) — initializeDefaults() normalizes so peak = 1.0
-    const double normFactor = 1.0 / std::tanh(2.0);
-    const int midpoint = dsp_core::LaneMixer::TABLE_SIZE / 2;
-    const double xMid = mixer->normalizeIndex(midpoint);
-    EXPECT_NEAR(lane.curveData[static_cast<size_t>(midpoint)], std::tanh(2.0 * xMid) * normFactor, 1e-10);
-
-    // Endpoints should be ±1.0 after normalization
-    EXPECT_NEAR(lane.curveData[0], -1.0, 1e-10);
-    EXPECT_NEAR(lane.curveData[dsp_core::LaneMixer::TABLE_SIZE - 1], 1.0, 1e-10);
-}
-
-TEST_F(LaneMixerTest, DefaultInitialization_Lane1IsIdentity) {
-    const auto& lane = mixer->getLane(1);
     EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Harmonic);
     EXPECT_EQ(lane.harmonicNumber, 1);
     EXPECT_DOUBLE_EQ(lane.amplitude, 1.0);
+    EXPECT_DOUBLE_EQ(lane.blendDepth, 0.0);
     EXPECT_TRUE(lane.oddSymmetryEnabled);
+    EXPECT_EQ(static_cast<int>(lane.curveData.size()), dsp_core::LaneMixer::TABLE_SIZE);
 
     // T_1(x) = x (identity function)
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
         const double x = mixer->normalizeIndex(i);
         EXPECT_NEAR(lane.curveData[static_cast<size_t>(i)], x, 1e-10)
-            << "Lane 1 curveData at index " << i << " should be x=" << x;
+            << "Lane 0 (H1) curveData at index " << i << " should be x=" << x;
     }
 }
 
-TEST_F(LaneMixerTest, DefaultInitialization_Lanes2Through10AreOddHarmonics) {
-    // Expected odd harmonic numbers for lanes 2-10
+TEST_F(LaneMixerTest, DefaultInitialization_Lanes1Through9AreOddHarmonics) {
+    // Harmonic-foldback factory layout: lanes 1..9 = H3..H19 with halving blendDepth.
     const std::array<int, 9> expectedHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
+    const std::array<double, 9> expectedDepths = {1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625};
 
-    for (int laneIdx = 2; laneIdx <= 10; ++laneIdx) {
+    for (int laneIdx = 1; laneIdx <= 9; ++laneIdx) {
         const auto& lane = mixer->getLane(laneIdx);
-        const int expectedN = expectedHarmonics[laneIdx - 2];
+        const int expectedN = expectedHarmonics[laneIdx - 1];
         EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Harmonic)
             << "Lane " << laneIdx << " should be Harmonic type";
         EXPECT_EQ(lane.harmonicNumber, expectedN)
             << "Lane " << laneIdx << " should have harmonicNumber=" << expectedN;
         EXPECT_DOUBLE_EQ(lane.amplitude, 0.0)
             << "Lane " << laneIdx << " should have amplitude=0.0";
+        EXPECT_DOUBLE_EQ(lane.blendDepth, expectedDepths[laneIdx - 1])
+            << "Lane " << laneIdx << " should have halving blendDepth";
         EXPECT_TRUE(lane.oddSymmetryEnabled)
             << "Lane " << laneIdx << " should have oddSymmetryEnabled";
         EXPECT_EQ(static_cast<int>(lane.curveData.size()), dsp_core::LaneMixer::TABLE_SIZE)
             << "Lane " << laneIdx << " should have TABLE_SIZE curve data";
     }
 
-    // Spot check: Lane 2 = H3, sin(3*asin(x))
-    const auto& lane2 = mixer->getLane(2);
+    // Spot check: Lane 1 = H3, sin(3*asin(x))
+    const auto& lane1 = mixer->getLane(1);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
         const double x = std::clamp(mixer->normalizeIndex(i), -1.0, 1.0);
         const double expected = std::sin(3.0 * std::asin(x));
-        EXPECT_NEAR(lane2.curveData[static_cast<size_t>(i)], expected, 1e-8)
-            << "Lane 2 (H3) at index " << i;
+        EXPECT_NEAR(lane1.curveData[static_cast<size_t>(i)], expected, 1e-8)
+            << "Lane 1 (H3) at index " << i;
     }
 
-    // Spot check: Lane 5 = H9, sin(9*asin(x))
-    const auto& lane5 = mixer->getLane(5);
+    // Spot check: Lane 4 = H9, sin(9*asin(x))
+    const auto& lane4 = mixer->getLane(4);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
         const double x = std::clamp(mixer->normalizeIndex(i), -1.0, 1.0);
         const double expected = std::sin(9.0 * std::asin(x));
-        EXPECT_NEAR(lane5.curveData[static_cast<size_t>(i)], expected, 1e-8)
-            << "Lane 5 (H9) at index " << i;
+        EXPECT_NEAR(lane4.curveData[static_cast<size_t>(i)], expected, 1e-8)
+            << "Lane 4 (H9) at index " << i;
     }
 }
 
-TEST_F(LaneMixerTest, DefaultInitialization_OnlyLane1HasNonZeroAmplitude) {
-    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 0.0); // WT
-    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(1), 1.0); // H1
-    for (int i = 2; i < mixer->getNumLanes(); ++i) {
+TEST_F(LaneMixerTest, DefaultInitialization_OnlyLane0HasNonZeroAmplitude) {
+    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 1.0); // H1
+    for (int i = 1; i < mixer->getNumLanes(); ++i) {
         EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(i), 0.0)
             << "Lane " << i << " should have amplitude 0.0";
     }
@@ -139,16 +135,15 @@ TEST_F(LaneMixerTest, DefaultInitialization_OnlyLane1HasNonZeroAmplitude) {
 // ============================================================================
 
 TEST_F(LaneMixerTest, ComputeSum_AllZeroAmplitudes_ReturnsZeros) {
-    // Set all amplitudes to zero (including H1)
-    mixer->setLaneAmplitude(1, 0.0);
+    blankMixer(*mixer);
 
     auto sum = computeSum();
     EXPECT_TRUE(isAllZeros(sum));
 }
 
 TEST_F(LaneMixerTest, ComputeSum_SingleLaneFullAmplitude_EqualsLaneCurve) {
-    // Default: only Lane 1 (H1=x) is active with amplitude 1.0
-    // With normalization, max(|x|) on [-1,1] = 1.0, so normalized = x
+    // Default: only Lane 0 (H1=x) is active with amplitude 1.0; default blendAmount=0
+    // means the preloaded depths on lanes 1..9 stay inert, so sum = x.
     auto sum = computeSum();
 
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
@@ -159,8 +154,9 @@ TEST_F(LaneMixerTest, ComputeSum_SingleLaneFullAmplitude_EqualsLaneCurve) {
 }
 
 TEST_F(LaneMixerTest, ComputeSum_TwoLanes_PreservesRelativeProportions) {
-    // Lane 1: H1=x, amplitude=0.5
-    // Lane 2: T_2(x), amplitude=0.3
+    // Lane 1: H3, amplitude=0.5
+    // Lane 2: H5, amplitude=0.3
+    blankMixer(*mixer);
     mixer->setLaneAmplitude(1, 0.5);
     mixer->setLaneAmplitude(2, 0.3);
 
@@ -185,21 +181,21 @@ TEST_F(LaneMixerTest, ComputeSum_TwoLanes_PreservesRelativeProportions) {
     }
 }
 
-TEST_F(LaneMixerTest, ComputeSum_NegativeAmplitude_InvertsCurve) {
+TEST_F(LaneMixerTest, ComputeSum_NegativeAmplitude_ClampsToSilence) {
+    // Effective amplitude is max(0, base + macro*depth); a negative base with zero
+    // depth clamps to 0, dropping the lane from the sum entirely. Regression guard
+    // against reintroducing inverted-curve contributions.
+    blankMixer(*mixer);
     mixer->setLaneAmplitude(1, -1.0);
 
     auto sum = computeSum();
 
-    // H1 with amplitude -1.0: raw = -x, max(|-x|) = 1.0, normalized = -x
-    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
-        const double x = mixer->normalizeIndex(i);
-        EXPECT_NEAR(sum[static_cast<size_t>(i)], -x, 1e-10)
-            << "Negative amplitude should invert at index " << i;
-    }
+    EXPECT_DOUBLE_EQ(maxAbs(sum), 0.0);
 }
 
 TEST_F(LaneMixerTest, ComputeSum_WithNormalization_MaxAbsIsOne) {
     // Set up multiple lanes with large amplitudes
+    blankMixer(*mixer);
     mixer->setLaneAmplitude(1, 5.0);
     mixer->setLaneAmplitude(2, 3.0);
     mixer->setLaneAmplitude(3, 2.0);
@@ -225,8 +221,8 @@ TEST_F(LaneMixerTest, SetLaneCurveData_UpdatesCurve) {
 }
 
 TEST_F(LaneMixerTest, SetLaneAmplitude_UpdatesAmplitude) {
-    mixer->setLaneAmplitude(10, 0.75);
-    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(10), 0.75);
+    mixer->setLaneAmplitude(9, 0.75);
+    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(9), 0.75);
 }
 
 TEST_F(LaneMixerTest, SetLaneContentType_UpdatesType) {
@@ -251,11 +247,11 @@ TEST_F(LaneMixerTest, FillLaneWithHarmonic_ProducesCorrectCurve) {
 }
 
 TEST_F(LaneMixerTest, FillLaneWithTanh2x_ProducesCorrectCurve) {
-    mixer->fillLaneWithTanh2x(10);
+    mixer->fillLaneWithTanh2x(9);
 
     // fillLaneWithTanh2x normalizes so peak = 1.0
     const double normFactor = 1.0 / std::tanh(2.0);
-    const auto& lane = mixer->getLane(10);
+    const auto& lane = mixer->getLane(9);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
         const double x = mixer->normalizeIndex(i);
         EXPECT_NEAR(lane.curveData[static_cast<size_t>(i)], std::tanh(2.0 * x) * normFactor, 1e-10)
@@ -305,15 +301,12 @@ TEST_F(LaneMixerTest, VersionCounter_BatchUpdate_SingleIncrement) {
 // ============================================================================
 
 TEST_F(LaneMixerTest, BackwardCompatibility_DefaultSumMatchesLTFDefault) {
-    // Create a LayeredTransferFunction with default init
-    // LTF default: WT=0.0, H1=1.0, base=tanh(2x) → evaluates to H1*x = x
+    // LTF default: WT=0.0, H1=1.0 → evaluates to x
     dsp_core::LayeredTransferFunction ltf(dsp_core::LaneMixer::TABLE_SIZE, -1.0, 1.0);
-    // LTF constructor sets WT=0.0, H1=1.0 by default
 
-    // LaneMixer default: Lane 0 (WT, tanh(2x), amp=0), Lane 1 (H1=x, amp=1.0)
-    // Sum = 0*tanh(2x) + 1.0*x = x
-
-    // Both should produce y=x (with normalization, which is identity for max(|x|)=1)
+    // LaneMixer default: Lane 0 (H1=x, amp=1.0), lanes 1..9 zero amp.
+    // The preloaded depths are inert because default blendAmount=0.
+    // Sum = 1.0 * x = x.
     auto mixerSum = computeSum();
 
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 100) {
@@ -330,25 +323,25 @@ TEST_F(LaneMixerTest, BackwardCompatibility_DefaultSumMatchesLTFDefault) {
 }
 
 TEST_F(LaneMixerTest, MixingMultipleLanes_ProducesCorrectNormalizedSum) {
-    // Set up: Lane 0 = tanh(2x) at 0.5, Lane 1 = H1 at 0.8, Lane 2 = H3 at 0.3
-    mixer->setLaneAmplitude(0, 0.5);  // WT (tanh(2x))
-    mixer->setLaneAmplitude(1, 0.8);  // H1
-    mixer->setLaneAmplitude(2, 0.3);  // H3
+    // Set up: Lane 0 = H1 at 0.8, Lane 1 = H3 at 0.3, Lane 2 = H5 at 0.2
+    blankMixer(*mixer);
+    mixer->setLaneAmplitude(0, 0.8);  // H1
+    mixer->setLaneAmplitude(1, 0.3);  // H3
+    mixer->setLaneAmplitude(2, 0.2);  // H5
 
     auto mixerSum = computeSum();
 
     // Compute expected raw sum then normalize
-    // Lane 0 curve is normalized tanh(2x): tanh(2x) / tanh(2.0)
-    const double tanh2NormFactor = 1.0 / std::tanh(2.0);
     std::vector<double> rawSum(dsp_core::LaneMixer::TABLE_SIZE);
     double rawMaxAbs = 0.0;
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
         const double x = mixer->normalizeIndex(i);
-        const double wtContrib = 0.5 * (std::tanh(2.0 * x) * tanh2NormFactor);
         const double h1Contrib = 0.8 * x;
         const double h3Contrib =
             0.3 * std::sin(3.0 * std::asin(std::clamp(x, -1.0, 1.0)));
-        rawSum[static_cast<size_t>(i)] = wtContrib + h1Contrib + h3Contrib;
+        const double h5Contrib =
+            0.2 * std::sin(5.0 * std::asin(std::clamp(x, -1.0, 1.0)));
+        rawSum[static_cast<size_t>(i)] = h1Contrib + h3Contrib + h5Contrib;
         rawMaxAbs = std::max(rawMaxAbs, std::abs(rawSum[static_cast<size_t>(i)]));
     }
 
@@ -440,18 +433,19 @@ TEST_F(LaneMixerTest, Serialization_SplineAnchors_RoundTrip) {
 
 TEST_F(LaneMixerTest, ResetToDefaults_RestoresInitialState) {
     // Modify state
-    mixer->setLaneAmplitude(1, 0.5);
+    mixer->setLaneAmplitude(0, 0.5);
     mixer->setLaneAmplitude(5, 0.8);
 
     // Reset
     mixer->resetToDefaults();
 
-    // Verify defaults: lane 0 = 0.0, lane 1 = 1.0, lanes 2-10 = 0.0
-    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 0.0);
-    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(1), 1.0);
+    // Verify factory defaults: lane 0 = H1 at 1.0, lanes 1..9 = H3..H19 at 0.0
+    EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 1.0);
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(5), 0.0);
-    EXPECT_EQ(mixer->getNumLanes(), 11);
-    EXPECT_EQ(mixer->getLane(5).harmonicNumber, 9);  // Lane 5 = H9
+    EXPECT_EQ(mixer->getNumLanes(), 10);
+    EXPECT_EQ(mixer->getLane(0).harmonicNumber, 1);  // Lane 0 = H1
+    EXPECT_EQ(mixer->getLane(5).harmonicNumber, 11); // Lane 5 = H11
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(5), 0.0625);
 }
 
 // ============================================================================
@@ -724,6 +718,10 @@ class LaneMixerDuplicateTest : public ::testing::Test {
   protected:
     void SetUp() override {
         mixer = std::make_unique<dsp_core::LaneMixer>();
+        // The factory default is 10 lanes (H1..H19). These tests were written
+        // against an 11-lane baseline, so add one more lane to keep the scan-
+        // position arithmetic in the tests below unchanged.
+        mixer->addLane(-1);
     }
     std::unique_ptr<dsp_core::LaneMixer> mixer;
 };
@@ -1006,10 +1004,14 @@ TEST_F(LaneMixerTest, OnVersionChanged_CalledOnStructuralChanges) {
 // Blend Depth + Blend Amount (Phase 1: per-lane macro modulation)
 // ============================================================================
 
-TEST_F(LaneMixerTest, LaneBlendDepth_DefaultsToZero) {
+TEST_F(LaneMixerTest, LaneBlendDepth_FactoryDefaults_HavingPattern) {
+    // Lane 0 (H1) is the dry carrier — depth=0.
     EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(0), 0.0);
-    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(1), 0.0);
-    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(mixer->getNumLanes() - 1), 0.0);
+    // Lanes 1..9 (H3..H19) are preloaded with halving depths so a single
+    // blendAmount sweep brings progressively higher harmonics in.
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(1), 1.0);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(2), 0.5);
+    EXPECT_DOUBLE_EQ(mixer->getLaneBlendDepth(mixer->getNumLanes() - 1), 0.00390625);
 }
 
 TEST_F(LaneMixerTest, LaneBlendDepth_SetGet_RoundTrips) {
@@ -1062,14 +1064,16 @@ TEST_F(LaneMixerTest, ComputeSum_BlendAmountZero_BehavesLikeBaseAmplitude) {
 }
 
 TEST_F(LaneMixerTest, ComputeSum_PositiveDepthAddsToAmplitude) {
-    // Lane 1 = identity. base=0.4, depth=+0.5, blendAmount=1.0 → effective=0.9.
-    // Compare against a fresh mixer with base=0.9, no depth.
+    // Lane 1 = H3. base=0.4, depth=+0.5, blendAmount=1.0 → effective=0.9.
+    // Compare against a fresh mixer with base=0.9 on lane 1, no depth.
+    blankMixer(*mixer);
     mixer->setLaneAmplitude(1, 0.4);
     mixer->setLaneBlendDepth(1, 0.5);
     mixer->setBlendAmount(1.0);
     const auto modulated = computeSum();
 
     auto fresh = std::make_unique<dsp_core::LaneMixer>();
+    blankMixer(*fresh);
     fresh->setLaneAmplitude(1, 0.9);
     std::vector<double> expected(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
     fresh->computeSum(expected.data(), dsp_core::LaneMixer::TABLE_SIZE);
@@ -1082,12 +1086,14 @@ TEST_F(LaneMixerTest, ComputeSum_PositiveDepthAddsToAmplitude) {
 
 TEST_F(LaneMixerTest, ComputeSum_NegativeDepthSubtracts) {
     // base=0.8, depth=-0.5, blendAmount=1.0 → effective = max(0, 0.3) = 0.3.
+    blankMixer(*mixer);
     mixer->setLaneAmplitude(1, 0.8);
     mixer->setLaneBlendDepth(1, -0.5);
     mixer->setBlendAmount(1.0);
     const auto modulated = computeSum();
 
     auto fresh = std::make_unique<dsp_core::LaneMixer>();
+    blankMixer(*fresh);
     fresh->setLaneAmplitude(1, 0.3);
     std::vector<double> expected(dsp_core::LaneMixer::TABLE_SIZE, 0.0);
     fresh->computeSum(expected.data(), dsp_core::LaneMixer::TABLE_SIZE);
@@ -1100,13 +1106,10 @@ TEST_F(LaneMixerTest, ComputeSum_NegativeDepthSubtracts) {
 TEST_F(LaneMixerTest, ComputeSum_NegativeDepthClampedAtZero) {
     // base=0.2, depth=-1.0, blendAmount=1.0 → raw = -0.8 → effective = 0.
     // The lane should drop out entirely (no inverted-curve contribution).
+    blankMixer(*mixer);
     mixer->setLaneAmplitude(1, 0.2);
     mixer->setLaneBlendDepth(1, -1.0);
     mixer->setBlendAmount(1.0);
-    // Zero out the H1=1.0 default and any other lanes so lane 1 is the only contributor.
-    for (int i = 0; i < mixer->getNumLanes(); ++i) {
-        if (i != 1) mixer->setLaneAmplitude(i, 0.0);
-    }
     const auto modulated = computeSum();
     // Lane 1 was pulled to silence — the buffer must be all zeros.
     EXPECT_DOUBLE_EQ(maxAbs(modulated), 0.0);
@@ -1115,15 +1118,12 @@ TEST_F(LaneMixerTest, ComputeSum_NegativeDepthClampedAtZero) {
 TEST_F(LaneMixerTest, ComputeSum_BaseAmplitudeZero_DepthStillContributes) {
     // Regression guard for the old isActive() skip bug. Lane with amp=0 used to be
     // dropped before depth was even consulted. Now it must contribute.
-    mixer->setLaneAmplitude(1, 0.0);   // zero base → would have been skipped before
-    mixer->setLaneBlendDepth(1, 0.5);  // but depth × macro = 0.5 effective
+    blankMixer(*mixer);
+    mixer->setLaneAmplitude(0, 0.0);   // zero base → would have been skipped before
+    mixer->setLaneBlendDepth(0, 0.5);  // but depth × macro = 0.5 effective
     mixer->setBlendAmount(1.0);
-    // Zero out the H1=1.0 default by also setting all other lanes to 0:
-    for (int i = 0; i < mixer->getNumLanes(); ++i) {
-        if (i != 1) mixer->setLaneAmplitude(i, 0.0);
-    }
     const auto buffer = computeSum();
-    // Lane 1 is identity (H1) — sum should be non-zero (specifically, ±1 after normalize).
+    // Lane 0 is identity (H1) — sum should be non-zero (±1 after normalize).
     EXPECT_GT(maxAbs(buffer), 0.5) << "Lane with amp=0 but depth*blendAmount != 0 must contribute";
 }
 
@@ -1202,6 +1202,7 @@ TEST_F(LaneMixerTest, MixVersion_UnchangedLaneAmplitude_DoesNotIncrement) {
 // ============================================================================
 
 TEST_F(LaneMixerTest, Serialization_RoundTripsBlendDepth) {
+    blankMixer(*mixer);
     mixer->setLaneBlendDepth(0, 0.25);
     mixer->setLaneBlendDepth(1, -0.5);
     mixer->setLaneBlendDepth(5, 1.0);
@@ -1226,9 +1227,9 @@ TEST_F(LaneMixerTest, Serialization_RoundTripsBlendAmount) {
     EXPECT_DOUBLE_EQ(restored.getBlendAmount(), 0.42);
 }
 
-TEST_F(LaneMixerTest, Serialization_FormatVersionIs4) {
+TEST_F(LaneMixerTest, Serialization_FormatVersionIs5) {
     const auto vt = mixer->toValueTree();
-    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 4);
+    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 5);
 }
 
 TEST_F(LaneMixerTest, Deserialization_MissingBlendFields_DefaultsToZero) {
