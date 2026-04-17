@@ -77,6 +77,11 @@ SeamlessTransferFunction::~SeamlessTransferFunction() {
     // during subsequent teardown
     pimpl->laneMixer.setOnVersionChanged(nullptr);
 
+    // Disconnect renderer → visualizer link before destroying the dispatcher
+    if (pimpl->eventRenderer) {
+        pimpl->eventRenderer->setVisualizerDispatcher(nullptr);
+    }
+
     // Stop visualizer dispatcher (cancels async updates + stops safety timer)
     if (pimpl->visualizerDispatcher) {
         pimpl->visualizerDispatcher->cancelPendingUpdate();
@@ -151,10 +156,14 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     pimpl->eventRenderer = std::make_unique<EventDrivenRenderer>(
         pimpl->laneMixer, pimpl->audioEngine);
 
-    // Create visualizer dispatcher first so the version-changed callback can wake it
+    // Create visualizer dispatcher so the version-changed callback can wake it
     pimpl->visualizerDispatcher = std::make_unique<VisualizerUpdateDispatcher>(pimpl->laneMixer);
     pimpl->visualizerDispatcher->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
     pimpl->visualizerDispatcher->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
+
+    // Let the renderer notify the visualizer after each doRender(), so
+    // automation-driven changes (which bypass onVersionChanged) update the UI.
+    pimpl->eventRenderer->setVisualizerDispatcher(pimpl->visualizerDispatcher.get());
 
     // Wire the version change callback to trigger both the DSP renderer and
     // the visualizer dispatcher. Both use AsyncUpdater and are rate-limited.
@@ -177,6 +186,11 @@ void SeamlessTransferFunction::stopSeamlessUpdates() {
 
     // Clear callback first (prevent triggering after renderer destroyed)
     pimpl->laneMixer.setOnVersionChanged(nullptr);
+
+    // Disconnect renderer → visualizer link before destroying the dispatcher
+    if (pimpl->eventRenderer) {
+        pimpl->eventRenderer->setVisualizerDispatcher(nullptr);
+    }
 
     // Stop visualizer dispatcher
     if (pimpl->visualizerDispatcher) {

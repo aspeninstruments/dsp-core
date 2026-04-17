@@ -294,11 +294,18 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
     /** Safety timer callback (5Hz fallback) */
     void timerCallback() override;
 
+    /** Set the visualizer dispatcher to notify after each render.
+     *  Called on the message thread after doRender() completes. */
+    void setVisualizerDispatcher(juce::AsyncUpdater* dispatcher) {
+        visualizerDispatcher_ = dispatcher;
+    }
+
   private:
     void doRender();
 
     LaneMixer& laneMixer;
     AudioEngine& audioEngine;
+    juce::AsyncUpdater* visualizerDispatcher_ = nullptr;
 
     uint64_t lastRenderedFullVersion{0};
     uint64_t lastRenderedMixVersion{0};

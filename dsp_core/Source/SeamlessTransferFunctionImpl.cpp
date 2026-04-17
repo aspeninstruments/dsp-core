@@ -431,6 +431,13 @@ void EventDrivenRenderer::doRender() {
     lastRenderedFullVersion = laneMixer.getVersion();
     lastRenderedMixVersion = laneMixer.getMixVersion();
     lastRenderedScanPosition = laneMixer.getScanPosition();
+
+    // Notify visualizer dispatcher so automation-driven amplitude changes
+    // (which bypass onVersionChanged) still update the UI promptly.
+    // Already on the message thread; triggerAsyncUpdate coalesces naturally.
+    if (visualizerDispatcher_ != nullptr) {
+        visualizerDispatcher_->triggerAsyncUpdate();
+    }
 }
 
 // VisualizerUpdateDispatcher Implementation (event-driven, 60Hz rate-limited)
