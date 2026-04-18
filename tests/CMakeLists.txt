@@ -38,6 +38,31 @@ endif()
 # Also add a simple test that can always be run
 add_test(NAME LayeredTransferFunctionTests COMMAND layered_transfer_function_tests)
 
+# ExpressionEvaluator tests (variable binding: x, m)
+add_executable(expression_evaluator_tests
+    ExpressionEvaluatorTest.cpp
+)
+
+target_include_directories(expression_evaluator_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(expression_evaluator_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(expression_evaluator_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(expression_evaluator_tests)
+endif()
+
+add_test(NAME ExpressionEvaluatorTests COMMAND expression_evaluator_tests)
+
 # LaneMixer tests
 add_executable(lane_mixer_tests
     LaneMixerTest.cpp
