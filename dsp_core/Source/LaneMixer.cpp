@@ -630,6 +630,11 @@ juce::ValueTree LaneMixer::toValueTree() const {
                 if (anchor.hasCustomTangent) {
                     anchorVT.setProperty("tangent", anchor.tangent, nullptr);
                 }
+                if (!anchor.morphGesture.empty()) {
+                    anchorVT.setProperty("homeX", anchor.homeX, nullptr);
+                    anchorVT.setProperty("homeY", anchor.homeY, nullptr);
+                    anchorVT.appendChild(anchor.morphGesture.toValueTree(), nullptr);
+                }
                 anchorsVT.appendChild(anchorVT, nullptr);
             }
             laneVT.appendChild(anchorsVT, nullptr);
@@ -737,6 +742,12 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
                 if (anchorVT.hasProperty("tangent")) {
                     anchor.hasCustomTangent = true;
                     anchor.tangent = static_cast<double>(anchorVT.getProperty("tangent", 0.0));
+                }
+                const auto gestureVT = anchorVT.getChildWithName("Gesture");
+                if (gestureVT.isValid()) {
+                    anchor.morphGesture = AnchorMorphGesture::fromValueTree(gestureVT);
+                    anchor.homeX = static_cast<double>(anchorVT.getProperty("homeX", anchor.x));
+                    anchor.homeY = static_cast<double>(anchorVT.getProperty("homeY", anchor.y));
                 }
                 lane.splineAnchors.push_back(anchor);
             }

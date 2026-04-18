@@ -2,6 +2,7 @@
 #include <vector>
 #include <juce_core/juce_core.h>
 #include "Services/CurveFeatureDetector.h"
+#include "MorphGesture.h"
 
 namespace dsp_core {
 
@@ -21,10 +22,23 @@ enum class SymmetryDetection {
 
 // Control point with optional tangent override
 struct SplineAnchor {
-    double x = 0.0; // Position in [-1, 1]
-    double y = 0.0; // Value in [-1, 1]
+    double x = 0.0; // Currently displayed position in [-1, 1]
+    double y = 0.0; // Currently displayed value in [-1, 1]
     bool hasCustomTangent = false;
     double tangent = 0.0; // m_i in PCHIP notation
+
+    // User-recorded morph gesture (deltas from this anchor's home position).
+    // Empty (size < 2) means "no gesture". Carried inline so the gesture
+    // survives anchor reordering, snapshot/restore, and serialization without
+    // a separate index-keyed map that could go stale.
+    AnchorMorphGesture morphGesture;
+
+    // Home position - the anchor's position when the morph knob is at sample(0).
+    // Meaningful only when morphGesture is non-empty: x = clamp(homeX + gesture.sampleAt(t).dx, [-1,1]).
+    // When morphGesture is empty, these fields are unused (and stay at their default).
+    // Set when the user records a gesture and updated when the user drags an anchor that has one.
+    double homeX = 0.0;
+    double homeY = 0.0;
 
     bool operator==(const SplineAnchor&) const = default;
 };
