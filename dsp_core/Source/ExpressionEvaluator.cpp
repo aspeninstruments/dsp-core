@@ -4,6 +4,7 @@ namespace dsp_core {
 
 ExpressionEvaluator::ExpressionEvaluator() {
     symbolTable.add_variable("x", xVar);
+    symbolTable.add_variable("n", nVar);
     symbolTable.add_variable("m", mVar);
     symbolTable.add_constants();
     expression.register_symbol_table(symbolTable);
@@ -15,6 +16,11 @@ bool ExpressionEvaluator::compile(const std::string& expressionStr) {
 
 double ExpressionEvaluator::evaluate(double x) const {
     const_cast<double&>(xVar) = x;
+    return expression.value();
+}
+
+double ExpressionEvaluator::evaluateHarmonic(double n) const {
+    const_cast<double&>(nVar) = n;
     return expression.value();
 }
 
