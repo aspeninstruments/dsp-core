@@ -62,7 +62,7 @@ TEST_F(EventDrivenRendererTest, ForceRender_SumMatchesLaneMixer) {
     auto& mixer = stf->getLaneMixer();
 
     // Set H3 amplitude to 1.0 (in addition to H1=1.0)
-    mixer.setLaneAmplitude(2, 1.0); // Lane 2 = H3
+    mixer.setLaneAmplitude(1, 1.0); // Lane 1 = H3
 
     renderAndFlushCrossfade();
 
@@ -98,7 +98,7 @@ TEST_F(EventDrivenRendererTest, AmplitudeChange_ReflectedInAudio) {
     // Enable H3 (which has a non-zero value at x=0 for even harmonics... actually
     // H3 is odd, sin(3*asin(0))=0. Use WT lane (tanh(2x)) which is odd too.
     // Let's use a simpler test: set all amplitudes to 0, verify silence
-    mixer.setLaneAmplitude(1, 0.0); // Turn off H1
+    mixer.setLaneAmplitude(0, 0.0); // Turn off H1 (lane 0)
     renderAndFlushCrossfade();
 
     // All lanes now have amplitude 0 → sum is zero → identity fallback
@@ -107,8 +107,8 @@ TEST_F(EventDrivenRendererTest, AmplitudeChange_ReflectedInAudio) {
     // and normalization doesn't kick in (maxAbs < epsilon)
     EXPECT_NEAR(output, 0.0, 0.01) << "With all amplitudes zero, output should be ~0";
 
-    // Re-enable H1
-    mixer.setLaneAmplitude(1, 1.0);
+    // Re-enable H1 (lane 0)
+    mixer.setLaneAmplitude(0, 1.0);
     renderAndFlushCrossfade();
     EXPECT_NEAR(evaluateAt(0.5), 0.5, 0.01) << "Re-enabled H1 should restore identity";
 }
@@ -163,9 +163,9 @@ TEST_F(EventDrivenRendererTest, ScanMode_AmplitudeChange_DoesNotAffectAudio) {
 TEST_F(EventDrivenRendererTest, VersionTracking_MultipleChangesCoalesce) {
     auto& mixer = stf->getLaneMixer();
 
-    // Make many rapid amplitude changes
+    // Make many rapid amplitude changes to H1 (lane 0)
     for (int i = 0; i < 100; ++i) {
-        mixer.setLaneAmplitude(1, static_cast<double>(i) / 100.0);
+        mixer.setLaneAmplitude(0, static_cast<double>(i) / 100.0);
     }
 
     // Single render should capture the final state
@@ -193,10 +193,10 @@ TEST_F(EventDrivenRendererTest, Integration_DefaultState_IsIdentity) {
 TEST_F(EventDrivenRendererTest, Integration_CurveDataChange_ReflectedInAudio) {
     auto& mixer = stf->getLaneMixer();
 
-    // Replace H1 curve data with a constant 0.7
+    // Replace H1 curve data (lane 0) with a constant 0.7
     // After normalization by computeSum, constant 0.7 → constant 1.0
     std::vector<double> constant(dsp_core::LaneMixer::TABLE_SIZE, 0.7);
-    mixer.setLaneCurveData(1, constant);
+    mixer.setLaneCurveData(0, constant);
 
     renderAndFlushCrossfade();
 

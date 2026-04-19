@@ -277,4 +277,11 @@ void HysteresisStage::setOperatingPoint(double Ms) {
     }
 }
 
+double HysteresisStage::computeMakeupForWidth(double width) {
+    const double w = juce::jlimit(0.0, 1.0, width);
+    // Placeholder linear formula — coefficients to be replaced with cubic fit
+    // from measured peak-loss data. See MakeupGain_WidthSweep_PeakWithinFivePercent.
+    return 1.0 + 1.371 * w;
+}
+
 } // namespace dsp_core::audio_pipeline

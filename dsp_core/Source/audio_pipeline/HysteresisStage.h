@@ -41,6 +41,11 @@ class HysteresisStage : public AudioProcessingStage {
     void setMakeupGain(double gain);
     void setOperatingPoint(double Ms);
 
+    // Returns makeup gain that compensates for width-dependent peak loss so a
+    // sine at default sat=0.5 exits hysteresis at roughly the input peak.
+    // Tuned empirically — see MakeupGain_WidthSweep_PeakWithinFivePercent.
+    static double computeMakeupForWidth(double width);
+
   private:
     enum class CrossfadeState { Inactive, WarmingUp, CrossfadingIn, CrossfadingOut };
 

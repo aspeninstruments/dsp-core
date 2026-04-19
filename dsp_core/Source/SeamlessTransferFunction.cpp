@@ -224,6 +224,13 @@ void SeamlessTransferFunction::setVisualizerCallback(std::function<void()> callb
     }
 }
 
+void SeamlessTransferFunction::forceVisualizerUpdate() {
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->forceUpdate();
+    }
+}
+
 const std::array<double, VISUALIZER_LUT_SIZE>&
 SeamlessTransferFunction::getLaneLUT() const {
     return pimpl->laneLUT;

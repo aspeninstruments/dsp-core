@@ -366,3 +366,213 @@ TEST_F(DCBlockingFilterTest, RemovesDCPreservesAC) {
     EXPECT_NEAR(rms, expectedRMS, 0.15) << "AC component should be preserved (RMS: " << rms
                                         << " expected: " << expectedRMS << ")";
 }
+
+// =========================================================================
+// Transparency characterization tests
+//
+// User report: "when output is over 0dB, sounds fine with DC filter OFF
+// but bad with DC filter ON". These tests probe the likely causes:
+//   (a) peak amplification on hot symmetric signals
+//   (b) envelope-tracking transients on signals with varying DC
+//   (c) THD introduction by filter at high levels
+// =========================================================================
+
+namespace {
+
+// Peak absolute value across a buffer
+double measurePeak(const juce::AudioBuffer<double>& buffer) {
+    double peak = 0.0;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+        for (int i = 0; i < buffer.getNumSamples(); ++i) {
+            peak = std::max(peak, std::abs(buffer.getSample(ch, i)));
+        }
+    }
+    return peak;
+}
+
+// Warm up the filter by running a continuous signal generator for N samples.
+// Generator signature: double(int sampleIndex) -> sample value.
+template <typename Gen>
+void warmupFilter(DCBlockingFilter& filter, Gen gen, int numChannels, int numSamples, int blockSize = 512) {
+    juce::AudioBuffer<double> buffer(numChannels, blockSize);
+    int produced = 0;
+    while (produced < numSamples) {
+        const int thisBlock = std::min(blockSize, numSamples - produced);
+        buffer.setSize(numChannels, thisBlock, false, false, true);
+        for (int ch = 0; ch < numChannels; ++ch) {
+            for (int i = 0; i < thisBlock; ++i) {
+                buffer.setSample(ch, i, gen(produced + i));
+            }
+        }
+        filter.process(buffer);
+        produced += thisBlock;
+    }
+}
+
+} // namespace
+
+// Test 9: Peak preservation on hot symmetric sine (no DC).
+// A signal with no DC offset should pass through with peak amplitude preserved
+// within tight tolerance. Any peak amplification indicates the filter is adding
+// energy — making it non-transparent at high levels.
+TEST_F(DCBlockingFilterTest, PeakPreservationOnHotSymmetricSine) {
+    const double sampleRate = 44100.0;
+    const double frequency = 100.0;
+    const double amplitude = 1.5; // Hot: over 0dB
+
+    // Warm up with continuous symmetric sine (no DC)
+    warmupFilter(*filter_,
+                 [=](int n) { return amplitude * std::sin(2.0 * M_PI * frequency * n / sampleRate); },
+                 2, 20000);
+
+    // Measurement buffer: one full period
+    const int periodSamples = static_cast<int>(sampleRate / frequency);
+    juce::AudioBuffer<double> buffer(2, periodSamples * 4);
+    const int phaseOffset = 20000; // continue phase from warmup
+    for (int ch = 0; ch < 2; ++ch) {
+        for (int i = 0; i < buffer.getNumSamples(); ++i) {
+            const double phase = 2.0 * M_PI * frequency * (phaseOffset + i) / sampleRate;
+            buffer.setSample(ch, i, amplitude * std::sin(phase));
+        }
+    }
+
+    const double inputPeak = measurePeak(buffer);
+    filter_->process(buffer);
+    const double outputPeak = measurePeak(buffer);
+
+    // Transparent filter must not amplify peaks of a DC-free signal.
+    // 0.5% tolerance for numerical error.
+    EXPECT_LE(outputPeak, inputPeak * 1.005)
+        << "Filter amplified peak (in: " << inputPeak << ", out: " << outputPeak << ")";
+    EXPECT_GE(outputPeak, inputPeak * 0.995)
+        << "Filter attenuated peak excessively (in: " << inputPeak << ", out: " << outputPeak << ")";
+}
+
+// Test 10: Envelope-change transient artifact.
+// When a signal with a DC offset (like a waveshaped asymmetric signal) suddenly
+// goes silent, the filter's tracked DC lags. Output overshoots to the opposite
+// polarity of the tracked DC. This is the primary suspect for audible artifacts
+// when the signal is hot and dynamics change fast.
+TEST_F(DCBlockingFilterTest, EnvelopeDropDoesNotCreateLargeTransient) {
+    const double sampleRate = 44100.0;
+    const double frequency = 200.0;
+    const double dcOffset = 0.4; // simulates hot asymmetric waveshaper output
+
+    // Warm up with asymmetric signal (sine + DC offset)
+    warmupFilter(*filter_,
+                 [=](int n) {
+                     return std::sin(2.0 * M_PI * frequency * n / sampleRate) + dcOffset;
+                 },
+                 1, 30000);
+
+    // Now process a block of SILENCE (simulate envelope gate closing)
+    const int silentSamples = 2048;
+    juce::AudioBuffer<double> silent(1, silentSamples);
+    silent.clear();
+
+    filter_->process(silent);
+
+    // The filter's tracked DC must not leak through as a large transient.
+    // A transparent DC blocker can leak some residual DC while the tracker relaxes
+    // to zero, but it should NOT approach the magnitude of the original DC.
+    const double transientPeak = measurePeak(silent);
+
+    // Threshold: the transient must be much smaller than the tracked DC itself.
+    // If it approaches dcOffset, we have a clearly audible artifact.
+    EXPECT_LT(transientPeak, dcOffset * 0.25)
+        << "Envelope-drop transient is too large (peak: " << transientPeak
+        << ", tracked DC was: " << dcOffset << "). This creates audible pops on hot signals.";
+}
+
+// Test 11: THD introduction at hot levels.
+// A pure sine wave should remain pure after filtering. If THD scales with input
+// amplitude, the filter is nonlinear at hot levels — which would explain why it
+// sounds bad over 0dB but fine at lower levels.
+TEST_F(DCBlockingFilterTest, THDIsLevelIndependent) {
+    const double sampleRate = 44100.0;
+    const double frequency = 440.0;
+    const int numSamples = 8192;
+
+    auto measureTHD = [&](double amplitude) {
+        filter_->reset();
+        warmupFilter(*filter_,
+                     [=](int n) { return amplitude * std::sin(2.0 * M_PI * frequency * n / sampleRate); },
+                     1, 10000);
+
+        juce::AudioBuffer<double> buffer(1, numSamples);
+        const int phaseOffset = 10000;
+        for (int i = 0; i < numSamples; ++i) {
+            const double phase = 2.0 * M_PI * frequency * (phaseOffset + i) / sampleRate;
+            buffer.setSample(0, i, amplitude * std::sin(phase));
+        }
+        filter_->process(buffer);
+
+        // Correlate with fundamental and 2nd/3rd harmonics
+        double fund = 0.0;
+        double h2 = 0.0;
+        double h3 = 0.0;
+        for (int i = 0; i < numSamples; ++i) {
+            const double s = buffer.getSample(0, i);
+            const double p1 = 2.0 * M_PI * frequency * (phaseOffset + i) / sampleRate;
+            const double p2 = 2.0 * p1;
+            const double p3 = 3.0 * p1;
+            fund += s * std::sin(p1);
+            h2 += s * std::sin(p2);
+            h3 += s * std::sin(p3);
+        }
+        const double fundMag = std::abs(fund);
+        const double harmMag = std::sqrt(h2 * h2 + h3 * h3);
+        return harmMag / std::max(fundMag, 1e-12);
+    };
+
+    const double thdAtQuiet = measureTHD(0.1);
+    const double thdAtHot = measureTHD(1.5);
+
+    // THD introduced by a linear filter must not depend on input amplitude.
+    // If these diverge by more than 10x, the filter is nonlinear at hot levels.
+    EXPECT_NEAR(thdAtHot, thdAtQuiet, thdAtQuiet * 10.0 + 1e-6)
+        << "THD at hot level (" << thdAtHot << ") differs from quiet level (" << thdAtQuiet
+        << ") — filter is level-dependent, not transparent";
+}
+
+// Test 12: No peak amplification on complex harmonic signal (phase coherence).
+// A filter that phase-shifts low frequencies more than high frequencies can
+// reassemble harmonics into a waveform with higher peak than the input.
+// This is a known cause of "intersample peak growth" through IIR filters.
+TEST_F(DCBlockingFilterTest, PeakPreservationOnComplexHarmonicSignal) {
+    const double sampleRate = 44100.0;
+    const double f0 = 80.0; // fundamental in the range where phase shift matters
+    const int numSamples = 16384;
+
+    // Signal: fundamental + several harmonics, phased to peak near ±1.0
+    auto gen = [=](int n) {
+        const double t = static_cast<double>(n) / sampleRate;
+        double v = std::sin(2.0 * M_PI * f0 * t);
+        v += 0.6 * std::sin(2.0 * M_PI * 2.0 * f0 * t);
+        v += 0.4 * std::sin(2.0 * M_PI * 3.0 * f0 * t);
+        v += 0.25 * std::sin(2.0 * M_PI * 4.0 * f0 * t);
+        return v;
+    };
+
+    // Warmup
+    warmupFilter(*filter_, gen, 1, 20000);
+
+    // Build input and keep a copy for comparison
+    juce::AudioBuffer<double> input(1, numSamples);
+    for (int i = 0; i < numSamples; ++i) {
+        input.setSample(0, i, gen(20000 + i));
+    }
+
+    juce::AudioBuffer<double> filtered(1, numSamples);
+    filtered.copyFrom(0, 0, input, 0, 0, numSamples);
+    filter_->process(filtered);
+
+    const double inputPeak = measurePeak(input);
+    const double outputPeak = measurePeak(filtered);
+
+    // Transparent filter: output peak must not exceed input peak meaningfully.
+    // Small amount (~1%) is tolerable; more indicates phase-induced peak growth.
+    EXPECT_LE(outputPeak, inputPeak * 1.02)
+        << "Peak grew through filter (in: " << inputPeak << ", out: " << outputPeak
+        << ") — phase shift is reassembling harmonics into a larger peak";
+}

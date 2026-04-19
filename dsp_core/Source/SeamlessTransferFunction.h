@@ -218,6 +218,18 @@ class SeamlessTransferFunction {
     void setVisualizerCallback(std::function<void()> callback);
 
     /**
+     * Synchronously recompute the visualizer LUT from current mixer state and
+     * fire the visualizer callback (message thread only).
+     *
+     * Call on editor reopen so a freshly constructed UI receives the current
+     * curve. The dispatcher normally only fires on mixer version changes, and
+     * nothing changes across editor close/reopen — without this, the new
+     * visualizer renders empty. No-op if startSeamlessUpdates() hasn't been
+     * called yet.
+     */
+    void forceVisualizerUpdate();
+
+    /**
      * Get lane LUT for secondary visualizer overlay (message thread only)
      *
      * Returns the selected lane's raw curve data (NOT amplitude-scaled),
