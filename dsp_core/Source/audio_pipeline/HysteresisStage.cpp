@@ -2,15 +2,19 @@
 
 namespace dsp_core::audio_pipeline {
 
-HysteresisStage::HysteresisStage(const dsp_core::SeamlessTransferFunction& tf)
+HysteresisStage::HysteresisStage(dsp_core::SeamlessTransferFunction& tf)
     : transferFunction_(&tf) {}
 
-void HysteresisStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+    // Forward to the shared transfer function at this (possibly oversampled) rate
+    // so the LUT crossfade and surge-weight step both track wall time correctly.
+    transferFunction_->prepareToPlay(sampleRate, samplesPerBlock);
+
     for (int ch = 0; ch < 2; ++ch) {
         processors_[ch].prepareToPlay(sampleRate);
         processors_[ch].setOperatingPoint(1.0); // Audio-range: LUT sees raw signal
-        processors_[ch].setNonlinearity([this](double x) {
-            return transferFunction_->applyTransferFunction(x);
+        processors_[ch].setNonlinearity([this, ch](double x) {
+            return transferFunction_->applyTransferFunction(x, ch);
         });
     }
 
@@ -148,7 +152,7 @@ void HysteresisStage::processWarmup(juce::AudioBuffer<double>& buffer, int start
             processors_[ch].process(input * s);
 
             // Output is pure waveshaping
-            data[i] = transferFunction_->applyTransferFunction(input);
+            data[i] = transferFunction_->applyTransferFunction(input, ch);
         }
         transferFunction_->advanceCrossfadeSample();
     }
@@ -167,7 +171,7 @@ void HysteresisStage::processCrossfadeIn(juce::AudioBuffer<double>& buffer, int 
         for (int ch = 0; ch < channelsToProcess; ++ch) {
             auto* data = buffer.getWritePointer(ch);
             const double input = data[i];
-            const double waveOut = transferFunction_->applyTransferFunction(input);
+            const double waveOut = transferFunction_->applyTransferFunction(input, ch);
             const double hystOut = processors_[ch].process(input) * gain;
 
             data[i] = waveOut * (1.0 - s) + hystOut * s;
@@ -189,7 +193,7 @@ void HysteresisStage::processCrossfadeOut(juce::AudioBuffer<double>& buffer, int
         for (int ch = 0; ch < channelsToProcess; ++ch) {
             auto* data = buffer.getWritePointer(ch);
             const double input = data[i];
-            const double waveOut = transferFunction_->applyTransferFunction(input);
+            const double waveOut = transferFunction_->applyTransferFunction(input, ch);
             const double hystOut = processors_[ch].process(input) * gain;
 
             data[i] = waveOut * s + hystOut * (1.0 - s);
@@ -220,7 +224,7 @@ void HysteresisStage::processSteadyWaveshaping(juce::AudioBuffer<double>& buffer
     for (int i = startSample; i < startSample + numSamples; ++i) {
         for (int ch = 0; ch < channelsToProcess; ++ch) {
             auto* data = buffer.getWritePointer(ch);
-            data[i] = transferFunction_->applyTransferFunction(data[i]);
+            data[i] = transferFunction_->applyTransferFunction(data[i], ch);
         }
         transferFunction_->advanceCrossfadeSample();
     }
@@ -264,6 +268,12 @@ void HysteresisStage::setSaturation(double sat) {
 void HysteresisStage::setWidth(double width) {
     for (auto& proc : processors_) {
         proc.setWidth(width);
+    }
+}
+
+void HysteresisStage::setK(double k) {
+    for (auto& proc : processors_) {
+        proc.setK(k);
     }
 }
 

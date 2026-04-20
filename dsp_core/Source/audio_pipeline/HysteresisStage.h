@@ -26,7 +26,10 @@ namespace dsp_core::audio_pipeline {
  */
 class HysteresisStage : public AudioProcessingStage {
   public:
-    explicit HysteresisStage(const dsp_core::SeamlessTransferFunction& tf);
+    // Non-const ref: HysteresisStage::prepareToPlay forwards the oversampled
+    // sample rate into transferFunction.prepareToPlay, so surge timing stays
+    // wall-time accurate across oversampling-order changes.
+    explicit HysteresisStage(dsp_core::SeamlessTransferFunction& tf);
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void process(juce::AudioBuffer<double>& buffer) override;
@@ -38,6 +41,7 @@ class HysteresisStage : public AudioProcessingStage {
     void setDrive(double drive);
     void setSaturation(double sat);
     void setWidth(double width);
+    void setK(double k);
     void setMakeupGain(double gain);
     void setOperatingPoint(double Ms);
 
@@ -57,7 +61,7 @@ class HysteresisStage : public AudioProcessingStage {
     void processSteadyHysteresis(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
     void processSteadyWaveshaping(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
 
-    const dsp_core::SeamlessTransferFunction* transferFunction_;
+    dsp_core::SeamlessTransferFunction* transferFunction_;
     std::array<dsp_core::HysteresisProcessor, 2> processors_; // stereo
     std::atomic<bool> hysteresisEnabled_{true};
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedMakeupGain_{1.0};

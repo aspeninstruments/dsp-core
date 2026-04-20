@@ -210,4 +210,31 @@ TEST_F(EventDrivenRendererTest, Integration_CurveDataChange_ReflectedInAudio) {
         << "Should differ from identity at x=0";
 }
 
+// ============================================================================
+// Regression: Surge needs edge slopes populated by the renderer
+// ============================================================================
+
+/**
+ * Test: Rendering with Surge mode populates edge slopes
+ * Expected: When extrapolationMode=Surge, the renderer computes leftSlope/rightSlope
+ *           (not just when mode=Linear). Without this, Surge's linear/clamp mix
+ *           collapses to pure clamp and nulls against Hard Clip.
+ */
+TEST_F(EventDrivenRendererTest, Render_SurgeModePopulatesEdgeSlopes) {
+    auto& mixer = stf->getLaneMixer();
+    mixer.setExtrapolationMode(dsp_core::LaneMixer::ExtrapolationMode::Surge);
+
+    renderAndFlushCrossfade();
+
+    // Force applyTransferFunction to surge past the LUT edge. For the default
+    // identity curve (y = x) the linear extrapolation slope per index step is
+    // ~2/(TABLE_SIZE-1), so x = 1.5 should produce output noticeably above 1.0
+    // on the first overshoot sample.
+    const double firstOvershoot = stf->applyTransferFunction(1.5, 0);
+    EXPECT_GT(firstOvershoot, 1.05)
+        << "First Surge sample past the edge should follow the linear slope, not clamp. "
+           "If this fails, the LUT renderer likely isn't populating leftSlope/rightSlope "
+           "for Surge mode (check the branch near SeamlessTransferFunctionImpl.cpp:495).";
+}
+
 } // namespace dsp_core_test

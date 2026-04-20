@@ -41,6 +41,7 @@ class HysteresisProcessor {
     void setDrive(double drive);      // 0-1
     void setSaturation(double sat);   // 0-1
     void setWidth(double width);      // 0-1
+    void setK(double k);              // 0.1-3.0 (irreversible-term scale)
 
     /**
      * Set fixed operating point for audio-range signals.
@@ -115,6 +116,9 @@ class HysteresisProcessor {
 
     // Smoothed c parameter (prevents clicks on width changes)
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedC_{0.17};
+
+    // Smoothed k parameter (prevents zipper noise on k automation)
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedK_{0.47875};
 
     // Derived parameter cache
     double M_s_oa_ = 0.0;      // M_s / a

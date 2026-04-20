@@ -72,6 +72,10 @@ struct LUTBuffer {
  */
 class AudioEngine {
   public:
+    // Surge extrapolation time constant: wall-time for the per-channel surge weight
+    // to sweep 0 → 1 (on continuous overshoot) or 1 → 0 (on continuous in-range input).
+    static constexpr double SURGE_DURATION_SEC = 0.002;
+
     AudioEngine();
 
     /**
@@ -91,9 +95,10 @@ class AudioEngine {
      * Uses active LUT or crossfades between old and new LUT.
      *
      * @param x Input sample
+     * @param channel Channel index (0 = L, 1 = R) — only consulted in Surge mode
      * @return Output sample
      */
-    double applyTransferFunction(double x) const;
+    double applyTransferFunction(double x, int channel = 0) const;
 
     /**
      * Process multi-channel buffer in-place (audio thread)
@@ -194,9 +199,10 @@ class AudioEngine {
      *
      * @param lut LUT buffer to evaluate
      * @param x Input value
+     * @param channel Channel index (0 = L, 1 = R) — only consulted in Surge mode
      * @return Interpolated output value
      */
-    double evaluateLUT(const LUTBuffer* lut, double x) const;
+    double evaluateLUT(const LUTBuffer* lut, double x, int channel) const;
 
     /**
      * Evaluate crossfade between two LUTs (OPTIMIZED)
@@ -221,7 +227,7 @@ class AudioEngine {
      * @return Crossfaded output value
      */
     double evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT,
-                            double x, double gainOld, double gainNew) const;
+                            double x, double gainOld, double gainNew, int channel) const;
 
     /**
      * Catmull-Rom interpolation on 4 pre-fetched samples
@@ -237,6 +243,13 @@ class AudioEngine {
 
     // Soft clipper for input bounding (stateless, const-safe)
     audio_pipeline::SoftClippingSolver softClipper_{0.95};
+
+    // Surge extrapolation state: per-channel weight that advances toward 1 while
+    // |x| > 1 (out-of-LUT) and decays toward 0 while |x| ≤ 1. Models the analog
+    // "capacitor charging" behavior where clipping engages gradually.
+    struct SurgeState { double weight{0.0}; };
+    mutable std::array<SurgeState, 2> surgeStates_{};
+    double surgeStepPerSample_{0.0};
 
     // TRIPLE BUFFERING (prevents data race during crossfade):
     // - lutBuffers[0,1]: Used for crossfading (audio thread reads)

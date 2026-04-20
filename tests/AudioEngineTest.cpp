@@ -655,4 +655,154 @@ TEST_F(AudioEngineTest, CrossfadeInterruption_NoContinuityGap) {
         << " Gap=" << gap;
 }
 
+// ============================================================================
+// Surge Extrapolation Tests
+// ============================================================================
+
+namespace {
+    // Configure every buffer of an identity-initialised engine for Surge mode,
+    // with the per-index slope that matches identity (so linear extrap = x).
+    void configureIdentitySurge(dsp_core::AudioEngine& engine) {
+        dsp_core::LUTBuffer* buffers = engine.getLUTBuffers();
+        const double identitySlope = 2.0 / static_cast<double>(dsp_core::TABLE_SIZE - 1);
+        for (int bufIdx = 0; bufIdx < 3; ++bufIdx) {
+            buffers[bufIdx].extrapolationMode = dsp_core::LaneMixer::ExtrapolationMode::Surge;
+            buffers[bufIdx].leftSlope = identitySlope;
+            buffers[bufIdx].rightSlope = identitySlope;
+        }
+    }
+} // namespace
+
+/**
+ * Test: In-range input produces identity in Surge mode (LUT covers [-1, 1])
+ * Expected: |x| ≤ 1 yields the same output as Clamp mode (y = x for identity LUT)
+ */
+TEST_F(AudioEngineTest, Surge_InRangeBehavesLikeIdentity) {
+    engine->prepareToPlay(48000.0, 512);
+    configureIdentitySurge(*engine);
+
+    const std::vector<double> testInputs = {-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0};
+    for (double const x : testInputs) {
+        double const output = engine->applyTransferFunction(x, 0);
+        EXPECT_NEAR(output, x, 1e-3) << "Surge mode should pass in-range x unchanged; x=" << x;
+    }
+}
+
+/**
+ * Test: First out-of-range sample surges to the linear value (weight ≈ 0)
+ * Expected: Immediately after entering clipping, output follows the linear extrapolation.
+ */
+TEST_F(AudioEngineTest, Surge_FirstOvershootReturnsLinearValue) {
+    engine->prepareToPlay(48000.0, 512);
+    configureIdentitySurge(*engine);
+
+    // One in-range sample to settle weight at 0, then a single overshoot
+    (void)engine->applyTransferFunction(0.5, 0);
+    const double surged = engine->applyTransferFunction(1.5, 0);
+
+    // First overshoot sample: weight advances by one step, so output ≈ linear = 1.5 for identity LUT.
+    EXPECT_NEAR(surged, 1.5, 1e-2) << "First clipping sample should surge to ~linear value";
+}
+
+/**
+ * Test: After sustained overshoot past the surge window, output settles to the clamp value
+ * Expected: weight → 1, output → clamp edge (1.0 for identity LUT).
+ */
+TEST_F(AudioEngineTest, Surge_SettlesToClampAfterDuration) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    // Drive x = 1.5 for 2× the surge window (well past saturation)
+    const int totalSamples = static_cast<int>(sampleRate * 2.0 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
+    double finalOutput = 0.0;
+    for (int i = 0; i < totalSamples; ++i) {
+        finalOutput = engine->applyTransferFunction(1.5, 0);
+    }
+
+    EXPECT_NEAR(finalOutput, 1.0, 1e-3) << "After the surge window, output should decay to clamp value 1.0";
+}
+
+/**
+ * Test: At ~half the surge window the output is the linear/clamp midpoint
+ * Expected: weight ≈ 0.5, so for identity LUT with input 1.5, output ≈ 0.5·1.5 + 0.5·1.0 = 1.25.
+ *           Also: the trajectory from sample 0 → half-window is strictly monotonically decreasing.
+ */
+TEST_F(AudioEngineTest, Surge_MidpointIsLinearClampMidpointAndMonotonic) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    const int halfSamples = static_cast<int>(sampleRate * 0.5 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
+    std::vector<double> trajectory;
+    trajectory.reserve(halfSamples);
+    for (int i = 0; i < halfSamples; ++i) {
+        trajectory.push_back(engine->applyTransferFunction(1.5, 0));
+    }
+
+    EXPECT_NEAR(trajectory.back(), 1.25, 1e-2)
+        << "At half the surge window, output should sit halfway between linear (1.5) and clamp (1.0)";
+
+    // Trajectory must be monotonically decreasing: weight climbs → clamp weighting grows
+    for (size_t i = 1; i < trajectory.size(); ++i) {
+        EXPECT_LE(trajectory[i], trajectory[i - 1] + 1e-12)
+            << "Surge output must decrease monotonically as weight advances; i=" << i;
+    }
+}
+
+/**
+ * Test: L and R channels track surge state independently
+ * Expected: One channel clipping does not affect the other channel's weight.
+ */
+TEST_F(AudioEngineTest, Surge_StereoChannelsAreIndependent) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    const int samples = static_cast<int>(sampleRate * 2.0 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
+    // Left gets sustained overshoot, right stays in-range.
+    for (int i = 0; i < samples; ++i) {
+        (void)engine->applyTransferFunction(1.5, 0); // L: clipping
+        (void)engine->applyTransferFunction(0.5, 1); // R: in-range
+    }
+
+    // L should now be fully settled (weight ≈ 1). First overshoot on R still sees weight = 0.
+    const double rightSurged = engine->applyTransferFunction(1.5, 1);
+    EXPECT_NEAR(rightSurged, 1.5, 1e-2)
+        << "Right channel's surge weight must not be affected by left-channel clipping";
+
+    // Left channel should still be at clamp (another overshoot doesn't reset)
+    const double leftStill = engine->applyTransferFunction(1.5, 0);
+    EXPECT_NEAR(leftStill, 1.0, 5e-3)
+        << "Left channel should remain at clamp value after sustained clipping";
+}
+
+/**
+ * Test: Weight decays back toward 0 while input is in-range
+ * Expected: After clipping to settle weight near 1, 50ms of in-range input decays it to ~0,
+ *           so the next overshoot surges to linear again.
+ */
+TEST_F(AudioEngineTest, Surge_DecaysBackDuringInRange) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    // Charge the weight up to ~1
+    const int chargeSamples = static_cast<int>(sampleRate * 0.060);
+    for (int i = 0; i < chargeSamples; ++i) {
+        (void)engine->applyTransferFunction(1.5, 0);
+    }
+
+    // Now hold in-range for 60ms — weight should decay to 0
+    const int dischargeSamples = static_cast<int>(sampleRate * 0.060);
+    for (int i = 0; i < dischargeSamples; ++i) {
+        (void)engine->applyTransferFunction(0.0, 0);
+    }
+
+    // Next overshoot should surge to linear again, not clamp
+    const double resurged = engine->applyTransferFunction(1.5, 0);
+    EXPECT_NEAR(resurged, 1.5, 1e-2)
+        << "After in-range period, surge should re-trigger with linear extrapolation";
+}
+
 } // namespace dsp_core_test

@@ -17,6 +17,7 @@ void HysteresisProcessor::prepareToPlay(double sampleRate) {
     dcR_ = 1.0 - 2.0 * 3.14159265358979323846 * dcCutoffHz / sampleRate;
 
     smoothedC_.reset(sampleRate, 0.01); // 10ms ramp
+    smoothedK_.reset(sampleRate, 0.01); // 10ms ramp
 
     reset();
 }
@@ -51,8 +52,9 @@ double HysteresisProcessor::process(double inputH) {
         return 0.0;
     }
 
-    // Smooth c parameter toward target (~10ms ramp)
+    // Smooth c and k parameters toward target (~10ms ramp)
     c_ = smoothedC_.getNextValue();
+    k_ = smoothedK_.getNextValue();
     M_s_oa_tc_ = c_ * M_s_oa_;
 
     // Input clamping
@@ -122,6 +124,10 @@ void HysteresisProcessor::setWidth(double width) {
     constexpr double cMax = 0.999;
     constexpr double cMin = 0.05;
     smoothedC_.setTargetValue(cMax - width * (cMax - cMin));
+}
+
+void HysteresisProcessor::setK(double k) {
+    smoothedK_.setTargetValue(std::clamp(k, 0.1, 3.0));
 }
 
 void HysteresisProcessor::setOperatingPoint(double Ms) {

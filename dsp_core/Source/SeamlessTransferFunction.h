@@ -96,9 +96,10 @@ class SeamlessTransferFunction {
      * Uses active LUT or crossfades between old and new LUT.
      *
      * @param x Input sample
+     * @param channel Channel index (0 = L, 1 = R) — only consulted in Surge mode
      * @return Output sample
      */
-    double applyTransferFunction(double x) const;
+    double applyTransferFunction(double x, int channel = 0) const;
 
     /**
      * Process multi-channel buffer in-place (audio thread)

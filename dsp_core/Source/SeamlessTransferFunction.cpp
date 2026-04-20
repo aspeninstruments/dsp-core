@@ -1,6 +1,7 @@
 #include "SeamlessTransferFunction.h"
 #include "SeamlessTransferFunctionImpl.h"
 #include <juce_core/juce_core.h>
+#include <algorithm>
 
 namespace dsp_core {
 
@@ -105,8 +106,8 @@ const LaneMixer& SeamlessTransferFunction::getLaneMixer() const {
     return pimpl->laneMixer;
 }
 
-double SeamlessTransferFunction::applyTransferFunction(double x) const {
-    return pimpl->audioEngine.applyTransferFunction(x);
+double SeamlessTransferFunction::applyTransferFunction(double x, int channel) const {
+    return pimpl->audioEngine.applyTransferFunction(x, channel);
 }
 
 void SeamlessTransferFunction::processBuffer(juce::AudioBuffer<double>& buffer) const {
@@ -279,6 +280,21 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     outputBuffer->version = mixer.getVersion();
     outputBuffer->extrapolationMode = mixer.getExtrapolationMode();
     outputBuffer->softClipEnabled = mixer.getSoftClipEnabled();
+
+    // Precompute edge slopes for modes that use linear extrapolation at the edges
+    // (Linear uses it directly; Surge time-blends linear with clamp). Keep this in
+    // sync with EventDrivenRenderer::doRender — both paths populate the same LUT.
+    if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear
+        || outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Surge) {
+        constexpr double MAX_SLOPE = 16.0;
+        const double leftSlope = outputBuffer->data[1] - outputBuffer->data[0];
+        const double rightSlope = outputBuffer->data[TABLE_SIZE - 1] - outputBuffer->data[TABLE_SIZE - 2];
+        outputBuffer->leftSlope = std::clamp(leftSlope, -MAX_SLOPE, MAX_SLOPE);
+        outputBuffer->rightSlope = std::clamp(rightSlope, -MAX_SLOPE, MAX_SLOPE);
+    } else {
+        outputBuffer->leftSlope = 0.0;
+        outputBuffer->rightSlope = 0.0;
+    }
 
     // Signal audio thread that new LUT is ready (using release to ensure LUT writes are visible)
     pimpl->audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);

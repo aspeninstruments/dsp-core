@@ -2,14 +2,18 @@
 
 namespace dsp_core::audio_pipeline {
 
-WaveshapingStage::WaveshapingStage(const dsp_core::SeamlessTransferFunction& tf)
+WaveshapingStage::WaveshapingStage(dsp_core::SeamlessTransferFunction& tf)
     : seamlessTransferFunction_(&tf) {}
 
 WaveshapingStage::WaveshapingStage(dsp_core::LayeredTransferFunction& ltf)
     : layeredTransferFunction_(&ltf) {}
 
-void WaveshapingStage::prepareToPlay(double /*sampleRate*/, int /*samplesPerBlock*/) {
-    // Waveshaping is stateless, no preparation needed
+void WaveshapingStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+    // Forward to the shared transfer function at this (possibly oversampled) rate
+    // so the LUT crossfade and surge-weight step both track wall time correctly.
+    if (seamlessTransferFunction_ != nullptr) {
+        seamlessTransferFunction_->prepareToPlay(sampleRate, samplesPerBlock);
+    }
 }
 
 void WaveshapingStage::process(juce::AudioBuffer<double>& buffer) {

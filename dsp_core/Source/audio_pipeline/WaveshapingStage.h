@@ -15,7 +15,10 @@ class WaveshapingStage : public AudioProcessingStage {
     /**
      * @param tf Reference to seamless transfer function (production use)
      */
-    explicit WaveshapingStage(const dsp_core::SeamlessTransferFunction& tf);
+    // Non-const ref: WaveshapingStage::prepareToPlay forwards the oversampled
+    // sample rate into transferFunction.prepareToPlay, so surge timing stays
+    // wall-time accurate across oversampling-order changes.
+    explicit WaveshapingStage(dsp_core::SeamlessTransferFunction& tf);
 
     /**
      * @param ltf Reference to layered transfer function (testing/profiling use)
@@ -30,7 +33,7 @@ class WaveshapingStage : public AudioProcessingStage {
     }
 
   private:
-    const dsp_core::SeamlessTransferFunction* seamlessTransferFunction_{nullptr};
+    dsp_core::SeamlessTransferFunction* seamlessTransferFunction_{nullptr};
     dsp_core::LayeredTransferFunction* layeredTransferFunction_{nullptr};
 };
 

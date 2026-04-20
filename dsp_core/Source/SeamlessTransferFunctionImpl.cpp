@@ -50,18 +50,21 @@ void AudioEngine::prepareToPlay(double sampleRate, int samplesPerBlock) {
     if (crossfading && crossfadePosition >= crossfadeSamples) {
         crossfading = false;
     }
+
+    surgeStepPerSample_ = (sampleRate > 0.0) ? (1.0 / (sampleRate * SURGE_DURATION_SEC)) : 0.0;
+    for (auto& state : surgeStates_) state.weight = 0.0;
 }
 
-double AudioEngine::applyTransferFunction(double x) const {
+double AudioEngine::applyTransferFunction(double x, int channel) const {
     if (crossfading) {
         const double t = static_cast<double>(crossfadePosition) / crossfadeSamples;
         const double alpha = smoothstep(t);
         const double gainOld = 1.0 - alpha;
         const double gainNew = alpha;
-        return evaluateCrossfade(oldLUT, newLUT, x, gainOld, gainNew);
+        return evaluateCrossfade(oldLUT, newLUT, x, gainOld, gainNew, channel);
     } else {
         const int idx = primaryIndex.load(std::memory_order_acquire);
-        return evaluateLUT(&lutBuffers[idx], x);
+        return evaluateLUT(&lutBuffers[idx], x, channel);
     }
 }
 
@@ -82,7 +85,7 @@ void AudioEngine::processBuffer(juce::AudioBuffer<double>& buffer) const {
             for (int ch = 0; ch < numChannels; ++ch) {
                 double* channelData = buffer.getWritePointer(ch);
                 const double input = channelData[i];
-                channelData[i] = evaluateCrossfade(oldLUT, newLUT, input, gainOld, gainNew);
+                channelData[i] = evaluateCrossfade(oldLUT, newLUT, input, gainOld, gainNew, ch);
             }
 
             if (++crossfadePosition >= crossfadeSamples) {
@@ -94,7 +97,7 @@ void AudioEngine::processBuffer(juce::AudioBuffer<double>& buffer) const {
             for (int ch = 0; ch < numChannels; ++ch) {
                 double* channelData = buffer.getWritePointer(ch);
                 const double input = channelData[i];
-                channelData[i] = evaluateLUT(&lutBuffers[idx], input);
+                channelData[i] = evaluateLUT(&lutBuffers[idx], input, ch);
             }
         }
     }
@@ -154,13 +157,49 @@ void AudioEngine::checkForNewLUT() const {
     }
 }
 
-double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
+double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x, int channel) const {
     if (lut->softClipEnabled) {
         x = softClipper_.process(x);
     }
     const double x_proj = (x - MIN_VALUE) / (MAX_VALUE - MIN_VALUE) * (TABLE_SIZE - 1);
     const int index = static_cast<int>(x_proj);
     const double t = x_proj - index;
+
+    if (lut->extrapolationMode == LaneMixer::ExtrapolationMode::Surge) {
+        // Linear-extrap sample (tangent at edge, via precomputed slopes)
+        auto edgeSample = [lut](int i) -> double {
+            if (i < 0) return lut->data[0] + lut->leftSlope * i;
+            if (i >= TABLE_SIZE) return lut->data[TABLE_SIZE - 1] + lut->rightSlope * (i - TABLE_SIZE + 1);
+            return lut->data[i];
+        };
+        const double ly0 = edgeSample(index - 1);
+        const double ly1 = edgeSample(index);
+        const double ly2 = edgeSample(index + 1);
+        const double ly3 = edgeSample(index + 2);
+        const double linearVal = interpolateCatmullRom(ly0, ly1, ly2, ly3, t);
+
+        // Clamped-index sample (held at LUT edge value)
+        const int cidx0 = std::clamp(index - 1, 0, TABLE_SIZE - 1);
+        const int cidx1 = std::clamp(index, 0, TABLE_SIZE - 1);
+        const int cidx2 = std::clamp(index + 1, 0, TABLE_SIZE - 1);
+        const int cidx3 = std::clamp(index + 2, 0, TABLE_SIZE - 1);
+        const double clampVal = interpolateCatmullRom(lut->data[cidx0], lut->data[cidx1],
+                                                     lut->data[cidx2], lut->data[cidx3], t);
+
+        // Per-channel weight: advance toward 1 while out-of-range, decay toward 0 while in-range
+        const int ch = std::clamp(channel, 0, static_cast<int>(surgeStates_.size()) - 1);
+        auto& state = surgeStates_[ch];
+        if (std::abs(x) > 1.0) {
+            state.weight = std::min(1.0, state.weight + surgeStepPerSample_);
+        } else {
+            state.weight = std::max(0.0, state.weight - surgeStepPerSample_);
+        }
+
+        constexpr double OUTPUT_LIMIT = 15.848931924611134;
+        const double result = (1.0 - state.weight) * linearVal + state.weight * clampVal;
+        if (std::isnan(result) || std::isinf(result)) return 0.0;
+        return std::clamp(result, -OUTPUT_LIMIT, OUTPUT_LIMIT);
+    }
 
     if (lut->extrapolationMode == LaneMixer::ExtrapolationMode::Clamp) {
         const int idx0 = std::clamp(index - 1, 0, TABLE_SIZE - 1);
@@ -233,7 +272,7 @@ double AudioEngine::interpolateCatmullRom(double y0, double y1, double y2, doubl
 }
 
 double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT,
-                                     double x, double gainOld, double gainNew) const {
+                                     double x, double gainOld, double gainNew, int channel) const {
     if (newLUT->softClipEnabled) {
         x = softClipper_.process(x);
     }
@@ -243,6 +282,45 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
     const double t = x_proj - index;
 
     const auto extrapMode = newLUT->extrapolationMode;
+
+    if (extrapMode == LaneMixer::ExtrapolationMode::Surge) {
+        auto edgeSample = [](const LUTBuffer* lut, int i) -> double {
+            if (i < 0) return lut->data[0] + lut->leftSlope * i;
+            if (i >= TABLE_SIZE) return lut->data[TABLE_SIZE - 1] + lut->rightSlope * (i - TABLE_SIZE + 1);
+            return lut->data[i];
+        };
+
+        // Mixed linear-extrap samples
+        const double lmy0 = gainOld * edgeSample(oldLUT, index - 1) + gainNew * edgeSample(newLUT, index - 1);
+        const double lmy1 = gainOld * edgeSample(oldLUT, index)     + gainNew * edgeSample(newLUT, index);
+        const double lmy2 = gainOld * edgeSample(oldLUT, index + 1) + gainNew * edgeSample(newLUT, index + 1);
+        const double lmy3 = gainOld * edgeSample(oldLUT, index + 2) + gainNew * edgeSample(newLUT, index + 2);
+        const double linearVal = interpolateCatmullRom(lmy0, lmy1, lmy2, lmy3, t);
+
+        // Mixed clamped-index samples
+        const int cidx0 = std::clamp(index - 1, 0, TABLE_SIZE - 1);
+        const int cidx1 = std::clamp(index, 0, TABLE_SIZE - 1);
+        const int cidx2 = std::clamp(index + 1, 0, TABLE_SIZE - 1);
+        const int cidx3 = std::clamp(index + 2, 0, TABLE_SIZE - 1);
+        const double cmy0 = gainOld * oldLUT->data[cidx0] + gainNew * newLUT->data[cidx0];
+        const double cmy1 = gainOld * oldLUT->data[cidx1] + gainNew * newLUT->data[cidx1];
+        const double cmy2 = gainOld * oldLUT->data[cidx2] + gainNew * newLUT->data[cidx2];
+        const double cmy3 = gainOld * oldLUT->data[cidx3] + gainNew * newLUT->data[cidx3];
+        const double clampVal = interpolateCatmullRom(cmy0, cmy1, cmy2, cmy3, t);
+
+        const int ch = std::clamp(channel, 0, static_cast<int>(surgeStates_.size()) - 1);
+        auto& state = surgeStates_[ch];
+        if (std::abs(x) > 1.0) {
+            state.weight = std::min(1.0, state.weight + surgeStepPerSample_);
+        } else {
+            state.weight = std::max(0.0, state.weight - surgeStepPerSample_);
+        }
+
+        constexpr double OUTPUT_LIMIT = 15.848931924611134;
+        const double result = (1.0 - state.weight) * linearVal + state.weight * clampVal;
+        if (std::isnan(result) || std::isinf(result)) return 0.0;
+        return std::clamp(result, -OUTPUT_LIMIT, OUTPUT_LIMIT);
+    }
 
     if (extrapMode == LaneMixer::ExtrapolationMode::Clamp) {
         const int idx0 = std::clamp(index - 1, 0, TABLE_SIZE - 1);
@@ -413,8 +491,11 @@ void EventDrivenRenderer::doRender() {
     outputBuffer->extrapolationMode = laneMixer.getExtrapolationMode();
     outputBuffer->softClipEnabled = laneMixer.getSoftClipEnabled();
 
-    // Precompute and clamp edge slopes for Linear extrapolation
-    if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear) {
+    // Precompute and clamp edge slopes for Linear and Surge extrapolation
+    // (Surge mixes linear-extrap with clamp over a time-varying weight, so it
+    // needs the slopes too — otherwise its "linear" half collapses to clamp.)
+    if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear
+        || outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Surge) {
         constexpr double MAX_SLOPE = 16.0;
         const double leftSlope = outputBuffer->data[1] - outputBuffer->data[0];
         const double rightSlope = outputBuffer->data[TABLE_SIZE - 1] - outputBuffer->data[TABLE_SIZE - 2];
