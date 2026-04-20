@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <dsp_core/dsp_core.h>
 #include <cmath>
-#include <iostream>
 #include <limits>
 
 using namespace dsp_core::audio_pipeline;
@@ -437,57 +436,54 @@ TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
     }
 }
 
-// Diagnostic — captures raw (width, peak) table with makeup=1.0 so cubic can be fit.
-// Delete once coefficients are installed.
-TEST_F(HysteresisStageTest, DIAGNOSTIC_WidthToPeakLoss_Sat05) {
+TEST_F(HysteresisStageTest, MakeupGain_FrequencySweep_PeakWithinFivePercent) {
     const double sampleRate = 48000.0 * 16.0;
-    const double freq = 100.0;
     const double amplitude = 0.5;
+    const double tolerance = 0.05;
 
-    std::cout << "\n=== DIAGNOSTIC: width -> peak at makeup=1.0, sat=0.5, 100Hz, amp=0.5 ===\n";
-    for (double w : {0.0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1.0}) {
-        stage_ = std::make_unique<HysteresisStage>(tf_);
-        stage_->prepareToPlay(sampleRate, 512);
-        stage_->setWidth(w);
-        stage_->setMakeupGain(1.0);
+    for (double freq : {50.0, 200.0, 400.0, 800.0, 1600.0}) {
+        for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+            stage_ = std::make_unique<HysteresisStage>(tf_);
+            stage_->prepareToPlay(sampleRate, 512);
+            stage_->setWidth(w);
+            stage_->setMakeupGain(HysteresisStage::computeMakeupForWidth(w));
 
-        const int blockSize = 512;
-        int phase = 0;
-        for (int b = 0; b < 120; ++b) {
-            juce::AudioBuffer<double> buf(2, blockSize);
+            // 200 blocks * 512 @ 768kHz = ~133ms: ≥6 cycles at the slowest (50Hz) freq
+            const int blockSize = 512;
+            int phase = 0;
+            for (int b = 0; b < 200; ++b) {
+                juce::AudioBuffer<double> buf(2, blockSize);
+                for (int ch = 0; ch < 2; ++ch) {
+                    auto* d = buf.getWritePointer(ch);
+                    for (int i = 0; i < blockSize; ++i) {
+                        d[i] = amplitude * std::sin(
+                            2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                    }
+                }
+                stage_->process(buf);
+                phase += blockSize;
+            }
+
+            // 32768 samples = ~2 cycles at 50Hz, plenty at higher freqs
+            const int measSamples = 32768;
+            juce::AudioBuffer<double> meas(2, measSamples);
             for (int ch = 0; ch < 2; ++ch) {
-                auto* d = buf.getWritePointer(ch);
-                for (int i = 0; i < blockSize; ++i) {
+                auto* d = meas.getWritePointer(ch);
+                for (int i = 0; i < measSamples; ++i) {
                     d[i] = amplitude * std::sin(
                         2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
                 }
             }
-            stage_->process(buf);
-            phase += blockSize;
+            stage_->process(meas);
+
+            double peak = 0.0;
+            for (int i = 0; i < measSamples; ++i)
+                peak = std::max(peak, std::abs(meas.getSample(0, i)));
+
+            EXPECT_NEAR(peak, amplitude, amplitude * tolerance)
+                << "freq=" << freq << "Hz width=" << w << " peak=" << peak;
         }
-
-        const int measSamples = 16384;
-        juce::AudioBuffer<double> meas(2, measSamples);
-        for (int ch = 0; ch < 2; ++ch) {
-            auto* d = meas.getWritePointer(ch);
-            for (int i = 0; i < measSamples; ++i) {
-                d[i] = amplitude * std::sin(
-                    2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
-            }
-        }
-        stage_->process(meas);
-
-        double peak = 0.0;
-        for (int i = 0; i < measSamples; ++i)
-            peak = std::max(peak, std::abs(meas.getSample(0, i)));
-
-        const double makeupTarget = amplitude / peak;
-        std::cout << "  w=" << w
-                  << "  peak=" << peak
-                  << "  loss_dB=" << 20.0 * std::log10(peak / amplitude)
-                  << "  makeup_target=" << makeupTarget << "\n";
     }
-    std::cout << "=== end diagnostic ===\n";
 }
 
 // =============================================================================

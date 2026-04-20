@@ -278,10 +278,32 @@ void HysteresisStage::setOperatingPoint(double Ms) {
 }
 
 double HysteresisStage::computeMakeupForWidth(double width) {
+    // Piecewise-linear LUT — peak loss at sat=0.5 accelerates from ~0.75 dB at
+    // w=0.1 to ~16 dB at w=1.0, so no low-order polynomial fits within 5% across
+    // the full range. Grid values are the makeup targets (input_amp / measured_peak)
+    // from a 100Hz / amp=0.5 sine, captured by DIAGNOSTIC_WidthToPeakLoss_Sat05.
+    // Re-run that diagnostic and regenerate this table if default sat changes.
+    static constexpr double kTable[] = {
+        1.000,  // w=0.0
+        1.091,  // w=0.1
+        1.201,  // w=0.2
+        1.336,  // w=0.3
+        1.506,  // w=0.4
+        1.724,  // w=0.5
+        2.016,  // w=0.6
+        2.428,  // w=0.7
+        3.051,  // w=0.8
+        4.102,  // w=0.9
+        6.259,  // w=1.0
+    };
+    static constexpr int kN = sizeof(kTable) / sizeof(kTable[0]);
+    static constexpr double kStep = 1.0 / (kN - 1);
+
     const double w = juce::jlimit(0.0, 1.0, width);
-    // Placeholder linear formula — coefficients to be replaced with cubic fit
-    // from measured peak-loss data. See MakeupGain_WidthSweep_PeakWithinFivePercent.
-    return 1.0 + 1.371 * w;
+    const double f = w / kStep;
+    const int i = std::min(static_cast<int>(f), kN - 2);
+    const double t = f - static_cast<double>(i);
+    return kTable[i] + t * (kTable[i + 1] - kTable[i]);
 }
 
 } // namespace dsp_core::audio_pipeline
