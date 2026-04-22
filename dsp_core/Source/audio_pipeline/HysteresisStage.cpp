@@ -295,25 +295,24 @@ void HysteresisStage::setOperatingPoint(double Ms) {
 }
 
 double HysteresisStage::computeMakeupForWidth(double width) {
-    // Piecewise-linear LUT — conservatively tuned at amp=1.0 (full-scale sine).
-    // Peak loss is strongly amplitude-dependent (a 0.5-amp signal loses ~2× more
-    // peak at w=1.0 than a 1.0-amp signal). Tuning here means full-scale signals
-    // exit at unity; lower-amplitude signals undershoot slightly at high widths,
-    // which is musically natural (quieter in → less saturation effect) and
-    // avoids louder-than-bypass overshoot. Measurements from
-    // DIAGNOSTIC_WidthToPeakLoss_Amp1 — re-run if default sat or J-A params change.
+    // Piecewise-linear LUT, tuned at amp=1.0 with k = 0.4·M_s (see setOperatingPoint).
+    // Low k/M_s ratio keeps peak loss roughly amplitude-independent in [0.5, 2.0]
+    // and bounded by natural J-A saturation at higher amplitudes — so tuning at
+    // full-scale means signals louder than unity undershoot (output bounded by
+    // M_s ≈ 1), which is the preferred failure mode. Measurements from
+    // DIAGNOSTIC_WidthSweep_Amp1_NewK. Re-run if J-A operating point changes.
     static constexpr double kTable[] = {
         1.000,  // w=0.0
-        1.079,  // w=0.1
-        1.169,  // w=0.2
-        1.277,  // w=0.3
-        1.407,  // w=0.4
-        1.565,  // w=0.5
-        1.765,  // w=0.6
-        2.022,  // w=0.7
-        2.367,  // w=0.8
-        2.854,  // w=0.9
-        3.594,  // w=1.0
+        1.039,  // w=0.1
+        1.081,  // w=0.2
+        1.126,  // w=0.3
+        1.175,  // w=0.4
+        1.229,  // w=0.5
+        1.288,  // w=0.6
+        1.352,  // w=0.7
+        1.424,  // w=0.8
+        1.504,  // w=0.9
+        1.593,  // w=1.0
     };
     static constexpr int kN = sizeof(kTable) / sizeof(kTable[0]);
     static constexpr double kStep = 1.0 / (kN - 1);

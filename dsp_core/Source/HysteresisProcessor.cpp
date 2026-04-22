@@ -134,10 +134,11 @@ void HysteresisProcessor::setOperatingPoint(double Ms) {
     a_ = Ms;              // Q = H/Ms — normalizes input to operating range
     scaleOverride_ = 1.0; // LUT sees normalized signal directly
 
-    // Scale k to preserve effective loop width (k/a ratio).
-    // ChowTape reference: a=M_s/(0.01+6*0.5)≈0.415, k=0.47875 → k/a≈1.154
-    // With a=Ms, need k=1.154*Ms to maintain the same ratio.
-    k_ = 1.154 * Ms;
+    // Coercivity set to match ChowTape's k/M_s ratio (~0.383) rather than its k/a.
+    // Seamless-bypass requires a=M_s here, so we can't replicate ChowTape's M_s/a≈3.
+    // Matching k/M_s instead keeps the coercive-vs-saturation ratio similar, which
+    // is the dimensionless group that controls amplitude sensitivity of peak loss.
+    k_ = 0.4 * Ms;
 
     updateDerivedParams();
 }

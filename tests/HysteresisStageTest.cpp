@@ -498,7 +498,10 @@ TEST_F(HysteresisStageTest, MakeupGain_AmplitudeSweep_NeverOvershoots) {
     const double freq = 100.0;
     const double overshootTolerance = 0.05;
 
-    for (double amp : {0.125, 0.25, 0.5, 0.75, 1.0}) {
+    // Sweeps two decades of input amplitude (0.1 → 10). With k = 0.4·M_s the J-A
+    // naturally saturates above unity, so a makeup tuned at amp=1.0 undershoots
+    // rather than overshoots at hot inputs — that's the preferred failure mode.
+    for (double amp : {0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0}) {
         for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
             stage_ = std::make_unique<HysteresisStage>(tf_);
             stage_->prepareToPlay(sampleRate, 512);
