@@ -72,9 +72,17 @@ struct LUTBuffer {
  */
 class AudioEngine {
   public:
-    // Surge extrapolation time constant: wall-time for the per-channel surge weight
+    // Default surge extrapolation time constant: wall-time for the per-channel surge weight
     // to sweep 0 → 1 (on continuous overshoot) or 1 → 0 (on continuous in-range input).
+    // Runtime-overridable via setSurgeDurationSec().
     static constexpr double SURGE_DURATION_SEC = 0.002;
+
+    /**
+     * Update the surge sweep duration at runtime (audio thread safe).
+     *
+     * Values ≤ one sample snap phase in a single sample (hard-clamp behavior).
+     */
+    void setSurgeDurationSec(double seconds) noexcept;
 
     AudioEngine();
 
@@ -99,6 +107,39 @@ class AudioEngine {
      * @return Output sample
      */
     double applyTransferFunction(double x, int channel = 0) const;
+
+    /**
+     * Same as applyTransferFunction, but does NOT advance the Surge per-rail phase state.
+     *
+     * Intended for callers that drive surge phase separately (e.g., the hysteresis
+     * RK4 solver, which invokes the NL many times per output sample and must not
+     * over-mutate phase). Such callers are responsible for calling advanceSurgePhase
+     * exactly once per real output sample with the driving signal.
+     */
+    double applyTransferFunctionNoAdvance(double x, int channel = 0) const;
+
+    /**
+     * Analytical derivative of the transfer function at x (audio thread, const).
+     *
+     * Uses the currently active primary LUT (does not crossfade). Does not advance
+     * Surge phase. Intended for numerical solvers that need a smooth slope at the
+     * Surge transition, where a central-difference estimate on the blended output
+     * is unreliable.
+     */
+    double applyTransferFunctionDerivative(double x, int channel = 0) const;
+
+    /**
+     * Advance the Surge per-rail phase state by one sample (audio thread).
+     *
+     * No-op when the active LUT's extrapolation mode is not Surge. Applies the
+     * LUT's soft-clip (if enabled) to x before the overshoot comparison, matching
+     * the value that evaluateLUT would have seen internally.
+     *
+     * CALLER CONTRACT: invoke exactly once per real output sample per channel.
+     * applyTransferFunction and processBuffer call this internally;
+     * applyTransferFunctionNoAdvance does not.
+     */
+    void advanceSurgePhase(double x, int channel) const noexcept;
 
     /**
      * Process multi-channel buffer in-place (audio thread)
@@ -205,6 +246,17 @@ class AudioEngine {
     double evaluateLUT(const LUTBuffer* lut, double x, int channel) const;
 
     /**
+     * Analytical derivative dy/dx of the LUT evaluation at x.
+     *
+     * Matches evaluateLUT's branches one-for-one (Surge, Clamp, Mirror, Linear-extrap).
+     * In Surge mode, blends the linear-branch and clamp-branch derivatives with the
+     * current (frozen) phase weight. If softClipEnabled, multiplies by the soft
+     * clipper's analytical derivative at the original x (chain rule). Reads the
+     * Surge phase state; does not mutate it.
+     */
+    double evaluateLUTDerivative(const LUTBuffer* lut, double x, int channel) const;
+
+    /**
      * Evaluate crossfade between two LUTs (OPTIMIZED)
      *
      * CRITICAL OPTIMIZATION: Mix table values BEFORE interpolation, not after.
@@ -241,15 +293,26 @@ class AudioEngine {
      */
     static double interpolateCatmullRom(double y0, double y1, double y2, double y3, double t);
 
+    // Shape the linear surge phase p∈[0,1] into a front-loaded asymmetric S-curve
+    // blend weight. Very flat near 0 (~3% of window: spike rises along linear value),
+    // fast rise to ~0.9 by p=0.5 (rapid discharge toward clamp), long gentle tail in
+    // final 50% (smooth asymptotic landing). Kumaraswamy CDF (a=2, b=8):
+    // w = 1 − (1 − p²)⁸, evaluated by repeated squaring — no pow, no branches.
+    static double surgeShapedWeight(double phase) noexcept;
+
     // Soft clipper for input bounding (stateless, const-safe)
     audio_pipeline::SoftClippingSolver softClipper_{0.95};
 
-    // Surge extrapolation state: per-channel weight that advances toward 1 while
-    // |x| > 1 (out-of-LUT) and decays toward 0 while |x| ≤ 1. Models the analog
-    // "capacitor charging" behavior where clipping engages gradually.
-    struct SurgeState { double weight{0.0}; };
+    // Surge extrapolation state: per-channel, per-rail linear phase in [0, 1].
+    // phasePos advances while x > 1 and retracts otherwise; phaseNeg advances
+    // while x < -1 and retracts otherwise. Each rail models an independent diode
+    // — overshoots on one rail do not influence the other rail's conducting
+    // state. Read sites pick the rail's phase by the sign of x and shape it via
+    // surgeShapedWeight() into the linear↔clamp blend coefficient.
+    struct SurgeState { double phasePos{0.0}; double phaseNeg{0.0}; };
     mutable std::array<SurgeState, 2> surgeStates_{};
     double surgeStepPerSample_{0.0};
+    double surgeDurationSec_{SURGE_DURATION_SEC};
 
     // TRIPLE BUFFERING (prevents data race during crossfade):
     // - lutBuffers[0,1]: Used for crossfading (audio thread reads)

@@ -724,11 +724,12 @@ TEST_F(AudioEngineTest, Surge_SettlesToClampAfterDuration) {
 }
 
 /**
- * Test: At ~half the surge window the output is the linear/clamp midpoint
- * Expected: weight ≈ 0.5, so for identity LUT with input 1.5, output ≈ 0.5·1.5 + 0.5·1.0 = 1.25.
+ * Test: At ~half the surge window the output matches the shaped blend of linear and clamp
+ * Expected: phase ≈ 0.5 ⇒ shaped weight = 1 − (1 − 0.5²)⁸ ≈ 0.8999, so for identity LUT
+ *           with input 1.5, output ≈ (1 − 0.900)·1.5 + 0.900·1.0 ≈ 1.050.
  *           Also: the trajectory from sample 0 → half-window is strictly monotonically decreasing.
  */
-TEST_F(AudioEngineTest, Surge_MidpointIsLinearClampMidpointAndMonotonic) {
+TEST_F(AudioEngineTest, Surge_MidpointMatchesShapedBlendAndMonotonic) {
     const double sampleRate = 48000.0;
     engine->prepareToPlay(sampleRate, 512);
     configureIdentitySurge(*engine);
@@ -740,8 +741,8 @@ TEST_F(AudioEngineTest, Surge_MidpointIsLinearClampMidpointAndMonotonic) {
         trajectory.push_back(engine->applyTransferFunction(1.5, 0));
     }
 
-    EXPECT_NEAR(trajectory.back(), 1.25, 1e-2)
-        << "At half the surge window, output should sit halfway between linear (1.5) and clamp (1.0)";
+    EXPECT_NEAR(trajectory.back(), 1.050, 1e-2)
+        << "At half the surge window, output should match the shaped blend of linear (1.5) and clamp (1.0)";
 
     // Trajectory must be monotonically decreasing: weight climbs → clamp weighting grows
     for (size_t i = 1; i < trajectory.size(); ++i) {
@@ -803,6 +804,136 @@ TEST_F(AudioEngineTest, Surge_DecaysBackDuringInRange) {
     const double resurged = engine->applyTransferFunction(1.5, 0);
     EXPECT_NEAR(resurged, 1.5, 1e-2)
         << "After in-range period, surge should re-trigger with linear extrapolation";
+}
+
+/**
+ * Test: Positive and negative rails track surge state independently within a channel
+ * Expected: After sustained positive clipping settles the positive rail to clamp, the first
+ *           negative overshoot still surges to the linear value — the negative rail's phase
+ *           was not elevated by the positive rail's activity (separate-diode behavior).
+ */
+TEST_F(AudioEngineTest, Surge_PositiveAndNegativeRailsAreIndependent) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    // Drive positive rail to saturation (phasePos → 1, output → clamp 1.0)
+    const int chargeSamples = static_cast<int>(sampleRate * 2.0 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
+    double lastPositive = 0.0;
+    for (int i = 0; i < chargeSamples; ++i) {
+        lastPositive = engine->applyTransferFunction(1.5, 0);
+    }
+    EXPECT_NEAR(lastPositive, 1.0, 1e-3) << "Positive rail should be saturated at clamp";
+
+    // First negative overshoot: negative rail's phase was kept at 0 during the positive charge,
+    // so output should surge to linear extrapolation (≈ -1.5 for identity LUT), not clamp (-1.0).
+    const double firstNegative = engine->applyTransferFunction(-1.5, 0);
+    EXPECT_NEAR(firstNegative, -1.5, 1e-2)
+        << "Negative rail must surge freshly to linear, uninfluenced by positive-rail history";
+}
+
+// ============================================================================
+// Surge-mode analytical derivative tests
+// ----------------------------------------------------------------------------
+// Verifies that applyTransferFunctionDerivative produces the correct blended
+// slope in Surge mode: (1-w)·dLinear + w·dClamp. This is the derivative the
+// hysteresis RK4 solver relies on, where a central-difference estimate through
+// the stateful applyTransferFunction would over-mutate Surge phase.
+// ============================================================================
+
+/**
+ * In-range input: linear and clamp branches are identical, so the derivative is
+ * the interior Catmull-Rom slope regardless of w. For an identity LUT this is
+ * dy/dx = 1.
+ */
+TEST_F(AudioEngineTest, SurgeDerivative_InRangeIsInteriorSlope) {
+    engine->prepareToPlay(48000.0, 512);
+    configureIdentitySurge(*engine);
+
+    const std::vector<double> testInputs = {-0.9, -0.5, -0.1, 0.0, 0.1, 0.5, 0.9};
+    for (double const x : testInputs) {
+        const double deriv = engine->applyTransferFunctionDerivative(x, 0);
+        EXPECT_NEAR(deriv, 1.0, 1e-3) << "Interior slope should match identity; x=" << x;
+    }
+}
+
+/**
+ * Freshly overshooting (weight ≈ 0): derivative blends fully toward the linear
+ * branch. For an identity LUT the linear-extrapolation slope is 1.0.
+ */
+TEST_F(AudioEngineTest, SurgeDerivative_FreshOvershootMatchesLinearSlope) {
+    engine->prepareToPlay(48000.0, 512);
+    configureIdentitySurge(*engine);
+
+    // Settle weight at 0 with in-range input.
+    for (int i = 0; i < 100; ++i) {
+        engine->advanceSurgePhase(0.0, 0);
+    }
+    const double deriv = engine->applyTransferFunctionDerivative(1.5, 0);
+    EXPECT_NEAR(deriv, 1.0, 1e-2)
+        << "Fresh overshoot should see linear-branch derivative ≈ 1.0 for identity LUT";
+}
+
+/**
+ * After saturation (weight ≈ 1): derivative collapses to clamp branch, which
+ * outside [-1, 1] is zero.
+ */
+TEST_F(AudioEngineTest, SurgeDerivative_SaturatedClampIsZero) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    // Drive surge phase to saturation.
+    const int chargeSamples = static_cast<int>(sampleRate * 5.0 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
+    for (int i = 0; i < chargeSamples; ++i) {
+        engine->advanceSurgePhase(1.5, 0);
+    }
+
+    const double deriv = engine->applyTransferFunctionDerivative(1.5, 0);
+    EXPECT_NEAR(deriv, 0.0, 1e-2)
+        << "Saturated surge past the edge should collapse to zero derivative";
+}
+
+/**
+ * Partial surge weight produces a blended derivative: half linear + half clamp.
+ * Well outside the LUT that's 0.5 × linearSlope + 0.5 × 0 = 0.5 for identity.
+ */
+TEST_F(AudioEngineTest, SurgeDerivative_BlendsLinearlyWithWeight) {
+    const double sampleRate = 48000.0;
+    engine->prepareToPlay(sampleRate, 512);
+    configureIdentitySurge(*engine);
+
+    // Advance phase to w ≈ 0.5 by overshooting for half the surge window.
+    const int halfCharge = static_cast<int>(sampleRate * 0.5 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
+    for (int i = 0; i < halfCharge; ++i) {
+        engine->advanceSurgePhase(1.5, 0);
+    }
+
+    // x well outside the LUT so the clamp branch is flat (dClamp = 0).
+    const double deriv = engine->applyTransferFunctionDerivative(3.0, 0);
+    EXPECT_GT(deriv, 0.1) << "Non-zero blend weight should produce non-trivial slope";
+    EXPECT_LT(deriv, 0.9) << "Mid-blend should not saturate toward either extreme";
+}
+
+/**
+ * Numerical sanity: inside the LUT, the analytical derivative must match a
+ * central-difference estimate on applyTransferFunctionNoAdvance (which reads
+ * without mutating Surge phase). Skip the ±1 boundary where the Catmull-Rom
+ * transition is not differentiable and the LUT resolution (~1/8192) matters.
+ */
+TEST_F(AudioEngineTest, SurgeDerivative_MatchesCentralDifferenceInsideLUT) {
+    engine->prepareToPlay(48000.0, 512);
+    configureIdentitySurge(*engine);
+
+    constexpr double h = 1e-3;
+    for (double x = -0.9; x <= 0.9; x += 0.1) {
+        const double analytical = engine->applyTransferFunctionDerivative(x, 0);
+        const double yPlus = engine->applyTransferFunctionNoAdvance(x + h, 0);
+        const double yMinus = engine->applyTransferFunctionNoAdvance(x - h, 0);
+        const double numerical = (yPlus - yMinus) / (2.0 * h);
+        EXPECT_NEAR(analytical, numerical, 2e-3)
+            << "Analytical ≠ central difference at x=" << x;
+    }
 }
 
 } // namespace dsp_core_test

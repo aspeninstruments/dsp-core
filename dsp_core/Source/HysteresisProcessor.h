@@ -19,12 +19,14 @@ namespace dsp_core {
  * Thread Safety:
  *   - process(): audio thread only (stateful, not reentrant)
  *   - setDrive/setSaturation/setWidth: UI thread only, before or between process calls
- *   - setNonlinearity(): test-only, not audio-thread safe (uses std::function)
+ *   - setNonlinearity(): not audio-thread safe (uses std::function); set during prepareToPlay
+ *   - setNonlinearityDerivative(): same contract as setNonlinearity
  *   - setTransferFunction(): set once at construction, pointer must outlive processor
  */
 class HysteresisProcessor {
   public:
     using NonlinearityFunc = std::function<double(double)>;
+    using NonlinearityDerivFunc = std::function<double(double)>;
 
     HysteresisProcessor();
 
@@ -32,8 +34,21 @@ class HysteresisProcessor {
     void reset();
     double process(double inputH);
 
-    // Test-only: inject arbitrary NL (not audio-thread safe)
+    // Inject arbitrary NL (not audio-thread safe — set during prepareToPlay)
     void setNonlinearity(NonlinearityFunc func);
+
+    /**
+     * Inject analytical NL derivative (not audio-thread safe).
+     *
+     * When set, langevinDeriv uses this instead of a central-difference estimate
+     * on the custom NL. Essential when the NL has stateful side effects (e.g.,
+     * Surge phase state) that make the central difference unreliable or
+     * non-deterministic across repeated calls.
+     *
+     * The callback receives the same argument that NonlinearityFunc receives
+     * (i.e. Q / scale_ after mapping).
+     */
+    void setNonlinearityDerivative(NonlinearityDerivFunc func);
 
     // Production: use SeamlessTransferFunction pointer (thread-safe via triple buffer)
     // void setTransferFunction(const SeamlessTransferFunction* tf);
@@ -41,7 +56,6 @@ class HysteresisProcessor {
     void setDrive(double drive);      // 0-1
     void setSaturation(double sat);   // 0-1
     void setWidth(double width);      // 0-1
-    void setK(double k);              // 0.1-3.0 (irreversible-term scale)
 
     /**
      * Set fixed operating point for audio-range signals.
@@ -97,6 +111,13 @@ class HysteresisProcessor {
     NonlinearityFunc customNL_;
     bool useCustomNL_ = false;
 
+    // Optional analytical derivative of the custom NL. When provided, replaces
+    // the central-difference estimate used by langevinDeriv. Essential for NLs
+    // with stateful side effects (e.g., Surge) since central difference would
+    // advance that state twice per derivative evaluation.
+    NonlinearityDerivFunc customNLDeriv_;
+    bool useCustomNLDeriv_ = false;
+
     // Safety limits
     static constexpr double upperLimit_ = 20.0;
     static constexpr double outputLimit_ = 2.0;
@@ -116,9 +137,6 @@ class HysteresisProcessor {
 
     // Smoothed c parameter (prevents clicks on width changes)
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedC_{0.17};
-
-    // Smoothed k parameter (prevents zipper noise on k automation)
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedK_{0.47875};
 
     // Derived parameter cache
     double M_s_oa_ = 0.0;      // M_s / a

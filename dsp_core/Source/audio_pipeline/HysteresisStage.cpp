@@ -13,8 +13,15 @@ void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
     for (int ch = 0; ch < 2; ++ch) {
         processors_[ch].prepareToPlay(sampleRate);
         processors_[ch].setOperatingPoint(1.0); // Audio-range: LUT sees raw signal
+        // Use the no-advance entry point: RK4 evaluates the NL ~4× per output
+        // sample. None of those intermediate evaluations should mutate Surge
+        // phase state — the processing path calls advanceSurgePhase() exactly
+        // once per real output sample with the raw driving signal.
         processors_[ch].setNonlinearity([this, ch](double x) {
-            return transferFunction_->applyTransferFunction(x, ch);
+            return transferFunction_->applyTransferFunctionNoAdvance(x, ch);
+        });
+        processors_[ch].setNonlinearityDerivative([this, ch](double x) {
+            return transferFunction_->applyTransferFunctionDerivative(x, ch);
         });
     }
 
@@ -211,7 +218,13 @@ void HysteresisStage::processSteadyHysteresis(juce::AudioBuffer<double>& buffer,
 
         for (int ch = 0; ch < channelsToProcess; ++ch) {
             auto* data = buffer.getWritePointer(ch);
-            data[i] = processors_[ch].process(data[i]) * gain;
+            // Advance Surge phase once per sample per channel with the raw
+            // input. The hysteresis processor's NL callback uses the no-advance
+            // entry point, so RK4's many intermediate evaluations don't touch
+            // phase. This is the only place phase advances in this path.
+            const double input = data[i];
+            transferFunction_->advanceSurgePhase(input, ch);
+            data[i] = processors_[ch].process(input) * gain;
         }
         transferFunction_->advanceCrossfadeSample();
     }
@@ -271,12 +284,6 @@ void HysteresisStage::setWidth(double width) {
     }
 }
 
-void HysteresisStage::setK(double k) {
-    for (auto& proc : processors_) {
-        proc.setK(k);
-    }
-}
-
 void HysteresisStage::setMakeupGain(double gain) {
     smoothedMakeupGain_.setTargetValue(gain);
 }
@@ -288,23 +295,25 @@ void HysteresisStage::setOperatingPoint(double Ms) {
 }
 
 double HysteresisStage::computeMakeupForWidth(double width) {
-    // Piecewise-linear LUT — peak loss at sat=0.5 accelerates from ~0.75 dB at
-    // w=0.1 to ~16 dB at w=1.0, so no low-order polynomial fits within 5% across
-    // the full range. Grid values are the makeup targets (input_amp / measured_peak)
-    // from a 100Hz / amp=0.5 sine, captured by DIAGNOSTIC_WidthToPeakLoss_Sat05.
-    // Re-run that diagnostic and regenerate this table if default sat changes.
+    // Piecewise-linear LUT — conservatively tuned at amp=1.0 (full-scale sine).
+    // Peak loss is strongly amplitude-dependent (a 0.5-amp signal loses ~2× more
+    // peak at w=1.0 than a 1.0-amp signal). Tuning here means full-scale signals
+    // exit at unity; lower-amplitude signals undershoot slightly at high widths,
+    // which is musically natural (quieter in → less saturation effect) and
+    // avoids louder-than-bypass overshoot. Measurements from
+    // DIAGNOSTIC_WidthToPeakLoss_Amp1 — re-run if default sat or J-A params change.
     static constexpr double kTable[] = {
         1.000,  // w=0.0
-        1.091,  // w=0.1
-        1.201,  // w=0.2
-        1.336,  // w=0.3
-        1.506,  // w=0.4
-        1.724,  // w=0.5
-        2.016,  // w=0.6
-        2.428,  // w=0.7
-        3.051,  // w=0.8
-        4.102,  // w=0.9
-        6.259,  // w=1.0
+        1.079,  // w=0.1
+        1.169,  // w=0.2
+        1.277,  // w=0.3
+        1.407,  // w=0.4
+        1.565,  // w=0.5
+        1.765,  // w=0.6
+        2.022,  // w=0.7
+        2.367,  // w=0.8
+        2.854,  // w=0.9
+        3.594,  // w=1.0
     };
     static constexpr int kN = sizeof(kTable) / sizeof(kTable[0]);
     static constexpr double kStep = 1.0 / (kN - 1);

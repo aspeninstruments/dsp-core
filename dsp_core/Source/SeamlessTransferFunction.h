@@ -102,6 +102,47 @@ class SeamlessTransferFunction {
     double applyTransferFunction(double x, int channel = 0) const;
 
     /**
+     * Evaluate the transfer function WITHOUT advancing Surge phase (audio thread).
+     *
+     * Callers that drive surge phase separately (e.g., the hysteresis RK4 solver,
+     * which evaluates the NL many times per output sample) must use this entry
+     * point to avoid over-mutating phase. Such callers are responsible for
+     * invoking advanceSurgePhase() exactly once per real output sample.
+     */
+    double applyTransferFunctionNoAdvance(double x, int channel = 0) const;
+
+    /**
+     * Analytical derivative dy/dx of the transfer function at x (audio thread).
+     *
+     * Uses the currently active primary LUT; does not crossfade; does not advance
+     * Surge phase. In Surge mode, blends the linear-branch and clamp-branch
+     * derivatives by the current (frozen) phase weight. Accounts for soft-clip
+     * via chain rule when enabled.
+     */
+    double applyTransferFunctionDerivative(double x, int channel = 0) const;
+
+    /**
+     * Advance Surge per-rail phase state by one sample (audio thread).
+     *
+     * No-op when the active LUT's extrapolation mode is not Surge. Apply once per
+     * real output sample per channel with the raw driving signal.
+     * applyTransferFunction and processBuffer call this internally;
+     * applyTransferFunctionNoAdvance does not.
+     */
+    void advanceSurgePhase(double x, int channel = 0) const;
+
+    /**
+     * Update the Surge extrapolation sweep duration at runtime (audio thread safe).
+     *
+     * Governs how fast the per-channel surge weight sweeps 0 → 1 while |x| > 1
+     * and retracts while |x| ≤ 1. Durations ≤ one sample give hard-clamp
+     * behavior (snap to 1 in a single sample).
+     *
+     * @param seconds Sweep duration in seconds (typical range 0.0 – 0.002).
+     */
+    void setSurgeDurationSec(double seconds);
+
+    /**
      * Process multi-channel buffer in-place (audio thread)
      *
      * Processes all channels with shared crossfade state.

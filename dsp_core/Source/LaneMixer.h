@@ -65,9 +65,11 @@ class LaneMixer {
     }
 
     // Mixer mode -- controls how lanes are combined into the output curve.
-    //   Blend: Weighted sum of all lanes (existing behavior)
-    //   Scan:  Wavetable-style sweep across lanes using scan position
-    enum class MixerMode { Blend = 0, Scan = 1 };
+    //   Blend:  Weighted sum of all lanes (existing behavior)
+    //   Scan:   Wavetable-style sweep across lanes using scan position
+    //   Series: Functional composition -- y = F(G(H(...(x)))). Each lane's amplitude
+    //           [0,1] maps to a drive gain in [0.25, 4.0] with 0.5 -> 1.0 (unity).
+    enum class MixerMode { Blend = 0, Scan = 1, Series = 2 };
 
     LaneMixer();
 
@@ -208,6 +210,23 @@ class LaneMixer {
      * @param size Number of output samples (must be <= TABLE_SIZE)
      */
     void computeScan(double* outputBuffer, int size) const;
+
+    /**
+     * Compute the series chain into an output buffer (Series mode).
+     *
+     * Functional composition across all active lanes, applied left-to-right:
+     *     y = lane_{N-1}( ... lane_1( lane_0( x * g_0 ) * g_1 ) ... * g_{N-1} )
+     *
+     * Per-lane drive gain g_n = pow(4, 2 * a_eff - 1), where
+     *     a_eff = clamp(amplitude_n + blendAmount * blendDepth_n, 0, 1).
+     * So amplitude 0 -> gain 0.25, 0.5 -> 1.0, 1 -> 4.0. Each intermediate input is
+     * hard-clamped to [-1, 1] before the lane's LUT lookup. Final output is
+     * normalized so max|output| = 1.
+     *
+     * @param outputBuffer Pre-allocated buffer of at least TABLE_SIZE doubles
+     * @param size Number of output samples (must be <= TABLE_SIZE)
+     */
+    void computeSeries(double* outputBuffer, int size) const;
 
     /**
      * Evaluate the mixed sum at a normalized position x in [-1, 1].

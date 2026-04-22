@@ -389,9 +389,11 @@ TEST_F(HysteresisStageTest, MakeupGain_HighSaturation_CompensatesLevelDrop) {
 }
 
 TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
+    // LUT is tuned at amp=1.0 (see computeMakeupForWidth comment) — verify the
+    // reference contract at that amplitude.
     const double sampleRate = 48000.0 * 16.0;
     const double freq = 100.0;
-    const double amplitude = 0.5;
+    const double amplitude = 1.0;
     const double tolerance = 0.05;
 
     for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
@@ -437,8 +439,9 @@ TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
 }
 
 TEST_F(HysteresisStageTest, MakeupGain_FrequencySweep_PeakWithinFivePercent) {
+    // Same reference amplitude (1.0) as the width-sweep contract.
     const double sampleRate = 48000.0 * 16.0;
-    const double amplitude = 0.5;
+    const double amplitude = 1.0;
     const double tolerance = 0.05;
 
     for (double freq : {50.0, 200.0, 400.0, 800.0, 1600.0}) {
@@ -482,6 +485,59 @@ TEST_F(HysteresisStageTest, MakeupGain_FrequencySweep_PeakWithinFivePercent) {
 
             EXPECT_NEAR(peak, amplitude, amplitude * tolerance)
                 << "freq=" << freq << "Hz width=" << w << " peak=" << peak;
+        }
+    }
+}
+
+// The LUT is tuned conservatively at amp=1.0 so lower-amplitude inputs will
+// undershoot (quieter out than in) at high widths — acceptable. But output must
+// never exceed input by more than 5% regardless of amplitude: overshoot would
+// sound louder than bypass, which is the UX bug this compensation exists to fix.
+TEST_F(HysteresisStageTest, MakeupGain_AmplitudeSweep_NeverOvershoots) {
+    const double sampleRate = 48000.0 * 16.0;
+    const double freq = 100.0;
+    const double overshootTolerance = 0.05;
+
+    for (double amp : {0.125, 0.25, 0.5, 0.75, 1.0}) {
+        for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+            stage_ = std::make_unique<HysteresisStage>(tf_);
+            stage_->prepareToPlay(sampleRate, 512);
+            stage_->setWidth(w);
+            stage_->setMakeupGain(HysteresisStage::computeMakeupForWidth(w));
+
+            const int blockSize = 512;
+            int phase = 0;
+            for (int b = 0; b < 120; ++b) {
+                juce::AudioBuffer<double> buf(2, blockSize);
+                for (int ch = 0; ch < 2; ++ch) {
+                    auto* d = buf.getWritePointer(ch);
+                    for (int i = 0; i < blockSize; ++i) {
+                        d[i] = amp * std::sin(
+                            2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                    }
+                }
+                stage_->process(buf);
+                phase += blockSize;
+            }
+
+            const int measSamples = 16384;
+            juce::AudioBuffer<double> meas(2, measSamples);
+            for (int ch = 0; ch < 2; ++ch) {
+                auto* d = meas.getWritePointer(ch);
+                for (int i = 0; i < measSamples; ++i) {
+                    d[i] = amp * std::sin(
+                        2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                }
+            }
+            stage_->process(meas);
+
+            double peak = 0.0;
+            for (int i = 0; i < measSamples; ++i)
+                peak = std::max(peak, std::abs(meas.getSample(0, i)));
+
+            EXPECT_LE(peak, amp * (1.0 + overshootTolerance))
+                << "amp=" << amp << " width=" << w << " peak=" << peak
+                << " (overshoot by " << 100.0 * (peak - amp) / amp << "%)";
         }
     }
 }

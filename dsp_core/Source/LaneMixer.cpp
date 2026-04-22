@@ -410,6 +410,72 @@ void LaneMixer::computeScan(double* outputBuffer, int size) const {
     }
 }
 
+namespace {
+    // Linear-interp LUT lookup. x must be in [-1, 1].
+    inline double lookupLaneLUT(const std::vector<double>& curve, double x, int tableSize) {
+        const double fractionalIndex =
+            (x - LaneMixer::MIN_VALUE) / (LaneMixer::MAX_VALUE - LaneMixer::MIN_VALUE)
+            * static_cast<double>(tableSize - 1);
+        const int idx0 = std::clamp(static_cast<int>(std::floor(fractionalIndex)), 0, tableSize - 1);
+        const int idx1 = std::min(idx0 + 1, tableSize - 1);
+        const double frac = fractionalIndex - static_cast<double>(idx0);
+        const double a = curve[static_cast<size_t>(idx0)];
+        const double b = curve[static_cast<size_t>(idx1)];
+        return a + frac * (b - a);
+    }
+} // namespace
+
+void LaneMixer::computeSeries(double* outputBuffer, int size) const {
+    const int numSamples = std::min(size, TABLE_SIZE);
+
+    // Seed with the identity x in [-1, 1] so the first lane sees the raw input.
+    for (int i = 0; i < numSamples; ++i) {
+        outputBuffer[i] = normalizeIndex(i);
+    }
+
+    // Empty mixer -> identity passthrough.
+    if (activeLaneCount_ <= 0) {
+        return;
+    }
+
+    // Gain mapping: a_eff in [0, 1] -> gain in [0.25, 4.0], with 0.5 -> 1.0.
+    // gain = 4^(2*a_eff - 1) = exp(ln(4) * (2*a_eff - 1)).
+    constexpr double kLn4 = 1.3862943611198906; // std::log(4.0)
+
+    const double macro = blendAmount_.load(std::memory_order_acquire);
+
+    // Apply each lane in order: y_{n+1} = lane_n.LUT(clamp(y_n * gain_n, -1, 1)).
+    for (int laneIdx = 0; laneIdx < activeLaneCount_; ++laneIdx) {
+        const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
+        if (lane.curveData.empty()) {
+            continue; // No curve to apply; preserves running signal.
+        }
+
+        const double base = lane.amplitude.load(std::memory_order_acquire);
+        const double depth = lane.blendDepth.load(std::memory_order_acquire);
+        const double aEff = std::clamp(base + macro * depth, 0.0, 1.0);
+        const double gain = std::exp(kLn4 * (2.0 * aEff - 1.0));
+
+        for (int i = 0; i < numSamples; ++i) {
+            const double driven = std::clamp(outputBuffer[i] * gain, MIN_VALUE, MAX_VALUE);
+            outputBuffer[i] = lookupLaneLUT(lane.curveData, driven, TABLE_SIZE);
+        }
+    }
+
+    // Normalize output to [-1, 1] range (match computeSum / computeScan).
+    double maxAbs = 0.0;
+    for (int i = 0; i < numSamples; ++i) {
+        maxAbs = std::max(maxAbs, std::abs(outputBuffer[i]));
+    }
+
+    if (maxAbs > kLaneMixerNormEpsilon) {
+        const double scalar = 1.0 / maxAbs;
+        for (int i = 0; i < numSamples; ++i) {
+            outputBuffer[i] *= scalar;
+        }
+    }
+}
+
 double LaneMixer::evaluateSumAt(double x) const {
     // Clamp x to valid range
     x = std::max(MIN_VALUE, std::min(MAX_VALUE, x));

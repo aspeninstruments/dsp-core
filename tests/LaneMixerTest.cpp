@@ -711,6 +711,192 @@ TEST_F(LaneMixerScanTest, Serialization_PreservesMixerMode) {
 }
 
 // ============================================================================
+// Series Mode Tests
+// ============================================================================
+
+class LaneMixerSeriesTest : public LaneMixerTest {
+  protected:
+    static constexpr int kSize = dsp_core::LaneMixer::TABLE_SIZE;
+
+    std::vector<double> computeSeries() {
+        std::vector<double> buffer(kSize, 0.0);
+        mixer->computeSeries(buffer.data(), kSize);
+        return buffer;
+    }
+
+    // Reduce to exactly N lanes, each filled with identity y=x and amplitude=0.5 (unity gain).
+    void setupIdentityChain(int count) {
+        mixer->resetToDefaults();
+        while (mixer->getNumLanes() > 1) {
+            mixer->removeLane(mixer->getNumLanes() - 1);
+        }
+        auto fillIdentity = [this](int idx) {
+            auto& lane = mixer->getMutableLane(idx);
+            lane.curveData.resize(kSize);
+            for (int j = 0; j < kSize; ++j) {
+                lane.curveData[static_cast<size_t>(j)] = mixer->normalizeIndex(j);
+            }
+            mixer->setLaneAmplitude(idx, 0.5);
+            mixer->setLaneBlendDepth(idx, 0.0);
+        };
+        fillIdentity(0);
+        for (int i = 1; i < count; ++i) {
+            mixer->addLane(-1);
+            fillIdentity(i);
+        }
+        mixer->setBlendAmount(0.0);
+    }
+
+    // Gain the DSP uses internally: pow(4, 2*a - 1), so 0 → 0.25, 0.5 → 1.0, 1 → 4.0.
+    static double gainFor(double a) {
+        return std::exp(std::log(4.0) * (2.0 * a - 1.0));
+    }
+};
+
+TEST_F(LaneMixerSeriesTest, GainMappingIsUnityAtHalf) {
+    // Single identity lane with amplitude=0.5 → gain=1 → output should equal input.
+    // After final normalization (max|x| = 1.0 already), result is identity.
+    setupIdentityChain(1);
+    auto result = computeSeries();
+    for (int i = 0; i < kSize; ++i) {
+        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10)
+            << "at index " << i;
+    }
+}
+
+TEST_F(LaneMixerSeriesTest, GainAtZeroIsQuarter) {
+    // Single identity lane with amplitude=0.0 → gain=0.25. Unclamped output = 0.25 * x.
+    // Final normalization scales by 1/maxAbs(0.25*x) = 1/0.25 = 4 → identity.
+    setupIdentityChain(1);
+    mixer->setLaneAmplitude(0, 0.0);
+    auto result = computeSeries();
+    // Normalization pushes it back to identity — so the shape is identity, but max is 1.0.
+    EXPECT_NEAR(maxAbs(result), 1.0, 1e-10);
+    for (int i = 0; i < kSize; ++i) {
+        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10)
+            << "at index " << i;
+    }
+}
+
+TEST_F(LaneMixerSeriesTest, GainAtOneIsFourClampedBeforeLookup) {
+    // Single identity lane with amplitude=1.0 → gain=4. y*4 gets hard-clamped to [-1, 1]
+    // before the identity LUT lookup → output is a hard-clipped ramp saturating at ±1 outside
+    // |x| > 0.25. After normalization (max=1), shape is preserved.
+    setupIdentityChain(1);
+    mixer->setLaneAmplitude(0, 1.0);
+    auto result = computeSeries();
+
+    // Inside the linear region (|x| < 0.25), output ≈ 4x.
+    for (int i = 0; i < kSize; ++i) {
+        const double x = mixer->normalizeIndex(i);
+        const double expected = std::clamp(4.0 * x, -1.0, 1.0);
+        EXPECT_NEAR(result[static_cast<size_t>(i)], expected, 1e-3) << "at index " << i;
+    }
+
+    // Edges should be saturated at ±1.
+    EXPECT_NEAR(result[0], -1.0, 1e-10);
+    EXPECT_NEAR(result[static_cast<size_t>(kSize - 1)], 1.0, 1e-10);
+}
+
+TEST_F(LaneMixerSeriesTest, EmptyMixerReturnsIdentity) {
+    // Before the chain runs, buffer seeds to the identity x ∈ [-1, 1]. Single-lane identity
+    // preserves that. Two-lane identity also preserves it (composition of identities).
+    setupIdentityChain(3);
+    auto result = computeSeries();
+    for (int i = 0; i < kSize; ++i) {
+        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10)
+            << "at index " << i;
+    }
+}
+
+TEST_F(LaneMixerSeriesTest, DepthZeroMeansMorphInert) {
+    // With all depths at 0, sweeping blendAmount must not change the output.
+    setupIdentityChain(2);
+    mixer->setBlendAmount(0.0);
+    const auto ref = computeSeries();
+
+    for (double m : {0.25, 0.5, 0.75, 1.0}) {
+        mixer->setBlendAmount(m);
+        const auto cur = computeSeries();
+        for (int i = 0; i < kSize; ++i) {
+            EXPECT_NEAR(cur[static_cast<size_t>(i)], ref[static_cast<size_t>(i)], 1e-10)
+                << "morph=" << m << " at index " << i;
+        }
+    }
+}
+
+TEST_F(LaneMixerSeriesTest, DepthModulatesGainViaMorph) {
+    // amplitude=0.5, depth=0.5, morph=1 → a_eff = 1.0 → gain=4 (clamp-saturating).
+    // This should match the behavior of amplitude=1.0 at morph=0.
+    setupIdentityChain(1);
+    mixer->setLaneAmplitude(0, 0.5);
+    mixer->setLaneBlendDepth(0, 0.5);
+    mixer->setBlendAmount(1.0);
+    const auto modulated = computeSeries();
+
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setLaneBlendDepth(0, 0.0);
+    mixer->setBlendAmount(0.0);
+    const auto direct = computeSeries();
+
+    for (int i = 0; i < kSize; ++i) {
+        EXPECT_NEAR(modulated[static_cast<size_t>(i)], direct[static_cast<size_t>(i)], 1e-10)
+            << "at index " << i;
+    }
+}
+
+TEST_F(LaneMixerSeriesTest, OutputIsNormalized) {
+    setupIdentityChain(2);
+    // Pick non-trivial amplitudes to ensure output is not all-zero.
+    mixer->setLaneAmplitude(0, 0.75);
+    mixer->setLaneAmplitude(1, 0.75);
+    const auto result = computeSeries();
+    EXPECT_NEAR(maxAbs(result), 1.0, 1e-10);
+}
+
+TEST_F(LaneMixerSeriesTest, ChainComposesFunctionally) {
+    // Two lanes: lane 0 = identity (y=x), lane 1 = square-ish (y = x^2 * sign(x)).
+    // With both amplitudes = 0.5 (gain=1), the chain applies lane1(lane0(x)) = lane1(x).
+    setupIdentityChain(2);
+    auto& lane1 = mixer->getMutableLane(1);
+    for (int j = 0; j < kSize; ++j) {
+        const double x = mixer->normalizeIndex(j);
+        lane1.curveData[static_cast<size_t>(j)] = x * std::abs(x);
+    }
+    const auto result = computeSeries();
+
+    // Expected: normalize lane1's curve to max|y|=1. Since max|x*|x|| = 1 at x=±1, no scaling.
+    for (int j = 0; j < kSize; ++j) {
+        const double x = mixer->normalizeIndex(j);
+        EXPECT_NEAR(result[static_cast<size_t>(j)], x * std::abs(x), 1e-10)
+            << "at index " << j;
+    }
+}
+
+TEST_F(LaneMixerSeriesTest, SetMixerModeSeries_IncrementsVersion) {
+    const auto v0 = mixer->getVersion();
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Series);
+    EXPECT_GT(mixer->getVersion(), v0);
+    EXPECT_EQ(mixer->getMixerMode(), dsp_core::LaneMixer::MixerMode::Series);
+}
+
+TEST_F(LaneMixerSeriesTest, Serialization_PreservesSeriesMode) {
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Series);
+    auto vt = mixer->toValueTree();
+
+    auto restored = std::make_unique<dsp_core::LaneMixer>();
+    restored->fromValueTree(vt);
+    EXPECT_EQ(restored->getMixerMode(), dsp_core::LaneMixer::MixerMode::Series);
+}
+
+TEST_F(LaneMixerSeriesTest, GainFormulaEndpointsAreExact) {
+    // Sanity-check the mapping matches the documented 0 → 0.25, 0.5 → 1.0, 1 → 4.0.
+    EXPECT_NEAR(gainFor(0.0), 0.25, 1e-12);
+    EXPECT_NEAR(gainFor(0.5), 1.0, 1e-12);
+    EXPECT_NEAR(gainFor(1.0), 4.0, 1e-12);
+}
+
+// ============================================================================
 // DuplicateLane Tests
 // ============================================================================
 

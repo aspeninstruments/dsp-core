@@ -110,6 +110,18 @@ double SeamlessTransferFunction::applyTransferFunction(double x, int channel) co
     return pimpl->audioEngine.applyTransferFunction(x, channel);
 }
 
+double SeamlessTransferFunction::applyTransferFunctionNoAdvance(double x, int channel) const {
+    return pimpl->audioEngine.applyTransferFunctionNoAdvance(x, channel);
+}
+
+double SeamlessTransferFunction::applyTransferFunctionDerivative(double x, int channel) const {
+    return pimpl->audioEngine.applyTransferFunctionDerivative(x, channel);
+}
+
+void SeamlessTransferFunction::advanceSurgePhase(double x, int channel) const {
+    pimpl->audioEngine.advanceSurgePhase(x, channel);
+}
+
 void SeamlessTransferFunction::processBuffer(juce::AudioBuffer<double>& buffer) const {
     // Audio thread: process entire multi-channel buffer with shared crossfade state
     // Change detection happens on the Editor's timer (25Hz) via notifyEditingModelChanged()
@@ -127,6 +139,10 @@ void SeamlessTransferFunction::advanceCrossfadeSample() const {
 void SeamlessTransferFunction::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // Can be called from audio thread - no message thread check
     pimpl->audioEngine.prepareToPlay(sampleRate, samplesPerBlock);
+}
+
+void SeamlessTransferFunction::setSurgeDurationSec(double seconds) {
+    pimpl->audioEngine.setSurgeDurationSec(seconds);
 }
 
 void SeamlessTransferFunction::releaseResources() {
@@ -263,8 +279,11 @@ void SeamlessTransferFunction::renderLUTImmediate() {
 
     // Compute the output curve based on mixer mode
     std::array<double, TABLE_SIZE> sumBuffer{};
-    if (mixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
+    const auto mode = mixer.getMixerMode();
+    if (mode == LaneMixer::MixerMode::Scan) {
         mixer.computeScan(sumBuffer.data(), TABLE_SIZE);
+    } else if (mode == LaneMixer::MixerMode::Series) {
+        mixer.computeSeries(sumBuffer.data(), TABLE_SIZE);
     } else {
         mixer.computeSum(sumBuffer.data(), TABLE_SIZE);
     }

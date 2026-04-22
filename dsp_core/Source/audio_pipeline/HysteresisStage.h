@@ -41,7 +41,6 @@ class HysteresisStage : public AudioProcessingStage {
     void setDrive(double drive);
     void setSaturation(double sat);
     void setWidth(double width);
-    void setK(double k);
     void setMakeupGain(double gain);
     void setOperatingPoint(double Ms);
 

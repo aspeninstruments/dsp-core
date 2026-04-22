@@ -104,6 +104,25 @@ class SoftClippingSolver {
         return sign * y;
     }
 
+    /**
+     * Analytical derivative dy/dx of process() at x.
+     *
+     * Piecewise:
+     *   |x| ≤ a: 1 (linear unity gain)
+     *   |x| ≥ b: 0 (flat saturation)
+     *   otherwise: cos(π/2 · (|x|-a)/(b-a)) — the (1-a)(π/2)/(b-a) prefactor
+     *              is identically 1 by C1 construction. Since y = sign(x)·f(|x|),
+     *              sign² cancels and dy/dx = f'(|x|).
+     */
+    [[nodiscard]] double derivative(double x) const {
+        const double u = std::abs(x);
+        if (u <= a_) return 1.0;
+        if (u >= b_) return 0.0;
+        constexpr double kPiOver2 = juce::MathConstants<double>::pi / 2.0;
+        const double t = (u - a_) * invInputRange_;
+        return std::cos(kPiOver2 * t);
+    }
+
   private:
     double a_ = 0.95;           // Knee threshold (input level where limiting starts)
     double b_ = 1.0285;         // Saturation threshold (input level where output = 1)
