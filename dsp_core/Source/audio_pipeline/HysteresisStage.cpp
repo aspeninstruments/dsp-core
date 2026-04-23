@@ -13,12 +13,11 @@ void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
     for (int ch = 0; ch < 2; ++ch) {
         processors_[ch].prepareToPlay(sampleRate);
         processors_[ch].setOperatingPoint(1.0); // Audio-range: LUT sees raw signal
-        // Use the no-advance entry point: RK4 evaluates the NL ~4× per output
-        // sample. None of those intermediate evaluations should mutate Surge
-        // phase state — the processing path calls advanceSurgePhase() exactly
-        // once per real output sample with the raw driving signal.
+        // LUT is now a pure memoryless function (Surge lives upstream as its own
+        // pipeline stage). RK4's 4× intra-sample NL evaluations are safe to route
+        // through applyTransferFunction directly.
         processors_[ch].setNonlinearity([this, ch](double x) {
-            return transferFunction_->applyTransferFunctionNoAdvance(x, ch);
+            return transferFunction_->applyTransferFunction(x, ch);
         });
         processors_[ch].setNonlinearityDerivative([this, ch](double x) {
             return transferFunction_->applyTransferFunctionDerivative(x, ch);
@@ -218,13 +217,7 @@ void HysteresisStage::processSteadyHysteresis(juce::AudioBuffer<double>& buffer,
 
         for (int ch = 0; ch < channelsToProcess; ++ch) {
             auto* data = buffer.getWritePointer(ch);
-            // Advance Surge phase once per sample per channel with the raw
-            // input. The hysteresis processor's NL callback uses the no-advance
-            // entry point, so RK4's many intermediate evaluations don't touch
-            // phase. This is the only place phase advances in this path.
-            const double input = data[i];
-            transferFunction_->advanceSurgePhase(input, ch);
-            data[i] = processors_[ch].process(input) * gain;
+            data[i] = processors_[ch].process(data[i]) * gain;
         }
         transferFunction_->advanceCrossfadeSample();
     }

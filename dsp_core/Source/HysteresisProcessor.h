@@ -120,7 +120,7 @@ class HysteresisProcessor {
 
     // Safety limits
     static constexpr double upperLimit_ = 20.0;
-    static constexpr double outputLimit_ = 2.0;
+    static constexpr double outputLimit_ = 15.848931924611134;  // +24 dB, matches linear-extrapolation path
     static constexpr double inputLimit_ = 10.0;
     static constexpr double hdLimit_ = 1e6;
     int consecutiveResets_ = 0;

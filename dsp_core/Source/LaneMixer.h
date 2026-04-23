@@ -55,7 +55,7 @@ class LaneMixer {
 
     // Extrapolation mode -- controls LUT boundary behavior in AudioEngine.
     // Defined here (not on LTF) so LaneMixer is the sole source of truth.
-    enum class ExtrapolationMode { Clamp, Linear, Mirror, Surge };
+    enum class ExtrapolationMode { Clamp, Linear, Mirror };
 
     // Mirror-wrap an index into [0, tableSize-1] by reflecting at boundaries.
     static inline int mirrorIndex(int i, int tableSize) {

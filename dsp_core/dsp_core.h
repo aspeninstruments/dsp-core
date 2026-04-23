@@ -58,6 +58,7 @@
 #include "Source/audio_pipeline/OversamplingWrapper.h"
 #include "Source/audio_pipeline/DCBlockingFilter.h"
 #include "Source/audio_pipeline/SoftClippingStage.h"
+#include "Source/audio_pipeline/SurgeStage.h"
 #include "Source/audio_pipeline/HysteresisStage.h"
 #include "Source/audio_pipeline/AudioInputBuffer.h"
 #include "Source/audio_pipeline/AudioInputWriter.h"

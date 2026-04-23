@@ -818,50 +818,6 @@ TEST_F(HysteresisStageTest, MakeupGain_HysteresisDisabled_NoMakeup) {
 // Surge rate propagation (oversampling correctness)
 // =============================================================================
 
-/**
- * Test: HysteresisStage::prepareToPlay forwards the oversampled sample rate
- *       into the shared SeamlessTransferFunction, so surge timing is wall-time
- *       accurate regardless of oversampling order.
- *
- * Without this forwarding, if PluginAudioProcessor calls tf.prepareToPlay(hostRate)
- * but the pipeline runs at hostRate * 16, surgeStepPerSample is sized for hostRate
- * and the weight saturates in SURGE_DURATION_SEC / 16 wall time — not what the user
- * asked for.
- */
-TEST(SurgeRateForwarding, HysteresisStagePropagatesOversampledRateToTransferFunction) {
-    dsp_core::SeamlessTransferFunction tf;
-    HysteresisStage stage(tf);
-
-    // Switch the shared transfer function into Surge mode via the public API,
-    // then render the LUT (identity curve → linear-extrap slope populated by
-    // SeamlessTransferFunction::renderLUTImmediate).
-    tf.getLaneMixer().setExtrapolationMode(dsp_core::LaneMixer::ExtrapolationMode::Surge);
-    tf.renderLUTImmediate();
-
-    constexpr double oversampledRate = 192000.0; // e.g. 48k host × 4x OS
-    stage.prepareToPlay(oversampledRate, 512);
-
-    // Flush the 5ms LUT crossfade so applyTransferFunction sees the Surge LUT.
-    const int crossfadeSamples = static_cast<int>(
-        oversampledRate * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
-    juce::AudioBuffer<double> warmup(1, crossfadeSamples + 16);
-    warmup.clear();
-    tf.processBuffer(warmup);
-
-    // Drive x = 1.5 for 2 × SURGE_DURATION_SEC worth of samples at the oversampled rate.
-    // If prepareToPlay propagated correctly, the weight reaches 1 and output settles to clamp (1.0).
-    // If the rate wasn't propagated, surgeStepPerSample_ would still be sized for the
-    // default/host rate and the output would not reach clamp in this sample count.
-    const int samples = static_cast<int>(
-        oversampledRate * 2.0 * dsp_core::AudioEngine::SURGE_DURATION_SEC);
-
-    double lastOutput = 0.0;
-    for (int i = 0; i < samples; ++i) {
-        lastOutput = tf.applyTransferFunction(1.5, 0);
-    }
-
-    EXPECT_NEAR(lastOutput, 1.0, 1e-3)
-        << "Surge should fully decay to clamp within 2×SURGE_DURATION_SEC at the rate "
-           "passed to HysteresisStage::prepareToPlay. If this fails, prepareToPlay is "
-           "not forwarding the oversampled rate to SeamlessTransferFunction.";
-}
+// SurgeRateForwarding test removed — surge is no longer inside the LUT.
+// Wall-time accuracy across oversampling rates is verified by
+// SurgeStageTest::DurationTracksWallTimeAcrossSampleRates.

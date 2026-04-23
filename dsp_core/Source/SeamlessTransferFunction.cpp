@@ -110,16 +110,8 @@ double SeamlessTransferFunction::applyTransferFunction(double x, int channel) co
     return pimpl->audioEngine.applyTransferFunction(x, channel);
 }
 
-double SeamlessTransferFunction::applyTransferFunctionNoAdvance(double x, int channel) const {
-    return pimpl->audioEngine.applyTransferFunctionNoAdvance(x, channel);
-}
-
 double SeamlessTransferFunction::applyTransferFunctionDerivative(double x, int channel) const {
     return pimpl->audioEngine.applyTransferFunctionDerivative(x, channel);
-}
-
-void SeamlessTransferFunction::advanceSurgePhase(double x, int channel) const {
-    pimpl->audioEngine.advanceSurgePhase(x, channel);
 }
 
 void SeamlessTransferFunction::processBuffer(juce::AudioBuffer<double>& buffer) const {
@@ -139,10 +131,6 @@ void SeamlessTransferFunction::advanceCrossfadeSample() const {
 void SeamlessTransferFunction::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // Can be called from audio thread - no message thread check
     pimpl->audioEngine.prepareToPlay(sampleRate, samplesPerBlock);
-}
-
-void SeamlessTransferFunction::setSurgeDurationSec(double seconds) {
-    pimpl->audioEngine.setSurgeDurationSec(seconds);
 }
 
 void SeamlessTransferFunction::releaseResources() {
@@ -300,11 +288,9 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     outputBuffer->extrapolationMode = mixer.getExtrapolationMode();
     outputBuffer->softClipEnabled = mixer.getSoftClipEnabled();
 
-    // Precompute edge slopes for modes that use linear extrapolation at the edges
-    // (Linear uses it directly; Surge time-blends linear with clamp). Keep this in
-    // sync with EventDrivenRenderer::doRender — both paths populate the same LUT.
-    if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear
-        || outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Surge) {
+    // Precompute edge slopes for Linear extrapolation. Keep this in sync with
+    // EventDrivenRenderer::doRender — both paths populate the same LUT.
+    if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear) {
         constexpr double MAX_SLOPE = 16.0;
         const double leftSlope = outputBuffer->data[1] - outputBuffer->data[0];
         const double rightSlope = outputBuffer->data[TABLE_SIZE - 1] - outputBuffer->data[TABLE_SIZE - 2];

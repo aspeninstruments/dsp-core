@@ -748,7 +748,13 @@ void LayeredTransferFunction::fromValueTree(const juce::ValueTree& vt) {
     // Load settings
     // Note: interpolationMode is ignored for backward compatibility (Catmull-Rom is now hardcoded)
     if (vt.hasProperty("extrapolationMode")) {
-        extrapMode = static_cast<ExtrapolationMode>(static_cast<int>(vt.getProperty("extrapolationMode")));
+        // Legacy presets may have persisted ExtrapolationMode::Surge (raw int = 3).
+        // That enum value is gone — fall back to Linear (no crash, sensible default).
+        // The user is responsible for re-saving presets that relied on Surge mode.
+        const int raw = static_cast<int>(vt.getProperty("extrapolationMode"));
+        extrapMode = (raw >= 0 && raw <= 2)
+                         ? static_cast<ExtrapolationMode>(raw)
+                         : ExtrapolationMode::Linear;
     }
 
     // Increment version to trigger LUT render on preset load

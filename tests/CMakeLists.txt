@@ -839,3 +839,28 @@ endif()
 
 add_test(NAME HysteresisStageTests COMMAND hysteresis_stage_tests)
 
+# SurgeStage tests
+add_executable(surge_stage_tests
+    SurgeStageTest.cpp
+)
+
+target_include_directories(surge_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(surge_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(surge_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(surge_stage_tests)
+endif()
+
+add_test(NAME SurgeStageTests COMMAND surge_stage_tests)
+
