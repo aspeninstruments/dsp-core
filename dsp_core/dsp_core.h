@@ -62,5 +62,8 @@
 #include "Source/audio_pipeline/HysteresisStage.h"
 #include "Source/audio_pipeline/AudioInputBuffer.h"
 #include "Source/audio_pipeline/AudioInputWriter.h"
+#include "Source/audio_pipeline/AutoGainState.h"
+#include "Source/audio_pipeline/AutoSquashStage.h"
+#include "Source/audio_pipeline/AutoRestoreStage.h"
 #include "Source/audio_pipeline/StageHandles.h"
 #include "Source/audio_pipeline/AudioPipelineBuilder.h"

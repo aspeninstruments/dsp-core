@@ -25,6 +25,8 @@ enum class StageTag {
     DryWetMix,
     Hysteresis,
     Surge,
+    AutoSquash,
+    AutoRestore,
 };
 
 /**
@@ -52,6 +54,10 @@ inline std::string stageTagToString(StageTag tag) {
             return "hysteresis";
         case StageTag::Surge:
             return "surge";
+        case StageTag::AutoSquash:
+            return "autoSquash";
+        case StageTag::AutoRestore:
+            return "autoRestore";
     }
     return "unknown";
 }

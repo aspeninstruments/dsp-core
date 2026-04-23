@@ -37,4 +37,6 @@
 #include "Source/audio_pipeline/SoftClippingStage.cpp"
 #include "Source/audio_pipeline/SurgeStage.cpp"
 #include "Source/audio_pipeline/HysteresisStage.cpp"
+#include "Source/audio_pipeline/AutoSquashStage.cpp"
+#include "Source/audio_pipeline/AutoRestoreStage.cpp"
 #include "Source/audio_pipeline/AudioPipelineBuilder.cpp"

@@ -120,11 +120,11 @@ void HysteresisProcessor::setSaturation(double sat) {
 
 void HysteresisProcessor::setWidth(double width) {
     width = std::clamp(width, 0.0, 1.0);
-    // Map width [0, 1] → c [0.999, 0.05]
+    // Map width [0, 1] → c [0.98, 0.05]
     // Above c≈0.05 (old width=0.95) the loop becomes unusable,
-    // and c=1.0 is a degenerate regime. This compresses the useful
-    // range into the full knob travel.
-    constexpr double cMax = 0.999;
+    // and c near 1.0 is a degenerate regime where the solver fails.
+    // Users wanting zero width should bypass hysteresis entirely.
+    constexpr double cMax = 0.98;
     constexpr double cMin = 0.05;
     smoothedC_.setTargetValue(cMax - width * (cMax - cMin));
 }

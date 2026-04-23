@@ -42,6 +42,19 @@ class TransferFunctionOperations {
     /** Mix curve 50/50 with linear y=x, then normalize to [-1, 1]. */
     static void linearize(std::vector<double>& curveData);
 
+    /** Shift the curve horizontally by `delta` (in x-domain units, clamped to +/-0.95).
+     *  Uses interpolated stretching: [-1, 0] -> [-1, delta] and [0, 1] -> [delta, 1]. */
+    static void shiftHorizontal(std::vector<double>& curveData, double delta);
+
+    /** Shift left 5% of the domain (delta = -0.05). */
+    static void shiftHorizontalLeft(std::vector<double>& curveData);
+
+    /** Shift right 5% of the domain (delta = +0.05). */
+    static void shiftHorizontalRight(std::vector<double>& curveData);
+
+    /** Find nearest zero crossing to x=0 and shift it onto x=0. No-op if none found. */
+    static void shiftToZeroCrossing(std::vector<double>& curveData);
+
   private:
     TransferFunctionOperations() = delete; // Pure static utility
 };

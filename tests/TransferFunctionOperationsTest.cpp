@@ -209,3 +209,109 @@ TEST_F(CurveDataOperationsTest, Smoother_PreservesConstantCurve) {
         EXPECT_NEAR(v, 0.5, 1e-10);
     }
 }
+
+// ============================================================================
+// Horizontal Shift Tests
+// ============================================================================
+
+namespace {
+// Build an identity curve y=x on [-1, 1] with `n` samples.
+std::vector<double> makeIdentity(size_t n) {
+    std::vector<double> c(n);
+    for (size_t i = 0; i < n; ++i) {
+        c[i] = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(n - 1);
+    }
+    return c;
+}
+
+// Sample a sampled curve at arbitrary x using linear interpolation.
+double sampleAt(const std::vector<double>& c, double x) {
+    const auto n = static_cast<int>(c.size());
+    const double fIdx = (x + 1.0) * 0.5 * (n - 1);
+    const int i0 = std::max(0, std::min(static_cast<int>(fIdx), n - 1));
+    const int i1 = std::min(i0 + 1, n - 1);
+    const double f = fIdx - static_cast<double>(i0);
+    return c[static_cast<size_t>(i0)] * (1.0 - f) + c[static_cast<size_t>(i1)] * f;
+}
+} // namespace
+
+TEST(HorizontalShiftTest, ShiftHorizontal_ZeroDelta_NoOp) {
+    auto c = makeIdentity(1024);
+    auto original = c;
+    TransferFunctionOperations::shiftHorizontal(c, 0.0);
+    for (size_t i = 0; i < c.size(); ++i) {
+        EXPECT_DOUBLE_EQ(c[i], original[i]);
+    }
+}
+
+TEST(HorizontalShiftTest, ShiftHorizontal_PreservesEndpoints) {
+    auto c = makeIdentity(2048);
+    const double firstOriginal = c.front();
+    const double lastOriginal = c.back();
+    TransferFunctionOperations::shiftHorizontal(c, 0.05);
+    EXPECT_NEAR(c.front(), firstOriginal, 1e-10);
+    EXPECT_NEAR(c.back(), lastOriginal, 1e-10);
+}
+
+TEST(HorizontalShiftTest, ShiftRight_PivotAtDelta) {
+    // A non-trivial curve so that f(0) is a distinctive value.
+    std::vector<double> c(4096);
+    for (size_t i = 0; i < c.size(); ++i) {
+        const double x = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(c.size() - 1);
+        c[i] = std::sin(x * 3.0);
+    }
+    const double fOrig0 = sampleAt(c, 0.0);
+    TransferFunctionOperations::shiftHorizontalRight(c);
+    // Value at x = +0.05 in the shifted curve should equal f(0) from the original.
+    EXPECT_NEAR(sampleAt(c, 0.05), fOrig0, 1e-3);
+}
+
+TEST(HorizontalShiftTest, ShiftLeftThenRight_ApproximatelyRoundTrips) {
+    std::vector<double> c(4096);
+    for (size_t i = 0; i < c.size(); ++i) {
+        const double x = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(c.size() - 1);
+        c[i] = std::tanh(x * 2.0);
+    }
+    auto original = c;
+    TransferFunctionOperations::shiftHorizontalRight(c);
+    TransferFunctionOperations::shiftHorizontalLeft(c);
+    // Interior should approximately round-trip (boundaries accumulate most error).
+    const size_t lo = c.size() / 4;
+    const size_t hi = 3 * c.size() / 4;
+    for (size_t i = lo; i < hi; ++i) {
+        EXPECT_NEAR(c[i], original[i], 0.02) << "at i=" << i;
+    }
+}
+
+TEST(HorizontalShiftTest, ShiftToZeroCrossing_CrossingEndsAtZero) {
+    // Curve with a zero crossing at x = 0.2, by construction.
+    std::vector<double> c(4096);
+    constexpr double crossingX = 0.2;
+    for (size_t i = 0; i < c.size(); ++i) {
+        const double x = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(c.size() - 1);
+        c[i] = x - crossingX; // zero at x=0.2, monotone
+    }
+    TransferFunctionOperations::shiftToZeroCrossing(c);
+    EXPECT_NEAR(sampleAt(c, 0.0), 0.0, 1e-3);
+}
+
+TEST(HorizontalShiftTest, ShiftToZeroCrossing_NoCrossing_NoOp) {
+    std::vector<double> c(1024, 0.5);
+    auto original = c;
+    TransferFunctionOperations::shiftToZeroCrossing(c);
+    for (size_t i = 0; i < c.size(); ++i) {
+        EXPECT_DOUBLE_EQ(c[i], original[i]);
+    }
+}
+
+TEST(HorizontalShiftTest, ShiftToZeroCrossing_PicksNearestToZero) {
+    // Curve with crossings at x ~ -0.3 and x ~ +0.1. Nearest to 0 is +0.1.
+    std::vector<double> c(4096);
+    for (size_t i = 0; i < c.size(); ++i) {
+        const double x = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(c.size() - 1);
+        c[i] = (x + 0.3) * (x - 0.1);
+    }
+    TransferFunctionOperations::shiftToZeroCrossing(c);
+    // After shift, x=0 in new domain == x=+0.1 in original, which was a crossing.
+    EXPECT_NEAR(sampleAt(c, 0.0), 0.0, 1e-3);
+}
