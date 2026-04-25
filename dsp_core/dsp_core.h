@@ -65,5 +65,6 @@
 #include "Source/audio_pipeline/AutoGainState.h"
 #include "Source/audio_pipeline/AutoSquashStage.h"
 #include "Source/audio_pipeline/AutoRestoreStage.h"
+#include "Source/audio_pipeline/EnvelopeFollowerStage.h"
 #include "Source/audio_pipeline/StageHandles.h"
 #include "Source/audio_pipeline/AudioPipelineBuilder.h"

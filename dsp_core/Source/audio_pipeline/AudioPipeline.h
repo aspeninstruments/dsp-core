@@ -27,6 +27,7 @@ enum class StageTag {
     Surge,
     AutoSquash,
     AutoRestore,
+    EnvelopeFollower,
 };
 
 /**
@@ -58,6 +59,8 @@ inline std::string stageTagToString(StageTag tag) {
             return "autoSquash";
         case StageTag::AutoRestore:
             return "autoRestore";
+        case StageTag::EnvelopeFollower:
+            return "envelopeFollower";
     }
     return "unknown";
 }
