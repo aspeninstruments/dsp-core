@@ -12,7 +12,7 @@ namespace dsp_core::audio_pipeline {
  * to an atomic owned by the processor for morph modulation.
  *
  * Algorithm per sample (single-pole peak detector):
- *     x = max(|L|, |R|) * inputGainLin * sensitivityLin
+ *     x = max(|L|, |R|) * sensitivityLin
  *     target = min(x, 1.0)
  *     coef = (target > env) ? attackCoef : releaseCoef
  *     env += coef * (target - env)
@@ -21,7 +21,7 @@ namespace dsp_core::audio_pipeline {
  * is purely a measurement tap.
  *
  * Thread safety:
- *   - enabled_, inputGainLinear_, sensitivityLinear_: atomics (UI writes, audio reads)
+ *   - enabled_, sensitivityLinear_: atomics (UI writes, audio reads)
  *   - setAttackReleaseSec, prepareToPlay: UI thread only, between process() calls
  *   - process: audio thread only
  */
@@ -43,11 +43,8 @@ class EnvelopeFollowerStage : public AudioProcessingStage {
         return enabled_.load(std::memory_order_acquire);
     }
 
-    // Pre-detection gain applied to |sample| before the peak detector.
+    // Pre-detection sensitivity applied to |sample| before the peak detector.
     // UI thread writes; audio thread reads at block boundaries.
-    void setInputGainLinear(double linear) {
-        inputGainLinear_.store(linear, std::memory_order_release);
-    }
     void setSensitivityLinear(double linear) {
         sensitivityLinear_.store(linear, std::memory_order_release);
     }
@@ -69,7 +66,6 @@ class EnvelopeFollowerStage : public AudioProcessingStage {
     std::atomic<double>& envelopeStorage_;
 
     std::atomic<bool> enabled_{false};
-    std::atomic<double> inputGainLinear_{1.0};
     std::atomic<double> sensitivityLinear_{1.0};
 
     double sampleRate_{48000.0};

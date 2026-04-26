@@ -28,7 +28,7 @@ class EnvelopeFollowerStageTest : public ::testing::Test {
         envelopeValue_.store(0.0);
         stage_ = std::make_unique<EnvelopeFollowerStage>(envelopeValue_);
         stage_->prepareToPlay(kSampleRate, 512);
-        // Defaults: enabled=false, gain=1.0, sensitivity=1.0, A=5ms, R=150ms
+        // Defaults: enabled=false, sensitivity=1.0, A=5ms, R=150ms
     }
 
     // Drive a DC value for N samples and return the atomic envelope after.
@@ -96,7 +96,6 @@ TEST_F(EnvelopeFollowerStageTest, SilenceProducesZeroEnvelope) {
 TEST_F(EnvelopeFollowerStageTest, DCInputConvergesToAbsValue) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
-    stage_->setInputGainLinear(1.0);
 
     // Drive for 10 attack + 10 release time-constants → well-converged
     const int samples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
@@ -112,7 +111,6 @@ TEST_F(EnvelopeFollowerStageTest, DCInputConvergesToAbsValue) {
 TEST_F(EnvelopeFollowerStageTest, AttackTimeConstant) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
-    stage_->setInputGainLinear(1.0);
 
     // Step from 0 to 1.0; at t = attackSec, one-pole reaches 1 - 1/e ≈ 0.632
     const int attackSamples = static_cast<int>(kSampleRate * kAttackSec);
@@ -124,7 +122,6 @@ TEST_F(EnvelopeFollowerStageTest, AttackTimeConstant) {
 TEST_F(EnvelopeFollowerStageTest, ReleaseTimeConstant) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
-    stage_->setInputGainLinear(1.0);
 
     // Charge to ~1.0
     const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kAttackSec);
@@ -142,7 +139,6 @@ TEST_F(EnvelopeFollowerStageTest, ReleaseTimeConstant) {
 
 TEST_F(EnvelopeFollowerStageTest, SensitivityScalesInput) {
     stage_->setEnabled(true);
-    stage_->setInputGainLinear(1.0);
     stage_->setSensitivityLinear(4.0);
 
     const int samples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
@@ -157,17 +153,6 @@ TEST_F(EnvelopeFollowerStageTest, SensitivityScalesInput) {
     EXPECT_NEAR(envHalf, 0.2, 1e-3) << "sensitivity=0.5 scales input linearly";
 }
 
-TEST_F(EnvelopeFollowerStageTest, InputGainScalesInput) {
-    stage_->setEnabled(true);
-    stage_->setSensitivityLinear(1.0);
-    stage_->setInputGainLinear(2.0);
-
-    const int samples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
-    // DC 0.3 * 2.0 * 1.0 = 0.6
-    const double env = driveDC(0.3, samples);
-    EXPECT_NEAR(env, 0.6, 1e-3) << "input gain should multiply detection signal";
-}
-
 // =============================================================================
 // Layer 3 — Stereo + state management
 // =============================================================================
@@ -175,7 +160,6 @@ TEST_F(EnvelopeFollowerStageTest, InputGainScalesInput) {
 TEST_F(EnvelopeFollowerStageTest, StereoUsesMaxChannel) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
-    stage_->setInputGainLinear(1.0);
 
     const int samples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
     juce::AudioBuffer<double> buf(2, samples);
@@ -191,7 +175,6 @@ TEST_F(EnvelopeFollowerStageTest, StereoUsesMaxChannel) {
 TEST_F(EnvelopeFollowerStageTest, ResetClearsState) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
-    stage_->setInputGainLinear(1.0);
 
     const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kAttackSec);
     (void)driveDC(1.0, chargeSamples);
@@ -220,7 +203,6 @@ TEST_F(EnvelopeFollowerStageTest, PrepareRecomputesCoefficientsAcrossSampleRates
         stage->prepareToPlay(sr, 512);
         stage->setEnabled(true);
         stage->setSensitivityLinear(1.0);
-        stage->setInputGainLinear(1.0);
 
         const int attackSamples = static_cast<int>(sr * kAttackSec);
         juce::AudioBuffer<double> buf(1, attackSamples);
@@ -241,7 +223,6 @@ TEST_F(EnvelopeFollowerStageTest, OversamplingCoefficientRecompute) {
     stage->prepareToPlay(osRate, 2048);
     stage->setEnabled(true);
     stage->setSensitivityLinear(1.0);
-    stage->setInputGainLinear(1.0);
 
     const int attackSamples = static_cast<int>(osRate * kAttackSec);
     juce::AudioBuffer<double> buf(1, attackSamples);

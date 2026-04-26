@@ -11,10 +11,10 @@ namespace dsp_core::audio_pipeline {
  *
  * Tracks a stereo-linked peak envelope (max(|L|, |R|)) with a one-pole
  * attack/release follower, derives a per-sample gain that drives the envelope
- * toward the target peak (~ -1 dBFS), clamps it within a max-gain ceiling, and
- * applies that gain in place. The per-sample gain is recorded into the shared
- * state's gainHistory buffer so AutoRestoreStage can apply the exact inverse
- * downstream.
+ * toward state_.targetPeakLinear (set by the host from InputGain - 0.1 dB),
+ * clamps it within a max-gain ceiling, and applies that gain in place. The
+ * per-sample gain is recorded into the shared state's gainHistory buffer so
+ * AutoRestoreStage can apply the exact inverse downstream.
  *
  * When the Auto feature is disabled, process() becomes a no-op after fading
  * gain back to 1.0 over an enable-fade window (to prevent clicks on toggle).

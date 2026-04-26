@@ -24,6 +24,7 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
 
     const auto& k = state_.k;
     const bool targetEnabled = state_.enabled.load(std::memory_order_acquire);
+    const double targetPeak = state_.targetPeakLinear.load(std::memory_order_acquire);
     const double enableStep = 1.0 / static_cast<double>(state_.enableFadeSamples);
 
     for (int n = 0; n < numSamples; ++n) {
@@ -53,7 +54,7 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
         // pure silence does not produce a wild gain.
         double rawGain = 1.0;
         if (state_.envelope > k.noiseFloorLinear) {
-            rawGain = k.targetPeak / state_.envelope;
+            rawGain = targetPeak / state_.envelope;
             if (rawGain > k.maxGainLinear)
                 rawGain = k.maxGainLinear;
             if (rawGain < 1.0 / k.maxGainLinear) // safety floor

@@ -35,9 +35,7 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
         return;
     }
 
-    const double inGain = inputGainLinear_.load(std::memory_order_acquire);
     const double sens = sensitivityLinear_.load(std::memory_order_acquire);
-    const double totalGain = inGain * sens;
 
     const int numChannels = buffer.getNumChannels();
     const int numSamples = buffer.getNumSamples();
@@ -50,7 +48,7 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
         for (int ch = 0; ch < numChannels; ++ch) {
             peak = std::max(peak, std::abs(buffer.getSample(ch, i)));
         }
-        const double target = std::min(peak * totalGain, 1.0);
+        const double target = std::min(peak * sens, 1.0);
         const double coef = (target > env) ? atk : rel;
         env += coef * (target - env);
     }

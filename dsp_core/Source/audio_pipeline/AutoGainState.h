@@ -40,6 +40,12 @@ struct AutoGainState {
     // Thread-shared enable flag. UI writes, audio reads.
     std::atomic<bool> enabled{false};
 
+    // Thread-shared peak target (linear). UI writes per parameter update; audio
+    // reads at the top of each process() block. Driven by InputGain so that the
+    // user's input-gain knob effectively sets the post-squash peak (with a small
+    // headroom below it to swallow envelope wiggle without clipping).
+    std::atomic<double> targetPeakLinear{0.9};
+
     // Per-sample gain history written by AutoSquash, consumed by AutoRestore.
     // Size matches the maximum block size set in prepareToPlay.
     juce::AudioBuffer<double> gainHistory;
