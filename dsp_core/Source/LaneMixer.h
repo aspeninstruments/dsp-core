@@ -137,6 +137,26 @@ class LaneMixer {
     void setLaneBlendDepth(int index, double depth);
     double getLaneBlendDepth(int index) const;
 
+    /**
+     * Per-lane modulation depth [-1, 1]. Modulated by the global modulation source
+     * (e.g. envelope follower) via setModulationEnvValue:
+     *     effectiveAmplitude = max(0, amplitude + blendAmount * blendDepth + envForLane * modulationDepth)
+     * Default 0 means the lane is inert with respect to the modulation source.
+     * Increments both mix and full version counters (amplitude-class change).
+     * Out-of-range values are clamped to [-1, 1].
+     */
+    void setLaneModulationDepth(int index, double depth);
+    double getLaneModulationDepth(int index) const;
+
+    /**
+     * Set the current modulation source value (e.g. envelope follower output) seen
+     * by per-lane modulationDepth in compute*. Called per-block by the processor.
+     * Pass 0.0 when the modulation source is disabled. Lock-free; does NOT
+     * increment version counters (env changes per block).
+     */
+    void setModulationEnvValue(double env);
+    double getModulationEnvValue() const { return modulationEnvValue_.load(std::memory_order_acquire); }
+
     void setLaneContentType(int index, LaneContentType type);
     LaneContentType getLaneContentType(int index) const;
 
@@ -380,6 +400,7 @@ class LaneMixer {
     MixerMode mixerMode_ = MixerMode::Blend;
     std::atomic<double> scanPosition_{0.0};
     std::atomic<double> blendAmount_{0.0};
+    std::atomic<double> modulationEnvValue_{0.0}; // Current modulation source value (e.g. env follower); 0 when source disabled
 
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
     bool softClipEnabled_ = false;

@@ -50,6 +50,11 @@ struct Lane {
     // Default 0 means the lane is inert with respect to the Morph knob in Blend mode.
     std::atomic<double> blendDepth{0.0};
 
+    // Per-lane modulation depth from the global modulation source (env follower) [-1, 1].
+    // Effective amplitude in Blend mode = ... + envForLane * modulationDepth.
+    // Default 0 means the lane is inert with respect to the modulation source.
+    std::atomic<double> modulationDepth{0.0};
+
     LaneContentType contentType = LaneContentType::Harmonic;
     int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
     double harmonicStrength = 1.0; // Unnormalized scale [-1, 1] applied to the Chebyshev curve when written.
@@ -74,6 +79,7 @@ struct Lane {
         : curveData(std::move(other.curveData)),
           amplitude(other.amplitude.load(std::memory_order_relaxed)),
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
+          modulationDepth(other.modulationDepth.load(std::memory_order_relaxed)),
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
           harmonicStrength(other.harmonicStrength),
@@ -90,6 +96,8 @@ struct Lane {
                         std::memory_order_relaxed);
         blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
                          std::memory_order_relaxed);
+        modulationDepth.store(other.modulationDepth.load(std::memory_order_relaxed),
+                              std::memory_order_relaxed);
         contentType = other.contentType;
         harmonicNumber = other.harmonicNumber;
         harmonicStrength = other.harmonicStrength;
@@ -107,6 +115,7 @@ struct Lane {
         : curveData(other.curveData),
           amplitude(other.amplitude.load(std::memory_order_relaxed)),
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
+          modulationDepth(other.modulationDepth.load(std::memory_order_relaxed)),
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
           harmonicStrength(other.harmonicStrength),
@@ -124,6 +133,8 @@ struct Lane {
                             std::memory_order_relaxed);
             blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
+            modulationDepth.store(other.modulationDepth.load(std::memory_order_relaxed),
+                                  std::memory_order_relaxed);
             contentType = other.contentType;
             harmonicNumber = other.harmonicNumber;
             harmonicStrength = other.harmonicStrength;
