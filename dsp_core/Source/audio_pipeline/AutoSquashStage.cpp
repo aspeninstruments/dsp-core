@@ -26,38 +26,37 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
 
     const auto& k = state_.k;
     const bool targetEnabled = state_.enabled.load(std::memory_order_acquire);
-    const double targetPeak = state_.targetPeakLinear.load(std::memory_order_acquire);
+    const double targetRms = state_.targetPeakLinear.load(std::memory_order_acquire);
     const double enableStep = 1.0 / static_cast<double>(state_.enableFadeSamples);
 
     for (int n = 0; n < numSamples; ++n) {
-        // Stereo-linked peak detection: max(|L|, |R|).
-        double sampleAbs = 0.0;
+        // Stereo-linked power detection: max(L², R²). Using power (sample²)
+        // rather than absolute value lets the one-pole below act as a true
+        // RMS averager once we sqrt at the end.
+        double samplePower = 0.0;
         for (int ch = 0; ch < numChannels; ++ch) {
             const double s = buffer.getReadPointer(ch)[n];
-            const double a = std::abs(s);
-            sampleAbs = std::max(sampleAbs, a);
+            samplePower = std::max(samplePower, s * s);
         }
 
-        // Peak follower: instantaneous attack, smooth release after a hold
-        // window. Any sample whose magnitude exceeds the current envelope
-        // snaps the envelope up to it, which guarantees the internal signal
-        // is bounded by target (no lookahead needed).
-        if (sampleAbs > state_.envelope) {
-            state_.envelope = sampleAbs;
-            state_.holdCounter = state_.holdSamples;
-        } else if (state_.holdCounter > 0) {
-            --state_.holdCounter;
-        } else {
-            state_.envelope += state_.releaseAlpha * (sampleAbs - state_.envelope);
-        }
+        // Asymmetric one-pole: fast on attack (samplePower above current
+        // mean — level is rising, catch it quickly), slow on release (level
+        // dropping — coast smoothly to avoid pumping). The slow release is
+        // what makes this *not* a peak follower: a single sine cycle's
+        // power dip does not pull the mean down, so the gain doesn't track
+        // the per-cycle envelope and produce audio-rate ring modulation.
+        const double alpha =
+            (samplePower > state_.meanSquare) ? state_.rmsAttackAlpha : state_.rmsReleaseAlpha;
+        state_.meanSquare += alpha * (samplePower - state_.meanSquare);
+
+        const double envRms = std::sqrt(state_.meanSquare);
 
         // Derive target gain. Below the noise floor, slew gain toward 1.0 so
         // pure silence does not produce a wild gain.
         double rawGain = 1.0;
-        if (state_.envelope > k.noiseFloorLinear) {
-            rawGain = targetPeak / state_.envelope;
+        if (envRms > k.noiseFloorLinear) {
+            rawGain = targetRms / envRms;
             rawGain = std::min(rawGain, k.maxGainLinear);
-            // safety floor
             rawGain = std::max(rawGain, 1.0 / k.maxGainLinear);
         }
 
@@ -71,13 +70,10 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
 
         const double g = 1.0 + state_.enableMix * (rawGain - 1.0);
 
-        // Asymmetric one-pole on the applied gain. When gain is dropping
-        // (attack — input got louder, must reduce gain immediately to keep
-        // the internal signal bounded by target), pass through instantly so
-        // the no-overshoot guarantee is preserved. When gain is rising
-        // (release — input got quieter, gain ramps back up), smooth across
-        // ~gainSmoothTauSeconds to spread out per-sample steps that would
-        // otherwise become audible zipper through the 1/envelope nonlinearity.
+        // Asymmetric one-pole on the applied gain. Instant when gain drops
+        // (so RMS-driven level reductions take effect immediately on the
+        // audio); smoothed when gain rises (cleans up any residual ripple
+        // from the 1/envelope nonlinearity near the noise floor).
         if (g < state_.smoothedGain) {
             state_.smoothedGain = g;
         } else {
