@@ -42,6 +42,8 @@ double LfoStage::periodInBeats(Division d, Flavor f) {
 double LfoStage::evaluateShape(Shape s, double phase, unsigned int seed) {
     // phase is in [0, 1)
     switch (s) {
+        case Shape::Off:
+            return 0.0;
         case Shape::Sin: {
             return 0.5 + 0.5 * std::sin(kTwoPi * phase);
         }
@@ -64,12 +66,12 @@ double LfoStage::evaluateShape(Shape s, double phase, unsigned int seed) {
 }
 
 void LfoStage::process(juce::AudioBuffer<double>& buffer) {
-    if (!enabled_.load(std::memory_order_acquire)) {
+    const Shape shape = static_cast<Shape>(shape_.load(std::memory_order_acquire));
+    if (!enabled_.load(std::memory_order_acquire) || shape == Shape::Off) {
         lfoStorage_.store(0.0, std::memory_order_release);
         return;
     }
 
-    const Shape shape = static_cast<Shape>(shape_.load(std::memory_order_acquire));
     const Units units = static_cast<Units>(units_.load(std::memory_order_acquire));
     const Division div = static_cast<Division>(division_.load(std::memory_order_acquire));
     const Flavor flv = static_cast<Flavor>(flavor_.load(std::memory_order_acquire));

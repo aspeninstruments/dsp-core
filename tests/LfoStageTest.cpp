@@ -131,6 +131,20 @@ TEST_F(LfoStageTest, PeriodInBeatsTable) {
     EXPECT_DOUBLE_EQ(LfoStage::periodInBeats(D::Quarter, F::Dotted), 1.5);
 }
 
+TEST_F(LfoStageTest, OffShapePublishesZero) {
+    // Off doubles as the LFO's enable gate (paralleling ENV's Input = Off).
+    // process() should short-circuit and publish 0 even with enabled_ = true
+    // and a non-zero rate, so a slot whose Shape is Off contributes nothing
+    // to the modulation sum.
+    stage_->setShape(LfoStage::Shape::Off);
+    stage_->setRateHz(5.0);
+    auto buf = makeBuffer(1, kBlockSize);
+    for (int i = 0; i < 10; ++i) {
+        stage_->process(buf);
+        EXPECT_DOUBLE_EQ(value_.load(), 0.0);
+    }
+}
+
 TEST_F(LfoStageTest, ResetClearsStorage) {
     stage_->setShape(LfoStage::Shape::Sin);
     stage_->setRateHz(5.0);

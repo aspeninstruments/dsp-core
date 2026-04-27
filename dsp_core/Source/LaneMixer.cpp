@@ -186,40 +186,48 @@ double LaneMixer::getLaneBlendDepth(int index) const {
     return lanes_[static_cast<size_t>(index)].blendDepth.load(std::memory_order_acquire);
 }
 
-void LaneMixer::setLaneModulationDepth(int index, double depth) {
-    if (!isValidIndex(index))
+void LaneMixer::setLaneModulationDepth(int index, int slotIdx, double depth) {
+    if (!isValidIndex(index) || slotIdx < 0 || slotIdx >= 2)
         return;
     const double clamped = std::clamp(depth, -1.0, 1.0);
     auto& slot = lanes_[static_cast<size_t>(index)];
-    const double current = slot.modulationDepth.load(std::memory_order_acquire);
+    auto& depthSlot = slot.modulationDepth[static_cast<size_t>(slotIdx)];
+    const double current = depthSlot.load(std::memory_order_acquire);
     if (current == clamped) {
         return; // Early-return guard: same rationale as setLaneAmplitude.
     }
-    slot.modulationDepth.store(clamped, std::memory_order_release);
+    depthSlot.store(clamped, std::memory_order_release);
     incrementMixVersionIfNotBatching();
     incrementVersionIfNotBatching();
 }
 
-double LaneMixer::getLaneModulationDepth(int index) const {
-    if (!isValidIndex(index))
+double LaneMixer::getLaneModulationDepth(int index, int slotIdx) const {
+    if (!isValidIndex(index) || slotIdx < 0 || slotIdx >= 2)
         return 0.0;
-    return lanes_[static_cast<size_t>(index)].modulationDepth.load(std::memory_order_acquire);
+    return lanes_[static_cast<size_t>(index)]
+        .modulationDepth[static_cast<size_t>(slotIdx)]
+        .load(std::memory_order_acquire);
 }
 
-void LaneMixer::setModulationEnvValue(double env) {
-    const double current = modulationEnvValue_.load(std::memory_order_acquire);
+void LaneMixer::setModulationEnvValue(int slotIdx, double env) {
+    if (slotIdx < 0 || slotIdx >= 2) {
+        return;
+    }
+    auto& slotEnv = modulationEnvValue_[static_cast<size_t>(slotIdx)];
+    const double current = slotEnv.load(std::memory_order_acquire);
     if (current == env) {
         return; // Early-return guard: steady-state env → no LUT remix needed.
     }
-    modulationEnvValue_.store(env, std::memory_order_release);
+    slotEnv.store(env, std::memory_order_release);
 
-    // Skip the version bump when no lane is using modulation depth — the env
-    // change has no audible effect, so a remix would be wasted work. This
-    // mirrors the optimisation that keeps the LUT cache stable when the
-    // modulation source is enabled but no destination is mapped.
+    // Skip the version bump when no lane is using *this slot's* modulation
+    // depth — the env change has no audible effect, so a remix would be wasted
+    // work. The other slot's depth is irrelevant here.
     bool anyLaneModulated = false;
     for (int i = 0; i < activeLaneCount_; ++i) {
-        if (lanes_[static_cast<size_t>(i)].modulationDepth.load(std::memory_order_acquire) != 0.0) {
+        if (lanes_[static_cast<size_t>(i)]
+                .modulationDepth[static_cast<size_t>(slotIdx)]
+                .load(std::memory_order_acquire) != 0.0) {
             anyLaneModulated = true;
             break;
         }
@@ -370,13 +378,14 @@ void LaneMixer::computeSum(double* outputBuffer, int size) const {
     // Zero the output buffer
     std::fill(outputBuffer, outputBuffer + numSamples, 0.0);
 
-    // Hoist the global blend amount once outside the per-lane loop.
+    // Hoist the global blend amount and per-slot env values once outside the per-lane loop.
     const double macro = blendAmount_.load(std::memory_order_acquire);
-    const double env = modulationEnvValue_.load(std::memory_order_acquire);
+    const double env0 = modulationEnvValue_[0].load(std::memory_order_acquire);
+    const double env1 = modulationEnvValue_[1].load(std::memory_order_acquire);
 
     // Accumulate weighted contributions from all lanes whose effective amplitude is non-zero.
-    // Effective amplitude = max(0, base + macro * depth + env * modDepth). Negative depth
-    // lets the macro/env pull the lane *down* toward silence; the lower clamp at 0
+    // Effective amplitude = max(0, base + macro * depth + sum_s env[s] * modDepth[s]). Negative
+    // depths let the macro/env pull the lane *down* toward silence; the lower clamp at 0
     // prevents inverted-curve contributions, which would invert the transfer function.
     // NB: Do NOT use Lane::isActive() here — that only checks `amplitude`, missing the case
     // amplitude=0, depth>0, blendAmount>0 where the lane *is* audibly contributing.
@@ -384,8 +393,9 @@ void LaneMixer::computeSum(double* outputBuffer, int size) const {
         const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
         const double base = lane.amplitude.load(std::memory_order_acquire);
         const double depth = lane.blendDepth.load(std::memory_order_acquire);
-        const double modDepth = lane.modulationDepth.load(std::memory_order_acquire);
-        const double effective = std::max(0.0, base + macro * depth + env * modDepth);
+        const double modDepth0 = lane.modulationDepth[0].load(std::memory_order_acquire);
+        const double modDepth1 = lane.modulationDepth[1].load(std::memory_order_acquire);
+        const double effective = std::max(0.0, base + macro * depth + env0 * modDepth0 + env1 * modDepth1);
 
         if (effective <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
             continue;
@@ -494,7 +504,8 @@ void LaneMixer::computeSeries(double* outputBuffer, int size) const {
     constexpr double kLn4 = 1.3862943611198906; // std::log(4.0)
 
     const double macro = blendAmount_.load(std::memory_order_acquire);
-    const double env = modulationEnvValue_.load(std::memory_order_acquire);
+    const double env0 = modulationEnvValue_[0].load(std::memory_order_acquire);
+    const double env1 = modulationEnvValue_[1].load(std::memory_order_acquire);
 
     // Apply each lane in order: y_{n+1} = lane_n.LUT(clamp(y_n * gain_n, -1, 1)).
     for (int laneIdx = 0; laneIdx < activeLaneCount_; ++laneIdx) {
@@ -505,8 +516,9 @@ void LaneMixer::computeSeries(double* outputBuffer, int size) const {
 
         const double base = lane.amplitude.load(std::memory_order_acquire);
         const double depth = lane.blendDepth.load(std::memory_order_acquire);
-        const double modDepth = lane.modulationDepth.load(std::memory_order_acquire);
-        const double aEff = std::clamp(base + macro * depth + env * modDepth, 0.0, 1.0);
+        const double modDepth0 = lane.modulationDepth[0].load(std::memory_order_acquire);
+        const double modDepth1 = lane.modulationDepth[1].load(std::memory_order_acquire);
+        const double aEff = std::clamp(base + macro * depth + env0 * modDepth0 + env1 * modDepth1, 0.0, 1.0);
         const double gain = std::exp(kLn4 * (2.0 * aEff - 1.0));
 
         for (int i = 0; i < numSamples; ++i) {
@@ -546,14 +558,16 @@ double LaneMixer::evaluateSumAt(double x) const {
     double sum1 = 0.0;
 
     const double macro = blendAmount_.load(std::memory_order_acquire);
-    const double env = modulationEnvValue_.load(std::memory_order_acquire);
+    const double env0 = modulationEnvValue_[0].load(std::memory_order_acquire);
+    const double env1 = modulationEnvValue_[1].load(std::memory_order_acquire);
 
     for (int laneIdx = 0; laneIdx < activeLaneCount_; ++laneIdx) {
         const auto& lane = lanes_[static_cast<size_t>(laneIdx)];
         const double base = lane.amplitude.load(std::memory_order_acquire);
         const double depth = lane.blendDepth.load(std::memory_order_acquire);
-        const double modDepth = lane.modulationDepth.load(std::memory_order_acquire);
-        const double effective = std::max(0.0, base + macro * depth + env * modDepth);
+        const double modDepth0 = lane.modulationDepth[0].load(std::memory_order_acquire);
+        const double modDepth1 = lane.modulationDepth[1].load(std::memory_order_acquire);
+        const double effective = std::max(0.0, base + macro * depth + env0 * modDepth0 + env1 * modDepth1);
 
         if (effective <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
             continue;
@@ -706,7 +720,7 @@ void LaneMixer::initializeDefaults() {
 
 juce::ValueTree LaneMixer::toValueTree() const {
     juce::ValueTree vt("LaneMixer");
-    vt.setProperty("formatVersion", 6, nullptr);
+    vt.setProperty("formatVersion", 7, nullptr);
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
@@ -721,7 +735,11 @@ juce::ValueTree LaneMixer::toValueTree() const {
         laneVT.setProperty("laneId", static_cast<int>(lane.laneId), nullptr);
         laneVT.setProperty("amplitude", lane.amplitude.load(std::memory_order_acquire), nullptr);
         laneVT.setProperty("blendDepth", lane.blendDepth.load(std::memory_order_acquire), nullptr);
-        laneVT.setProperty("modulationDepth", lane.modulationDepth.load(std::memory_order_acquire), nullptr);
+        // formatVersion 7+ stores per-slot modulation depth (one property per slot).
+        laneVT.setProperty("modulationDepth_slot1",
+                            lane.modulationDepth[0].load(std::memory_order_acquire), nullptr);
+        laneVT.setProperty("modulationDepth_slot2",
+                            lane.modulationDepth[1].load(std::memory_order_acquire), nullptr);
         laneVT.setProperty("contentType", static_cast<int>(lane.contentType), nullptr);
         laneVT.setProperty("harmonicNumber", lane.harmonicNumber, nullptr);
         laneVT.setProperty("harmonicStrength", lane.harmonicStrength, nullptr);
@@ -840,10 +858,23 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
         lane.blendDepth.store(
             static_cast<double>(laneVT.getProperty("blendDepth", 0.0)),
             std::memory_order_release);
-        // formatVersion 6+ adds per-lane modulationDepth; default 0 for older versions.
-        lane.modulationDepth.store(
-            static_cast<double>(laneVT.getProperty("modulationDepth", 0.0)),
-            std::memory_order_release);
+        // formatVersion 7+ stores per-slot modulationDepth as two separate properties.
+        // formatVersion 6 stored a single legacy `modulationDepth` — load that into
+        // slot 1 only (slot 2 stays at 0) so old presets retain audible behavior.
+        // Pre-v6 presets have neither and stay at 0/0.
+        if (formatVersion >= 7) {
+            lane.modulationDepth[0].store(
+                static_cast<double>(laneVT.getProperty("modulationDepth_slot1", 0.0)),
+                std::memory_order_release);
+            lane.modulationDepth[1].store(
+                static_cast<double>(laneVT.getProperty("modulationDepth_slot2", 0.0)),
+                std::memory_order_release);
+        } else {
+            lane.modulationDepth[0].store(
+                static_cast<double>(laneVT.getProperty("modulationDepth", 0.0)),
+                std::memory_order_release);
+            lane.modulationDepth[1].store(0.0, std::memory_order_release);
+        }
         lane.contentType = static_cast<LaneContentType>(
             static_cast<int>(laneVT.getProperty("contentType", 0)));
         lane.harmonicNumber = laneVT.getProperty("harmonicNumber", 0);

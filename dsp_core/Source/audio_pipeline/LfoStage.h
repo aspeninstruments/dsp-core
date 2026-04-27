@@ -19,7 +19,7 @@ namespace dsp_core::audio_pipeline {
  */
 class LfoStage : public AudioProcessingStage {
   public:
-    enum class Shape : int { Sin = 0, Tri = 1, Saw = 2, Sq = 3, Random = 4 };
+    enum class Shape : int { Off = 0, Sin = 1, Tri = 2, Saw = 3, Sq = 4, Random = 5 };
     enum class Units : int { Hz = 0, BPM = 1 };
     enum class Division : int { Sixteenth = 0, Eighth = 1, Quarter = 2, Half = 3, Bar = 4, TwoBar = 5, FourBar = 6 };
     enum class Flavor : int { Straight = 0, Triplet = 1, Dotted = 2 };

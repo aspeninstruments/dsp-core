@@ -138,24 +138,29 @@ class LaneMixer {
     double getLaneBlendDepth(int index) const;
 
     /**
-     * Per-lane modulation depth [-1, 1]. Modulated by the global modulation source
-     * (e.g. envelope follower) via setModulationEnvValue:
-     *     effectiveAmplitude = max(0, amplitude + blendAmount * blendDepth + envForLane * modulationDepth)
-     * Default 0 means the lane is inert with respect to the modulation source.
+     * Per-lane modulation depth [-1, 1] for a specific modulator slot. The
+     * effective amplitude in Blend mode is:
+     *     amplitude + blendAmount * blendDepth + sum_s slotEnv[s] * modulationDepth[s]
+     * where s is the slot index (0 = Slot 1, 1 = Slot 2). Default 0 means the
+     * lane is inert with respect to that slot's modulation source.
      * Increments both mix and full version counters (amplitude-class change).
      * Out-of-range values are clamped to [-1, 1].
      */
-    void setLaneModulationDepth(int index, double depth);
-    double getLaneModulationDepth(int index) const;
+    void setLaneModulationDepth(int index, int slotIdx, double depth);
+    double getLaneModulationDepth(int index, int slotIdx) const;
 
     /**
-     * Set the current modulation source value (e.g. envelope follower output) seen
-     * by per-lane modulationDepth in compute*. Called per-block by the processor.
-     * Pass 0.0 when the modulation source is disabled. Lock-free; does NOT
-     * increment version counters (env changes per block).
+     * Set the current modulation source value (envelope follower or LFO output)
+     * for a specific modulator slot. Slot 0 = Slot 1, slot 1 = Slot 2. Called
+     * per-block by the processor. Pass 0.0 when the slot is disabled. Lock-free;
+     * does NOT increment version counters (env changes per block).
      */
-    void setModulationEnvValue(double env);
-    double getModulationEnvValue() const { return modulationEnvValue_.load(std::memory_order_acquire); }
+    void setModulationEnvValue(int slotIdx, double env);
+    double getModulationEnvValue(int slotIdx) const {
+        return (slotIdx >= 0 && slotIdx < 2)
+                   ? modulationEnvValue_[static_cast<size_t>(slotIdx)].load(std::memory_order_acquire)
+                   : 0.0;
+    }
 
     void setLaneContentType(int index, LaneContentType type);
     LaneContentType getLaneContentType(int index) const;
@@ -400,7 +405,9 @@ class LaneMixer {
     MixerMode mixerMode_ = MixerMode::Blend;
     std::atomic<double> scanPosition_{0.0};
     std::atomic<double> blendAmount_{0.0};
-    std::atomic<double> modulationEnvValue_{0.0}; // Current modulation source value (e.g. env follower); 0 when source disabled
+    // Per-slot current modulation source value (envelope follower or LFO output);
+    // 0 when that slot is disabled. Indexed by slot (0 = Slot 1, 1 = Slot 2).
+    std::array<std::atomic<double>, 2> modulationEnvValue_{};
 
     ExtrapolationMode extrapolationMode_ = ExtrapolationMode::Clamp;
     bool softClipEnabled_ = false;

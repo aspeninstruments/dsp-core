@@ -2,6 +2,7 @@
 
 #include "SplineTypes.h"
 #include <juce_core/juce_core.h>
+#include <array>
 #include <atomic>
 #include <vector>
 
@@ -50,10 +51,11 @@ struct Lane {
     // Default 0 means the lane is inert with respect to the Morph knob in Blend mode.
     std::atomic<double> blendDepth{0.0};
 
-    // Per-lane modulation depth from the global modulation source (env follower) [-1, 1].
-    // Effective amplitude in Blend mode = ... + envForLane * modulationDepth.
-    // Default 0 means the lane is inert with respect to the modulation source.
-    std::atomic<double> modulationDepth{0.0};
+    // Per-lane modulation depth from each modulator slot's signal source [-1, 1].
+    // Effective amplitude in Blend mode = ... + slotEnv[s] * modulationDepth[s] summed over both slots.
+    // Indexed by slot (0 = Slot 1, 1 = Slot 2). Default 0 means the lane is inert
+    // with respect to that slot's modulation source.
+    std::array<std::atomic<double>, 2> modulationDepth{};
 
     LaneContentType contentType = LaneContentType::Harmonic;
     int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
@@ -79,7 +81,9 @@ struct Lane {
         : curveData(std::move(other.curveData)),
           amplitude(other.amplitude.load(std::memory_order_relaxed)),
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
-          modulationDepth(other.modulationDepth.load(std::memory_order_relaxed)),
+          modulationDepth{
+              std::atomic<double>{other.modulationDepth[0].load(std::memory_order_relaxed)},
+              std::atomic<double>{other.modulationDepth[1].load(std::memory_order_relaxed)}},
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
           harmonicStrength(other.harmonicStrength),
@@ -96,8 +100,10 @@ struct Lane {
                         std::memory_order_relaxed);
         blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
                          std::memory_order_relaxed);
-        modulationDepth.store(other.modulationDepth.load(std::memory_order_relaxed),
-                              std::memory_order_relaxed);
+        for (size_t s = 0; s < 2; ++s) {
+            modulationDepth[s].store(other.modulationDepth[s].load(std::memory_order_relaxed),
+                                     std::memory_order_relaxed);
+        }
         contentType = other.contentType;
         harmonicNumber = other.harmonicNumber;
         harmonicStrength = other.harmonicStrength;
@@ -115,7 +121,9 @@ struct Lane {
         : curveData(other.curveData),
           amplitude(other.amplitude.load(std::memory_order_relaxed)),
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
-          modulationDepth(other.modulationDepth.load(std::memory_order_relaxed)),
+          modulationDepth{
+              std::atomic<double>{other.modulationDepth[0].load(std::memory_order_relaxed)},
+              std::atomic<double>{other.modulationDepth[1].load(std::memory_order_relaxed)}},
           contentType(other.contentType),
           harmonicNumber(other.harmonicNumber),
           harmonicStrength(other.harmonicStrength),
@@ -133,8 +141,10 @@ struct Lane {
                             std::memory_order_relaxed);
             blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
-            modulationDepth.store(other.modulationDepth.load(std::memory_order_relaxed),
-                                  std::memory_order_relaxed);
+            for (size_t s = 0; s < 2; ++s) {
+                modulationDepth[s].store(other.modulationDepth[s].load(std::memory_order_relaxed),
+                                         std::memory_order_relaxed);
+            }
             contentType = other.contentType;
             harmonicNumber = other.harmonicNumber;
             harmonicStrength = other.harmonicStrength;
