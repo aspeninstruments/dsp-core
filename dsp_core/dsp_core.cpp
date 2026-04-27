@@ -27,6 +27,7 @@
 #include "Source/Services/SplineEvaluator.cpp"
 #include "Source/Services/SymmetryAnalyzer.cpp"
 #include "Source/Services/TransferFunctionOperations.cpp"
+#include "Source/Services/PerlinNoiseService.cpp"
 #include "Source/HysteresisProcessor.cpp"
 #include "Source/audio_pipeline/AudioPipeline.cpp"
 #include "Source/audio_pipeline/GainStage.cpp"
@@ -40,4 +41,5 @@
 #include "Source/audio_pipeline/AutoSquashStage.cpp"
 #include "Source/audio_pipeline/AutoRestoreStage.cpp"
 #include "Source/audio_pipeline/EnvelopeFollowerStage.cpp"
+#include "Source/audio_pipeline/LfoStage.cpp"
 #include "Source/audio_pipeline/AudioPipelineBuilder.cpp"

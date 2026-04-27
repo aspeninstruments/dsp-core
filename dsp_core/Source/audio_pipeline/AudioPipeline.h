@@ -28,6 +28,8 @@ enum class StageTag {
     AutoSquash,
     AutoRestore,
     EnvelopeFollower,
+    Modulator1,
+    Modulator2,
 };
 
 /**
@@ -61,6 +63,10 @@ inline std::string stageTagToString(StageTag tag) {
             return "autoRestore";
         case StageTag::EnvelopeFollower:
             return "envelopeFollower";
+        case StageTag::Modulator1:
+            return "modulator1";
+        case StageTag::Modulator2:
+            return "modulator2";
     }
     return "unknown";
 }

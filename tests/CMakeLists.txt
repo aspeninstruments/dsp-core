@@ -814,6 +814,31 @@ endif()
 
 add_test(NAME MorphGestureTests COMMAND morph_gesture_tests)
 
+# LfoStage tests
+add_executable(lfo_stage_tests
+    LfoStageTest.cpp
+)
+
+target_include_directories(lfo_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(lfo_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(lfo_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(lfo_stage_tests)
+endif()
+
+add_test(NAME LfoStageTests COMMAND lfo_stage_tests)
+
 # HysteresisStage tests
 add_executable(hysteresis_stage_tests
     HysteresisStageTest.cpp

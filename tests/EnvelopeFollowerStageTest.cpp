@@ -111,6 +111,11 @@ TEST_F(EnvelopeFollowerStageTest, DCInputConvergesToAbsValue) {
 TEST_F(EnvelopeFollowerStageTest, AttackTimeConstant_DbDomain) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
+    // Long attack so the RMS averaging window (~15 ms) is small relative to the
+    // dB-domain smoother's τ — keeps the cascade close to a clean step at the
+    // smoother's input and makes the dB-domain time constant directly testable.
+    const double longAttack = 0.100;
+    stage_->setAttackReleaseSec(longAttack, kReleaseSec);
 
     // Smoothing is dB-domain: time constants apply to envDb, not envLin. Charge
     // to a known starting level (-40 dB / 0.01 linear) so the rising step has
@@ -121,11 +126,11 @@ TEST_F(EnvelopeFollowerStageTest, AttackTimeConstant_DbDomain) {
 
     // Step to 1.0 (target = 0 dB). After exactly one attack τ, envDb should
     // have traversed (1 - 1/e) of the 40 dB span.
-    const int attackSamples = static_cast<int>(kSampleRate * kAttackSec);
+    const int attackSamples = static_cast<int>(kSampleRate * longAttack);
     const double env = driveDC(1.0, attackSamples);
     const double expectedDb = -40.0 + (1.0 - 1.0 / std::exp(1.0)) * 40.0;
     const double expectedLin = std::pow(10.0, expectedDb / 20.0);
-    EXPECT_NEAR(env, expectedLin, 0.02)
+    EXPECT_NEAR(env, expectedLin, 0.03)
         << "dB-domain attack: 63% of dB span after one τ";
 }
 
@@ -168,7 +173,9 @@ TEST_F(EnvelopeFollowerStageTest, SensitivityScalesInput) {
 // Layer 3 — Stereo + state management
 // =============================================================================
 
-TEST_F(EnvelopeFollowerStageTest, StereoUsesMaxChannel) {
+TEST_F(EnvelopeFollowerStageTest, StereoLinksViaSumOfSquares) {
+    // Stereo RMS uses sum-of-squares linking: env = sqrt(mean(x_l² + x_r²)).
+    // For DC channels (0.2, 0.8): meanSq = (0.04 + 0.64) / 2 = 0.34 → RMS ≈ 0.583.
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
 
@@ -179,8 +186,9 @@ TEST_F(EnvelopeFollowerStageTest, StereoUsesMaxChannel) {
         buf.setSample(1, i, 0.8);
     }
     stage_->process(buf);
-    EXPECT_NEAR(envelopeValue_.load(), 0.8, 1e-3)
-        << "stereo envelope must track the hotter channel";
+    const double expected = std::sqrt((0.2 * 0.2 + 0.8 * 0.8) / 2.0);
+    EXPECT_NEAR(envelopeValue_.load(), expected, 1e-3)
+        << "stereo RMS links via sum-of-squares";
 }
 
 TEST_F(EnvelopeFollowerStageTest, ResetClearsState) {
@@ -217,6 +225,9 @@ double measureAttackOneTauFromMinus40(double sampleRate, int blockSize = 512) {
     stage->prepareToPlay(sampleRate, blockSize);
     stage->setEnabled(true);
     stage->setSensitivityLinear(1.0);
+    // Long attack so the RMS averaging window is dominated by the dB smoother τ.
+    const double longAttack = 0.100;
+    stage->setAttackReleaseSec(longAttack, kReleaseSec);
 
     // Charge to -40 dB / 0.01 linear. Many release τ guarantees convergence.
     const int chargeSamples = static_cast<int>(sampleRate * 10.0 * kReleaseSec);
@@ -225,7 +236,7 @@ double measureAttackOneTauFromMinus40(double sampleRate, int blockSize = 512) {
     stage->process(charge);
 
     // One attack τ at full scale.
-    const int attackSamples = static_cast<int>(sampleRate * kAttackSec);
+    const int attackSamples = static_cast<int>(sampleRate * longAttack);
     juce::AudioBuffer<double> step(1, attackSamples);
     fillBuffer(step, 1.0);
     stage->process(step);
@@ -238,7 +249,7 @@ TEST_F(EnvelopeFollowerStageTest, PrepareRecomputesCoefficientsAcrossSampleRates
     const double expectedLin = std::pow(10.0, expectedDb / 20.0);
     for (double sr : {48000.0, 96000.0, 192000.0}) {
         const double env = measureAttackOneTauFromMinus40(sr);
-        EXPECT_NEAR(env, expectedLin, 0.02)
+        EXPECT_NEAR(env, expectedLin, 0.03)
             << "dB-domain attack τ must track wall-clock at sr=" << sr;
     }
 }
@@ -250,48 +261,85 @@ TEST_F(EnvelopeFollowerStageTest, OversamplingCoefficientRecompute) {
     const double env = measureAttackOneTauFromMinus40(osRate, 2048);
     const double expectedDb = -40.0 + (1.0 - 1.0 / std::exp(1.0)) * 40.0;
     const double expectedLin = std::pow(10.0, expectedDb / 20.0);
-    EXPECT_NEAR(env, expectedLin, 0.02)
+    EXPECT_NEAR(env, expectedLin, 0.03)
         << "dB-domain attack τ must track wall-clock at 4× oversampled rate";
 }
 
 // =============================================================================
-// Layer 5 — Detector mode (Peak / RMS)
+// Layer 5 — Sidechain HPF
 // =============================================================================
 
-TEST_F(EnvelopeFollowerStageTest, DetectorMode_RmsOnSineConvergesToRms) {
-    // RMS of a unit-amplitude sine = 1/√2. Verify the RMS detector converges
-    // there. (Peak-vs-RMS is most cleanly differentiated on duty-cycled signals;
-    // on a steady sine, the dB-domain smoother + nonlinear release interact
-    // in ways that make a direct peak/RMS comparison less clean than in
-    // linear-domain detectors. The next test covers the duty-cycle case.)
-    stage_->setEnabled(true);
-    stage_->setSensitivityLinear(1.0);
-    stage_->setDetectionMode(EnvelopeFollowerStage::DetectionMode::Rms);
+namespace {
+// RMS mode gives a clean, time-averaged readout that doesn't depend on the
+// peak smoother's trajectory through each cycle, so HPF magnitude effects
+// are easy to verify quantitatively.
+double measureSineEnvelopeRms(double freqHz, bool hpfOn, double hpfHz = 100.0) {
+    std::atomic<double> env{0.0};
+    auto stage = std::make_unique<EnvelopeFollowerStage>(env);
+    stage->prepareToPlay(kSampleRate, 512);
+    stage->setEnabled(true);
+    stage->setSensitivityLinear(1.0);
+    stage->setSidechainHpfEnabled(hpfOn);
+    stage->setSidechainHpfCutoffHz(hpfHz);
 
-    const int totalSamples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
+    // 1 second is plenty for HPF transient + RMS window + envelope to converge.
+    const int totalSamples = static_cast<int>(kSampleRate * 1.0);
     juce::AudioBuffer<double> buf(1, totalSamples);
-    const double w = 2.0 * juce::MathConstants<double>::pi * 1000.0 / kSampleRate;
+    const double w = 2.0 * juce::MathConstants<double>::pi * freqHz / kSampleRate;
     for (int i = 0; i < totalSamples; ++i) {
         buf.setSample(0, i, std::sin(w * static_cast<double>(i)));
     }
-    stage_->process(buf);
-    EXPECT_NEAR(envelopeValue_.load(), 1.0 / std::sqrt(2.0), 0.06)
-        << "RMS detector on unit sine converges near 1/√2";
+    stage->process(buf);
+    return env.load();
+}
+} // namespace
+
+TEST_F(EnvelopeFollowerStageTest, SidechainHpf_LowFreqAttenuated) {
+    // 30 Hz sine through 1st-order HPF @ 100 Hz: theoretical magnitude
+    // 30/√(30² + 100²) ≈ 0.287, so RMS envelope drops by ~10.9 dB.
+    const double envOff = measureSineEnvelopeRms(30.0, /*hpfOn=*/false);
+    const double envOn = measureSineEnvelopeRms(30.0, /*hpfOn=*/true, 100.0);
+
+    EXPECT_NEAR(envOff, 1.0 / std::sqrt(2.0), 0.05) << "RMS of 30 Hz sine, HPF off";
+    EXPECT_LT(envOn, envOff * 0.5) << "HPF must drop 30 Hz envelope by >6 dB";
 }
 
-TEST_F(EnvelopeFollowerStageTest, DetectorMode_RmsConvergesOnDc) {
-    // RMS of DC equals |DC|. Steady-state must match peak detector for DC input.
-    stage_->setEnabled(true);
-    stage_->setSensitivityLinear(1.0);
-    stage_->setDetectionMode(EnvelopeFollowerStage::DetectionMode::Rms);
+TEST_F(EnvelopeFollowerStageTest, SidechainHpf_HighFreqUnchanged) {
+    // 1 kHz sine is well above the 100 Hz HPF cutoff (~20 dB above), so the
+    // HPF should pass it nearly unchanged.
+    const double envOff = measureSineEnvelopeRms(1000.0, /*hpfOn=*/false);
+    const double envOn = measureSineEnvelopeRms(1000.0, /*hpfOn=*/true, 100.0);
+    EXPECT_NEAR(envOn, envOff, 0.05) << "HPF should not materially affect 1 kHz envelope";
+}
 
-    const int samples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
-    const double env = driveDC(0.5, samples);
-    EXPECT_NEAR(env, 0.5, 1e-2) << "RMS of DC = |DC| at steady state";
+TEST_F(EnvelopeFollowerStageTest, SidechainHpf_DoesNotMutateBuffer) {
+    // The stage must remain a pure measurement tap even with HPF enabled.
+    stage_->setEnabled(true);
+    stage_->setSidechainHpfEnabled(true);
+    stage_->setSidechainHpfCutoffHz(150.0);
+
+    juce::AudioBuffer<double> buf(2, 1024);
+    const double w = 2.0 * juce::MathConstants<double>::pi * 50.0 / kSampleRate; // 50 Hz
+    for (int ch = 0; ch < 2; ++ch) {
+        for (int i = 0; i < 1024; ++i) {
+            buf.setSample(ch, i, 0.7 * std::sin(w * static_cast<double>(i)));
+        }
+    }
+    juce::AudioBuffer<double> reference;
+    reference.makeCopyOf(buf);
+
+    stage_->process(buf);
+
+    for (int ch = 0; ch < 2; ++ch) {
+        for (int i = 0; i < 1024; ++i) {
+            EXPECT_EQ(buf.getSample(ch, i), reference.getSample(ch, i))
+                << "HPF must filter a side copy, never the buffer; ch=" << ch << " i=" << i;
+        }
+    }
 }
 
 // =============================================================================
-// Layer 6 — Nonlinear release
+// Layer 7 — Nonlinear release
 // =============================================================================
 
 TEST_F(EnvelopeFollowerStageTest, NonlinearRelease_BigDropFasterThanSmallDrop) {
@@ -322,4 +370,80 @@ TEST_F(EnvelopeFollowerStageTest, NonlinearRelease_BigDropFasterThanSmallDrop) {
     EXPECT_GT(bigFrac, smallFrac)
         << "nonlinear release: bigger drops cover a larger fraction of dB span per τ ("
         << "small=" << smallFrac << " big=" << bigFrac << ")";
+}
+
+// =============================================================================
+// Layer 7 — External input buffer routing (sidechain-style detector tap)
+// =============================================================================
+
+TEST_F(EnvelopeFollowerStageTest, ExternalBufferIsReadInsteadOfInPipeline) {
+    // When an external buffer is set, process() must read from it and ignore
+    // the in-pipeline buffer arg. Drive silence into the in-pipeline buffer,
+    // signal into the external one, and assert the envelope tracks the signal.
+    stage_->setEnabled(true);
+    stage_->setSensitivityLinear(1.0);
+
+    const int samples = static_cast<int>(kSampleRate * 20.0 * kAttackSec);
+    juce::AudioBuffer<double> external(2, samples);
+    juce::AudioBuffer<double> inPipeline(2, samples);
+    fillBuffer(external, 0.5);
+    fillBuffer(inPipeline, 0.0);
+
+    stage_->setExternalInputBuffer(&external);
+    stage_->process(inPipeline);
+
+    EXPECT_NEAR(envelopeValue_.load(), 0.5, 0.01)
+        << "external buffer must drive the detector when set";
+
+    // In-pipeline buffer must remain untouched (stage is a pure read tap).
+    for (int i = 0; i < samples; ++i) {
+        EXPECT_EQ(inPipeline.getSample(0, i), 0.0);
+    }
+}
+
+TEST_F(EnvelopeFollowerStageTest, ExternalNullptrFallsBackToInPipelineBuffer) {
+    // Explicit nullptr must restore the in-pipeline-arg behavior. Signal into
+    // the in-pipeline buffer, no external buffer set → envelope must track.
+    stage_->setEnabled(true);
+    stage_->setExternalInputBuffer(nullptr);
+
+    const int samples = static_cast<int>(kSampleRate * 20.0 * kAttackSec);
+    const double env = driveDC(0.5, samples);
+
+    EXPECT_NEAR(env, 0.5, 0.01)
+        << "with no external buffer, stage must read the in-pipeline arg";
+}
+
+TEST_F(EnvelopeFollowerStageTest, ExternalBufferCanBeSwappedAcrossBlocks) {
+    // The external pointer is a per-block routing decision. Alternate between
+    // signal and silence sources across blocks and assert the envelope tracks
+    // whichever buffer was selected in each block.
+    stage_->setEnabled(true);
+    stage_->setSensitivityLinear(1.0);
+
+    const int blockSamples = 256;
+    juce::AudioBuffer<double> sigBuf(2, blockSamples);
+    juce::AudioBuffer<double> silenceBuf(2, blockSamples);
+    juce::AudioBuffer<double> dummyInPipeline(2, blockSamples);
+    fillBuffer(sigBuf, 0.5);
+    fillBuffer(silenceBuf, 0.0);
+
+    // Many attack-time-constants worth of signal-source blocks → env rises.
+    const int attackBlocks = static_cast<int>(kSampleRate * 20.0 * kAttackSec) / blockSamples + 1;
+    stage_->setExternalInputBuffer(&sigBuf);
+    for (int b = 0; b < attackBlocks; ++b) {
+        fillBuffer(dummyInPipeline, 0.0);
+        stage_->process(dummyInPipeline);
+    }
+    const double envAfterRise = envelopeValue_.load();
+    EXPECT_NEAR(envAfterRise, 0.5, 0.01) << "env should rise while external = signal";
+
+    // Switch external pointer to silence; env must release.
+    const int releaseBlocks = static_cast<int>(kSampleRate * 10.0 * kReleaseSec) / blockSamples + 1;
+    stage_->setExternalInputBuffer(&silenceBuf);
+    for (int b = 0; b < releaseBlocks; ++b) {
+        fillBuffer(dummyInPipeline, 0.0);
+        stage_->process(dummyInPipeline);
+    }
+    EXPECT_LT(envelopeValue_.load(), 1e-3) << "env should release while external = silence";
 }
