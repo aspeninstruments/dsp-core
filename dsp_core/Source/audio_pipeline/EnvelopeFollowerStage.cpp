@@ -96,6 +96,9 @@ void EnvelopeFollowerStage::recomputeCoefficients() {
 
 void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
     if (!enabled_.load(std::memory_order_acquire)) {
+        // Publish silence so downstream targets snap to 0 when the input is OFF;
+        // otherwise the last computed value would persist in the shared atomic.
+        envelopeStorage_.store(0.0, std::memory_order_release);
         return;
     }
 
