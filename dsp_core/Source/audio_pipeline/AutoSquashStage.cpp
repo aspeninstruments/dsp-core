@@ -45,8 +45,7 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
         // what makes this *not* a peak follower: a single sine cycle's
         // power dip does not pull the mean down, so the gain doesn't track
         // the per-cycle envelope and produce audio-rate ring modulation.
-        const double alpha =
-            (samplePower > state_.meanSquare) ? state_.rmsAttackAlpha : state_.rmsReleaseAlpha;
+        const double alpha = (samplePower > state_.meanSquare) ? state_.rmsAttackAlpha : state_.rmsReleaseAlpha;
         state_.meanSquare += alpha * (samplePower - state_.meanSquare);
 
         const double envRms = std::sqrt(state_.meanSquare);
