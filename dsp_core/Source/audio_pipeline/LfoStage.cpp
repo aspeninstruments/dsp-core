@@ -76,6 +76,7 @@ void LfoStage::process(juce::AudioBuffer<double>& buffer) {
     const Division div = static_cast<Division>(division_.load(std::memory_order_acquire));
     const Flavor flv = static_cast<Flavor>(flavor_.load(std::memory_order_acquire));
     const double rateHz = rateHz_.load(std::memory_order_acquire);
+    const double phaseOffset = phaseOffset_.load(std::memory_order_acquire);
     const unsigned int seed = seed_.load(std::memory_order_acquire);
 
     const int numSamples = buffer.getNumSamples();
@@ -109,7 +110,9 @@ void LfoStage::process(juce::AudioBuffer<double>& buffer) {
         }
     }
 
-    const double value = evaluateShape(shape, phase_, seed);
+    double effectivePhase = std::fmod(phase_ + phaseOffset, 1.0);
+    if (effectivePhase < 0.0) effectivePhase += 1.0;
+    const double value = evaluateShape(shape, effectivePhase, seed);
     lfoStorage_.store(value, std::memory_order_release);
 }
 

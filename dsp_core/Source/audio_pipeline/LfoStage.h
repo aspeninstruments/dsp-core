@@ -41,6 +41,11 @@ class LfoStage : public AudioProcessingStage {
     void setFlavor(Flavor f) { flavor_.store(static_cast<int>(f), std::memory_order_release); }
     void setSeed(unsigned int seed) { seed_.store(seed, std::memory_order_release); }
 
+    /// Phase offset in normalized cycles (degrees / 360). Applied before wave
+    /// evaluation so it shifts where the cycle starts relative to the beat in
+    /// BPM mode (and the free-run cycle in Hz mode).
+    void setPhaseOffset(double normalized) { phaseOffset_.store(normalized, std::memory_order_release); }
+
     /// Set once per block from the audio thread before process(). bpm and
     /// ppqPosition come straight from juce::AudioPlayHead. isPlaying gates
     /// host-locked phase derivation in BPM mode.
@@ -65,6 +70,7 @@ class LfoStage : public AudioProcessingStage {
     std::atomic<double> rateHz_{1.0};
     std::atomic<int> division_{static_cast<int>(Division::Quarter)};
     std::atomic<int> flavor_{static_cast<int>(Flavor::Straight)};
+    std::atomic<double> phaseOffset_{0.0};
     std::atomic<unsigned int> seed_{0xA5F37B12u};
 
     double sampleRate_{48000.0};
