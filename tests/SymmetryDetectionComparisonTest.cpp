@@ -120,13 +120,12 @@ class SymmetryDetectionComparisonTest : public ::testing::Test {
     FitMetrics fitWithMode(SymmetryDetection mode) {
         auto config = SplineFitConfig::tight();
         config.symmetryDetection = mode;
-        config.maxAnchors = 48; // Allow enough anchors for complex curves
+        config.maxAnchors = 48;          // Allow enough anchors for complex curves
         config.positionTolerance = 0.01; // Reasonable tolerance for comparison
 
         auto curveData = extractCurveData();
-        auto result = SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        auto result = SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                             ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
         FitMetrics metrics;
         metrics.maxError = result.maxError;
@@ -137,7 +136,8 @@ class SymmetryDetectionComparisonTest : public ::testing::Test {
         int pairedCount = 0;
         int totalNonCenter = 0;
         for (const auto& anchor : result.anchors) {
-            if (std::abs(anchor.x) < 1e-4) continue; // Skip center anchor
+            if (std::abs(anchor.x) < 1e-4)
+                continue; // Skip center anchor
 
             totalNonCenter++;
             for (const auto& other : result.anchors) {
@@ -149,31 +149,31 @@ class SymmetryDetectionComparisonTest : public ::testing::Test {
         }
 
         metrics.pairedAnchorCount = pairedCount;
-        metrics.pairRatio = (totalNonCenter > 0)
-                                ? static_cast<double>(pairedCount) / totalNonCenter
-                                : 1.0;
+        metrics.pairRatio = (totalNonCenter > 0) ? static_cast<double>(pairedCount) / totalNonCenter : 1.0;
 
         return metrics;
     }
 
-    FitMetrics fitWithoutSymmetry() { return fitWithMode(SymmetryDetection::Never); }
-    FitMetrics fitWithSymmetryAuto() { return fitWithMode(SymmetryDetection::Auto); }
+    FitMetrics fitWithoutSymmetry() {
+        return fitWithMode(SymmetryDetection::Never);
+    }
+    FitMetrics fitWithSymmetryAuto() {
+        return fitWithMode(SymmetryDetection::Auto);
+    }
 
     //--------------------------------------------------------------------------
     // Output Helpers
     //--------------------------------------------------------------------------
 
     static void printMetrics(const std::string& label, const FitMetrics& m) {
-        std::cout << std::setw(12) << label << " | " << std::fixed << std::setprecision(4)
-                  << std::setw(8) << m.maxError << " | " << std::setw(7) << m.anchorCount << " | "
-                  << std::setw(7) << static_cast<int>(m.pairRatio * 100) << "%" << '\n';
+        std::cout << std::setw(12) << label << " | " << std::fixed << std::setprecision(4) << std::setw(8) << m.maxError
+                  << " | " << std::setw(7) << m.anchorCount << " | " << std::setw(7)
+                  << static_cast<int>(m.pairRatio * 100) << "%" << '\n';
     }
 
-    static void printComparison(const std::string& curveName, const FitMetrics& without,
-                                const FitMetrics& withSym) {
-        double const errorDiff = (without.maxError > 1e-9)
-                               ? 100.0 * (withSym.maxError - without.maxError) / without.maxError
-                               : 0.0;
+    static void printComparison(const std::string& curveName, const FitMetrics& without, const FitMetrics& withSym) {
+        double const errorDiff =
+            (without.maxError > 1e-9) ? 100.0 * (withSym.maxError - without.maxError) / without.maxError : 0.0;
         double const pairDiff = 100.0 * (withSym.pairRatio - without.pairRatio);
 
         std::string verdict;
@@ -195,10 +195,10 @@ class SymmetryDetectionComparisonTest : public ::testing::Test {
         std::cout << std::string(48, '-') << '\n';
         printMetrics("Without", without);
         printMetrics("With", withSym);
-        std::cout << "Error change: " << std::showpos << std::fixed << std::setprecision(1)
-                  << errorDiff << "%" << std::noshowpos << '\n';
-        std::cout << "Paired change: " << std::showpos << std::fixed << std::setprecision(1)
-                  << pairDiff << "%" << std::noshowpos << '\n';
+        std::cout << "Error change: " << std::showpos << std::fixed << std::setprecision(1) << errorDiff << "%"
+                  << std::noshowpos << '\n';
+        std::cout << "Paired change: " << std::showpos << std::fixed << std::setprecision(1) << pairDiff << "%"
+                  << std::noshowpos << '\n';
         std::cout << "Verdict: " << verdict << '\n';
     }
 };
@@ -221,8 +221,7 @@ TEST_F(SymmetryDetectionComparisonTest, Tanh_AllVariants) {
         printComparison(name, without, withSym);
 
         // Verify no severe regression (allow 20% error increase max)
-        EXPECT_LE(withSym.maxError, without.maxError * 1.2)
-            << name << " has severe regression with symmetry detection";
+        EXPECT_LE(withSym.maxError, without.maxError * 1.2) << name << " has severe regression with symmetry detection";
     }
 }
 
@@ -320,10 +319,9 @@ TEST_F(SymmetryDetectionComparisonTest, SummaryReport) {
     std::cout << "FULL COMPARISON SUMMARY" << '\n';
     std::cout << "==========================================\n" << '\n';
 
-    std::cout << std::setw(15) << "Curve" << " | " << std::setw(12) << "Without Err" << " | "
-              << std::setw(12) << "With Err" << " | " << std::setw(10) << "Err Diff" << " | "
-              << std::setw(12) << "Without Pair" << " | " << std::setw(12) << "With Pair"
-              << '\n';
+    std::cout << std::setw(15) << "Curve" << " | " << std::setw(12) << "Without Err" << " | " << std::setw(12)
+              << "With Err" << " | " << std::setw(10) << "Err Diff" << " | " << std::setw(12) << "Without Pair" << " | "
+              << std::setw(12) << "With Pair" << '\n';
     std::cout << std::string(90, '-') << '\n';
 
     auto runTest = [&](const std::string& name, auto setupFn) {
@@ -331,14 +329,12 @@ TEST_F(SymmetryDetectionComparisonTest, SummaryReport) {
         auto without = fitWithoutSymmetry();
         auto withSym = fitWithSymmetryAuto();
 
-        double const errDiff = (without.maxError > 1e-9)
-                             ? 100.0 * (withSym.maxError - without.maxError) / without.maxError
-                             : 0.0;
+        double const errDiff =
+            (without.maxError > 1e-9) ? 100.0 * (withSym.maxError - without.maxError) / without.maxError : 0.0;
 
-        std::cout << std::setw(15) << name << " | " << std::fixed << std::setprecision(5)
-                  << std::setw(12) << without.maxError << " | " << std::setw(12)
-                  << withSym.maxError << " | " << std::setw(8) << std::showpos << errDiff << "%"
-                  << std::noshowpos << " | " << std::setw(10)
+        std::cout << std::setw(15) << name << " | " << std::fixed << std::setprecision(5) << std::setw(12)
+                  << without.maxError << " | " << std::setw(12) << withSym.maxError << " | " << std::setw(8)
+                  << std::showpos << errDiff << "%" << std::noshowpos << " | " << std::setw(10)
                   << static_cast<int>(without.pairRatio * 100) << "%" << " | " << std::setw(10)
                   << static_cast<int>(withSym.pairRatio * 100) << "%" << '\n';
     };

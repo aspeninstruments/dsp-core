@@ -27,12 +27,12 @@ struct AutoGainState {
     // transient through at the previous (too-high) gain, causing large
     // internal overshoot. Opto-style release preserves transparency.
     struct Constants {
-        double targetPeak = 0.9;           // -1 dB headroom
-        double maxGainLinear = 100.0;      // +40 dB cap to prevent noise runaway
-        double noiseFloorLinear = 0.001;   // -60 dB: below this, slew gain toward 1
-        double releaseTauSeconds = 0.120;  // 120 ms — opto-style release
-        double holdSeconds = 0.010;        // 10 ms hold before release can start
-        double enableFadeSeconds = 0.020;  // 20 ms crossfade on toggle
+        double targetPeak = 0.9;          // -1 dB headroom
+        double maxGainLinear = 100.0;     // +40 dB cap to prevent noise runaway
+        double noiseFloorLinear = 0.001;  // -60 dB: below this, slew gain toward 1
+        double releaseTauSeconds = 0.120; // 120 ms — opto-style release
+        double holdSeconds = 0.010;       // 10 ms hold before release can start
+        double enableFadeSeconds = 0.020; // 20 ms crossfade on toggle
     };
 
     Constants k{};
@@ -51,8 +51,8 @@ struct AutoGainState {
     juce::AudioBuffer<double> gainHistory;
 
     // Envelope-follower state (audio thread only).
-    double envelope = 0.0;          // peak envelope
-    int holdCounter = 0;            // samples remaining in hold before release kicks in
+    double envelope = 0.0; // peak envelope
+    int holdCounter = 0;   // samples remaining in hold before release kicks in
 
     // Enable crossfade mix: 0.0 = fully bypassed, 1.0 = fully engaged.
     // Ramps on enable/disable to avoid clicks.

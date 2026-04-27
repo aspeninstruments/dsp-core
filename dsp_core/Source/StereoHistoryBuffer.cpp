@@ -1,14 +1,9 @@
 #include "StereoHistoryBuffer.h"
 
 StereoHistoryBuffer::StereoHistoryBuffer(int historySize)
-    : xBuffer_(static_cast<size_t>(historySize), 0.0),
-      yBuffer_(static_cast<size_t>(historySize), 0.0),
-      sequence_(0),
-      writePos_(0),
-      size_(historySize),
-      cachedX_(static_cast<size_t>(historySize), 0.0),
-      cachedY_(static_cast<size_t>(historySize), 0.0),
-      cachedSize_(0) {}
+    : xBuffer_(static_cast<size_t>(historySize), 0.0), yBuffer_(static_cast<size_t>(historySize), 0.0), sequence_(0),
+      writePos_(0), size_(historySize), cachedX_(static_cast<size_t>(historySize), 0.0),
+      cachedY_(static_cast<size_t>(historySize), 0.0), cachedSize_(0) {}
 
 void StereoHistoryBuffer::pushSample(double xSample, double ySample) {
     // Begin write: increment sequence to odd (signals write in progress)

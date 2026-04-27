@@ -60,7 +60,8 @@ class SeamlessTransferFunctionCharacterizationTest : public ::testing::Test {
      */
     static double maxAbs(const std::vector<double>& buf) {
         double m = 0.0;
-        for (auto v : buf) m = std::max(m, std::abs(v));
+        for (auto v : buf)
+            m = std::max(m, std::abs(v));
         return m;
     }
 };
@@ -75,8 +76,7 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, DefaultLUT_IsIdentityFuncti
 
     for (int i = 0; i < static_cast<int>(output.size()); i += 50) {
         const double x = -1.0 + 2.0 * (i / static_cast<double>(output.size() - 1));
-        EXPECT_NEAR(output[static_cast<size_t>(i)], x, 0.01)
-            << "Default TF should be identity (y=x) at sample " << i;
+        EXPECT_NEAR(output[static_cast<size_t>(i)], x, 0.01) << "Default TF should be identity (y=x) at sample " << i;
     }
 }
 
@@ -84,8 +84,8 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, AfterHarmonicChange_LUTRefl
     auto& mixer = stf->getLaneMixer();
 
     // Set H1=0.5, H3=0.5 (mix of linear and cubic harmonics)
-    mixer.setLaneAmplitude(1, 0.5);  // H1
-    mixer.setLaneAmplitude(3, 0.5);  // H3
+    mixer.setLaneAmplitude(1, 0.5); // H1
+    mixer.setLaneAmplitude(3, 0.5); // H3
 
     auto output = renderAndProcess();
 
@@ -113,7 +113,7 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, PaintModeRender_MixerStillA
     for (int i = 0; i < mixer.getActiveLaneCount(); ++i) {
         mixer.setLaneAmplitude(i, 0.0);
     }
-    mixer.setLaneAmplitude(0, 1.0);  // WT mix = 1.0
+    mixer.setLaneAmplitude(0, 1.0); // WT mix = 1.0
 
     auto output = renderAndProcess();
 
@@ -133,8 +133,8 @@ TEST_F(SeamlessTransferFunctionCharacterizationTest, NormalizationEnabled_MaxAbs
     // Set WT=1.0, H1=1.0 (composite will be tanh(2x) + x)
     // The max abs of tanh(2x)+x on [-1,1] is tanh(2)+1 ≈ 1.964
     // With normalization, output should be scaled to max abs = 1.0
-    mixer.setLaneAmplitude(0, 1.0);  // WT mix
-    mixer.setLaneAmplitude(1, 1.0);  // H1
+    mixer.setLaneAmplitude(0, 1.0); // WT mix
+    mixer.setLaneAmplitude(1, 1.0); // H1
 
     auto output = renderAndProcess();
 

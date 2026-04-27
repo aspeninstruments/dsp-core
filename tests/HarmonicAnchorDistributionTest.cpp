@@ -46,8 +46,7 @@ class HarmonicAnchorDistributionTest : public ::testing::Test {
         for (const auto& anchor : anchors) {
             if (anchor.x < -0.66) {
                 nearMinusOne++;
-                std::cout << "  x=" << std::fixed << std::setprecision(6) << anchor.x << ", y=" << anchor.y
-                          << '\n';
+                std::cout << "  x=" << std::fixed << std::setprecision(6) << anchor.x << ", y=" << anchor.y << '\n';
             } else if (anchor.x < 0.66) {
                 middle++;
             } else {
@@ -56,12 +55,12 @@ class HarmonicAnchorDistributionTest : public ::testing::Test {
         }
 
         std::cout << "\nRegion distribution:" << '\n';
-        std::cout << "  [-1.0, -0.66]: " << nearMinusOne << " anchors (" << (100.0 * static_cast<double>(nearMinusOne) / static_cast<double>(anchors.size()))
-                  << "%)" << '\n';
-        std::cout << "  (-0.66, 0.66): " << middle << " anchors (" << (100.0 * static_cast<double>(middle) / static_cast<double>(anchors.size())) << "%)"
-                  << '\n';
-        std::cout << "  [0.66, 1.0]:   " << nearPlusOne << " anchors (" << (100.0 * static_cast<double>(nearPlusOne) / static_cast<double>(anchors.size()))
-                  << "%)" << '\n';
+        std::cout << "  [-1.0, -0.66]: " << nearMinusOne << " anchors ("
+                  << (100.0 * static_cast<double>(nearMinusOne) / static_cast<double>(anchors.size())) << "%)" << '\n';
+        std::cout << "  (-0.66, 0.66): " << middle << " anchors ("
+                  << (100.0 * static_cast<double>(middle) / static_cast<double>(anchors.size())) << "%)" << '\n';
+        std::cout << "  [0.66, 1.0]:   " << nearPlusOne << " anchors ("
+                  << (100.0 * static_cast<double>(nearPlusOne) / static_cast<double>(anchors.size())) << "%)" << '\n';
     }
 
     std::vector<double> extractCurveData() const {
@@ -87,8 +86,8 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic3_FeatureDetection) {
     auto curveData = extractCurveData();
 
     auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
+        curveData.data(), static_cast<int>(curveData.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(),
+        featureConfig);
 
     std::cout << "\n=== H3 Feature Detection ===" << '\n';
     std::cout << "Local extrema: " << features.localExtrema.size() << '\n';
@@ -98,9 +97,9 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic3_FeatureDetection) {
         std::cout << "  Extremum " << i << ": x=" << x << '\n';
     }
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result.success);
 
     analyzeAnchorDistribution(result.anchors, 3);
@@ -115,9 +114,9 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic3_NoFeatureDetection) {
 
     auto curveData = extractCurveData();
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result.success);
 
     std::cout << "\n=== NO Feature Detection (Pure Greedy) ===" << '\n';
@@ -136,15 +135,15 @@ TEST_F(HarmonicAnchorDistributionTest, Harmonic5_FeatureDetection) {
     auto curveData = extractCurveData();
 
     auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
+        curveData.data(), static_cast<int>(curveData.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(),
+        featureConfig);
 
     std::cout << "\n=== H5 Feature Detection ===" << '\n';
     std::cout << "Local extrema: " << features.localExtrema.size() << '\n';
 
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     ASSERT_TRUE(result.success);
 
     analyzeAnchorDistribution(result.anchors, 5);
@@ -160,9 +159,9 @@ TEST_F(HarmonicAnchorDistributionTest, NoBoundaryClusteringRegression) {
         setHarmonicCurve(3);
         auto curveData = extractCurveData();
 
-        auto result = dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        auto result =
+            dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                       ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         ASSERT_TRUE(result.success);
 
         // Count anchors near boundaries
@@ -171,10 +170,10 @@ TEST_F(HarmonicAnchorDistributionTest, NoBoundaryClusteringRegression) {
         for (const auto& anchor : result.anchors) {
             if (anchor.x < -0.66) {
                 nearMinusOne++;
-}
+            }
             if (anchor.x > 0.66) {
                 nearPlusOne++;
-}
+            }
         }
 
         // Both sides should have similar anchor density
@@ -191,9 +190,9 @@ TEST_F(HarmonicAnchorDistributionTest, NoBoundaryClusteringRegression) {
         setHarmonicCurve(5);
         auto curveData = extractCurveData();
 
-        auto result = dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        auto result =
+            dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                       ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         ASSERT_TRUE(result.success);
 
         int nearMinusOne = 0;
@@ -201,10 +200,10 @@ TEST_F(HarmonicAnchorDistributionTest, NoBoundaryClusteringRegression) {
         for (const auto& anchor : result.anchors) {
             if (anchor.x < -0.66) {
                 nearMinusOne++;
-}
+            }
             if (anchor.x > 0.66) {
                 nearPlusOne++;
-}
+            }
         }
 
         double const leftRatio = static_cast<double>(nearMinusOne) / static_cast<double>(result.anchors.size());

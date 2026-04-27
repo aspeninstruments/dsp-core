@@ -37,8 +37,7 @@ TEST_F(StereoHistoryBufferTest, PushMultipleSamplesAndRead) {
 
     // Push 5 paired samples
     for (int i = 0; i < 5; ++i) {
-        buffer.pushSample(static_cast<double>(i) * 0.1,
-                          static_cast<double>(i) * 0.2);
+        buffer.pushSample(static_cast<double>(i) * 0.1, static_cast<double>(i) * 0.2);
     }
 
     std::vector<double> x(5), y(5);
@@ -70,18 +69,17 @@ TEST_F(StereoHistoryBufferTest, ReadReturnsCorrespondingSamples) {
 
     // Every Y should be exactly 2x its corresponding X
     for (int i = 0; i < 50; ++i) {
-        EXPECT_DOUBLE_EQ(y[i], x[i] * 2.0)
-            << "Mismatch at index " << i << ": x=" << x[i] << ", y=" << y[i];
+        EXPECT_DOUBLE_EQ(y[i], x[i] * 2.0) << "Mismatch at index " << i << ": x=" << x[i] << ", y=" << y[i];
     }
 }
 
 TEST_F(StereoHistoryBufferTest, ReadReturnsCorrespondingSamplesAfterWrap) {
-    StereoHistoryBuffer buffer(64);  // Small buffer to force wrap
+    StereoHistoryBuffer buffer(64); // Small buffer to force wrap
 
     // Push 100 samples (wraps around multiple times)
     for (int i = 0; i < 100; ++i) {
         double xVal = static_cast<double>(i);
-        double yVal = static_cast<double>(i) + 1000.0;  // Y = X + 1000
+        double yVal = static_cast<double>(i) + 1000.0; // Y = X + 1000
         buffer.pushSample(xVal, yVal);
     }
 
@@ -90,8 +88,7 @@ TEST_F(StereoHistoryBufferTest, ReadReturnsCorrespondingSamplesAfterWrap) {
 
     // Every Y should be X + 1000, regardless of wraparound
     for (int i = 0; i < 32; ++i) {
-        EXPECT_DOUBLE_EQ(y[i], x[i] + 1000.0)
-            << "Wraparound broke correspondence at index " << i;
+        EXPECT_DOUBLE_EQ(y[i], x[i] + 1000.0) << "Wraparound broke correspondence at index " << i;
     }
 }
 
@@ -111,8 +108,7 @@ TEST_F(StereoHistoryBufferTest, CorrespondencePreservedWithSineCosineRelationshi
     for (int i = 0; i < 500; ++i) {
         double sumOfSquares = x[i] * x[i] + y[i] * y[i];
         EXPECT_NEAR(sumOfSquares, 1.0, 1e-10)
-            << "Pythagorean identity violated at index " << i
-            << ": sin=" << x[i] << ", cos=" << y[i];
+            << "Pythagorean identity violated at index " << i << ": sin=" << x[i] << ", cos=" << y[i];
     }
 }
 
@@ -129,7 +125,7 @@ TEST_F(StereoHistoryBufferTest, PushSamplesBlockMaintainsCorrespondence) {
 
     for (int i = 0; i < blockSize; ++i) {
         xBlock[i] = static_cast<double>(i);
-        yBlock[i] = static_cast<double>(i) * 3.0;  // Y = X * 3
+        yBlock[i] = static_cast<double>(i) * 3.0; // Y = X * 3
     }
 
     buffer.pushSamples(xBlock.data(), yBlock.data(), blockSize);
@@ -138,8 +134,7 @@ TEST_F(StereoHistoryBufferTest, PushSamplesBlockMaintainsCorrespondence) {
     buffer.getHistory(xOut.data(), yOut.data(), blockSize);
 
     for (int i = 0; i < blockSize; ++i) {
-        EXPECT_DOUBLE_EQ(yOut[i], xOut[i] * 3.0)
-            << "Block push broke correspondence at index " << i;
+        EXPECT_DOUBLE_EQ(yOut[i], xOut[i] * 3.0) << "Block push broke correspondence at index " << i;
     }
 }
 
@@ -153,7 +148,7 @@ TEST_F(StereoHistoryBufferTest, MultipleBlockPushesPreserveCorrespondence) {
         for (int i = 0; i < blockSize; ++i) {
             int globalIdx = block * blockSize + i;
             xBlock[i] = static_cast<double>(globalIdx);
-            yBlock[i] = -static_cast<double>(globalIdx);  // Y = -X
+            yBlock[i] = -static_cast<double>(globalIdx); // Y = -X
         }
         buffer.pushSamples(xBlock.data(), yBlock.data(), blockSize);
     }
@@ -162,8 +157,7 @@ TEST_F(StereoHistoryBufferTest, MultipleBlockPushesPreserveCorrespondence) {
     buffer.getHistory(xOut.data(), yOut.data(), 512);
 
     for (int i = 0; i < 512; ++i) {
-        EXPECT_DOUBLE_EQ(yOut[i], -xOut[i])
-            << "Multi-block push broke correspondence at index " << i;
+        EXPECT_DOUBLE_EQ(yOut[i], -xOut[i]) << "Multi-block push broke correspondence at index " << i;
     }
 }
 
@@ -209,8 +203,7 @@ TEST_F(StereoHistoryBufferTest, ConcurrentWritesDontCorruptCorrespondence) {
     writer.join();
     reader.join();
 
-    EXPECT_EQ(correspondenceErrors.load(), 0)
-        << "Concurrent access caused X/Y desynchronization";
+    EXPECT_EQ(correspondenceErrors.load(), 0) << "Concurrent access caused X/Y desynchronization";
 }
 
 TEST_F(StereoHistoryBufferTest, HighFrequencyWritesPreserveCorrespondence) {
@@ -259,8 +252,7 @@ TEST_F(StereoHistoryBufferTest, HighFrequencyWritesPreserveCorrespondence) {
                     if (std::abs(x[i]) > 1e-10) {
                         double actualMultiplier = y[i] / x[i];
                         // Allow some tolerance for samples crossing block boundaries
-                        if (std::abs(actualMultiplier - multiplier) > 0.5 &&
-                            actualMultiplier > 0.5) {
+                        if (std::abs(actualMultiplier - multiplier) > 0.5 && actualMultiplier > 0.5) {
                             badSamples++;
                         }
                     }
@@ -279,8 +271,7 @@ TEST_F(StereoHistoryBufferTest, HighFrequencyWritesPreserveCorrespondence) {
     writer.join();
     reader.join();
 
-    EXPECT_EQ(correspondenceErrors.load(), 0)
-        << "High-frequency writes caused X/Y desynchronization";
+    EXPECT_EQ(correspondenceErrors.load(), 0) << "High-frequency writes caused X/Y desynchronization";
 }
 
 //==============================================================================
@@ -414,6 +405,5 @@ TEST_F(StereoHistoryBufferTest, SimulatedVisualizationReadNeverShowsPhaseShift) 
     audioThread.join();
     uiThread.join();
 
-    EXPECT_EQ(ellipseDetected.load(), 0)
-        << "Phase shift detected - X and Y became desynchronized!";
+    EXPECT_EQ(ellipseDetected.load(), 0) << "Phase shift detected - X and Y became desynchronized!";
 }

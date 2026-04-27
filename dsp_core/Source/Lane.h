@@ -58,7 +58,7 @@ struct Lane {
     std::array<std::atomic<double>, 2> modulationDepth{};
 
     LaneContentType contentType = LaneContentType::Harmonic;
-    int harmonicNumber = 0; // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
+    int harmonicNumber = 0;        // Which harmonic (0 = WT/base, 1+ = T_n). Only meaningful for Harmonic type.
     double harmonicStrength = 1.0; // Unnormalized scale [-1, 1] applied to the Chebyshev curve when written.
 
     // Mode-specific state (only populated for the relevant content type)
@@ -78,28 +78,19 @@ struct Lane {
     // memory_order_relaxed is correct: shifting is message-thread-only, and the
     // version counter increment after the shift provides the release fence.
     Lane(Lane&& other) noexcept
-        : curveData(std::move(other.curveData)),
-          amplitude(other.amplitude.load(std::memory_order_relaxed)),
+        : curveData(std::move(other.curveData)), amplitude(other.amplitude.load(std::memory_order_relaxed)),
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
-          modulationDepth{
-              std::atomic<double>{other.modulationDepth[0].load(std::memory_order_relaxed)},
-              std::atomic<double>{other.modulationDepth[1].load(std::memory_order_relaxed)}},
-          contentType(other.contentType),
-          harmonicNumber(other.harmonicNumber),
-          harmonicStrength(other.harmonicStrength),
-          splineAnchors(std::move(other.splineAnchors)),
-          equationText(std::move(other.equationText)),
-          presetSourcePath(std::move(other.presetSourcePath)),
-          customName(std::move(other.customName)),
-          oddSymmetryEnabled(other.oddSymmetryEnabled),
-          laneId(other.laneId) {}
+          modulationDepth{std::atomic<double>{other.modulationDepth[0].load(std::memory_order_relaxed)},
+                          std::atomic<double>{other.modulationDepth[1].load(std::memory_order_relaxed)}},
+          contentType(other.contentType), harmonicNumber(other.harmonicNumber),
+          harmonicStrength(other.harmonicStrength), splineAnchors(std::move(other.splineAnchors)),
+          equationText(std::move(other.equationText)), presetSourcePath(std::move(other.presetSourcePath)),
+          customName(std::move(other.customName)), oddSymmetryEnabled(other.oddSymmetryEnabled), laneId(other.laneId) {}
 
     Lane& operator=(Lane&& other) noexcept {
         curveData = std::move(other.curveData);
-        amplitude.store(other.amplitude.load(std::memory_order_relaxed),
-                        std::memory_order_relaxed);
-        blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
-                         std::memory_order_relaxed);
+        amplitude.store(other.amplitude.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        blendDepth.store(other.blendDepth.load(std::memory_order_relaxed), std::memory_order_relaxed);
         for (size_t s = 0; s < 2; ++s) {
             modulationDepth[s].store(other.modulationDepth[s].load(std::memory_order_relaxed),
                                      std::memory_order_relaxed);
@@ -118,29 +109,20 @@ struct Lane {
 
     // Copy constructor/assignment — needed for snapshot capture/restore
     Lane(const Lane& other)
-        : curveData(other.curveData),
-          amplitude(other.amplitude.load(std::memory_order_relaxed)),
+        : curveData(other.curveData), amplitude(other.amplitude.load(std::memory_order_relaxed)),
           blendDepth(other.blendDepth.load(std::memory_order_relaxed)),
-          modulationDepth{
-              std::atomic<double>{other.modulationDepth[0].load(std::memory_order_relaxed)},
-              std::atomic<double>{other.modulationDepth[1].load(std::memory_order_relaxed)}},
-          contentType(other.contentType),
-          harmonicNumber(other.harmonicNumber),
-          harmonicStrength(other.harmonicStrength),
-          splineAnchors(other.splineAnchors),
-          equationText(other.equationText),
-          presetSourcePath(other.presetSourcePath),
-          customName(other.customName),
-          oddSymmetryEnabled(other.oddSymmetryEnabled),
-          laneId(other.laneId) {}
+          modulationDepth{std::atomic<double>{other.modulationDepth[0].load(std::memory_order_relaxed)},
+                          std::atomic<double>{other.modulationDepth[1].load(std::memory_order_relaxed)}},
+          contentType(other.contentType), harmonicNumber(other.harmonicNumber),
+          harmonicStrength(other.harmonicStrength), splineAnchors(other.splineAnchors),
+          equationText(other.equationText), presetSourcePath(other.presetSourcePath), customName(other.customName),
+          oddSymmetryEnabled(other.oddSymmetryEnabled), laneId(other.laneId) {}
 
     Lane& operator=(const Lane& other) {
         if (this != &other) {
             curveData = other.curveData;
-            amplitude.store(other.amplitude.load(std::memory_order_relaxed),
-                            std::memory_order_relaxed);
-            blendDepth.store(other.blendDepth.load(std::memory_order_relaxed),
-                             std::memory_order_relaxed);
+            amplitude.store(other.amplitude.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            blendDepth.store(other.blendDepth.load(std::memory_order_relaxed), std::memory_order_relaxed);
             for (size_t s = 0; s < 2; ++s) {
                 modulationDepth[s].store(other.modulationDepth[s].load(std::memory_order_relaxed),
                                          std::memory_order_relaxed);

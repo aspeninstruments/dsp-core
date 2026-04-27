@@ -8,23 +8,17 @@ namespace {
 
 // Centripetal Catmull-Rom interpolation between p1 and p2 (p0, p3 are neighbors).
 // alpha=0.5 gives centripetal parameterization which avoids loops/cusps.
-GestureSample catmullRom(const GestureSample& p0,
-                         const GestureSample& p1,
-                         const GestureSample& p2,
-                         const GestureSample& p3,
-                         double t) {
+GestureSample catmullRom(const GestureSample& p0, const GestureSample& p1, const GestureSample& p2,
+                         const GestureSample& p3, double t) {
     const double t2 = t * t;
     const double t3 = t2 * t;
 
     auto interp = [&](double a, double b, double c, double d) {
-        return 0.5 * ((2.0 * b)
-                      + (-a + c) * t
-                      + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2
-                      + (-a + 3.0 * b - 3.0 * c + d) * t3);
+        return 0.5 *
+               ((2.0 * b) + (-a + c) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (-a + 3.0 * b - 3.0 * c + d) * t3);
     };
 
-    return {interp(p0.dx, p1.dx, p2.dx, p3.dx),
-            interp(p0.dy, p1.dy, p2.dy, p3.dy)};
+    return {interp(p0.dx, p1.dx, p2.dx, p3.dx), interp(p0.dy, p1.dy, p2.dy, p3.dy)};
 }
 
 double distance(const GestureSample& a, const GestureSample& b) {
@@ -35,8 +29,7 @@ double distance(const GestureSample& a, const GestureSample& b) {
 
 } // namespace
 
-AnchorMorphGesture GestureSmoother::smooth(const std::vector<GestureSample>& rawSamples,
-                                           int outputCount) {
+AnchorMorphGesture GestureSmoother::smooth(const std::vector<GestureSample>& rawSamples, int outputCount) {
     AnchorMorphGesture out;
 
     if (rawSamples.empty()) {

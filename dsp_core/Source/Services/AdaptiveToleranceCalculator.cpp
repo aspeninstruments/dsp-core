@@ -17,8 +17,7 @@ double AdaptiveToleranceCalculator::computeTolerance(double verticalRange, int c
     const double baselineTolerance = verticalRange * config.relativeErrorTarget;
 
     // Compute anchor density ratio (0.0 = no anchors, 1.0 = at capacity)
-    const double anchorRatio =
-        std::min(1.0, static_cast<double>(currentAnchors) / static_cast<double>(maxAnchors));
+    const double anchorRatio = std::min(1.0, static_cast<double>(currentAnchors) / static_cast<double>(maxAnchors));
 
     // Linear scaling: tolerance = baseline × (1 + anchorRatio × multiplier)
     // Relaxes tolerance as anchor count increases toward capacity

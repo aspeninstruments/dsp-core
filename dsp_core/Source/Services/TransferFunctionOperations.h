@@ -16,7 +16,6 @@ namespace dsp_core::Services {
  */
 class TransferFunctionOperations {
   public:
-
     /** Invert curve vertically: f(x) → -f(x) */
     static void invert(std::vector<double>& curveData);
 

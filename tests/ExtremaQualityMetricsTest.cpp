@@ -89,10 +89,10 @@ class ExtremaQualityMetrics : public ::testing::Test {
      * Compute average position error for a set of extrema
      */
     static double computeAveragePositionError(const std::vector<dsp_core::SplineAnchor>& anchors,
-                                       const std::vector<double>& extrema) {
+                                              const std::vector<double>& extrema) {
         if (extrema.empty()) {
             return 0.0;
-}
+        }
 
         double total_error = 0.0;
         for (double const extremum_x : extrema) {
@@ -124,7 +124,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic3_PositionError) {
     // Fit with current configuration (inherits from SplineFitConfig::tight())
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 3 fit failed";
 
@@ -152,7 +153,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic5_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 5 fit failed";
 
@@ -177,7 +179,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic10_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 10 fit failed";
 
@@ -202,7 +205,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic20_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 20 fit failed";
 
@@ -227,7 +231,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic40_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 40 fit failed";
 
@@ -254,7 +259,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic2_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 2 fit failed";
 
@@ -276,7 +282,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic4_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 4 fit failed";
 
@@ -298,7 +305,8 @@ TEST_F(ExtremaQualityMetrics, Harmonic6_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Harmonic 6 fit failed";
 
@@ -327,7 +335,8 @@ TEST_F(ExtremaQualityMetrics, Sigmoid5_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Sigmoid 5 fit failed";
 
@@ -350,7 +359,8 @@ TEST_F(ExtremaQualityMetrics, Sigmoid10_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Sigmoid 10 fit failed";
 
@@ -373,7 +383,8 @@ TEST_F(ExtremaQualityMetrics, Sigmoid15_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Sigmoid 15 fit failed";
 
@@ -401,7 +412,8 @@ TEST_F(ExtremaQualityMetrics, MixedXSin5X_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Mixed x*sin(5x) fit failed";
 
@@ -424,14 +436,14 @@ TEST_F(ExtremaQualityMetrics, MixedXSin10X_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Mixed x*sin(10x) fit failed";
 
     double const avg_error = computeAveragePositionError(result.anchors, extrema);
 
-    std::cout << "METRIC: MixedXSin10X_PositionError = " << std::fixed << std::setprecision(6) << avg_error
-              << '\n';
+    std::cout << "METRIC: MixedXSin10X_PositionError = " << std::fixed << std::setprecision(6) << avg_error << '\n';
 
     EXPECT_LT(avg_error, 0.1) << "Position error should be reasonable";
 }
@@ -455,14 +467,14 @@ TEST_F(ExtremaQualityMetrics, PolynomialX4_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Polynomial x^4-2x^2 fit failed";
 
     double const avg_error = computeAveragePositionError(result.anchors, extrema);
 
-    std::cout << "METRIC: PolynomialX4_PositionError = " << std::fixed << std::setprecision(6) << avg_error
-              << '\n';
+    std::cout << "METRIC: PolynomialX4_PositionError = " << std::fixed << std::setprecision(6) << avg_error << '\n';
 
     EXPECT_LT(avg_error, 0.1) << "Position error should be reasonable";
 }
@@ -482,14 +494,14 @@ TEST_F(ExtremaQualityMetrics, PolynomialX5_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Polynomial x^5-5x^3+4x fit failed";
 
     double const avg_error = computeAveragePositionError(result.anchors, extrema);
 
-    std::cout << "METRIC: PolynomialX5_PositionError = " << std::fixed << std::setprecision(6) << avg_error
-              << '\n';
+    std::cout << "METRIC: PolynomialX5_PositionError = " << std::fixed << std::setprecision(6) << avg_error << '\n';
 
     EXPECT_LT(avg_error, 0.1) << "Position error should be reasonable";
 }
@@ -532,7 +544,8 @@ TEST_F(ExtremaQualityMetrics, SuperpositionOddHarmonics_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Superposition odd harmonics fit failed";
 
@@ -561,14 +574,14 @@ TEST_F(ExtremaQualityMetrics, ExtremeTanh9_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Extreme tanh(9x) fit failed";
 
     double const avg_error = computeAveragePositionError(result.anchors, extrema);
 
-    std::cout << "METRIC: ExtremeTanh9_PositionError = " << std::fixed << std::setprecision(6) << avg_error
-              << '\n';
+    std::cout << "METRIC: ExtremeTanh9_PositionError = " << std::fixed << std::setprecision(6) << avg_error << '\n';
 
     EXPECT_LT(avg_error, 0.1) << "Position error should be reasonable";
 }
@@ -585,14 +598,14 @@ TEST_F(ExtremaQualityMetrics, ExtremeTanh15_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Extreme tanh(15x) fit failed";
 
     double const avg_error = computeAveragePositionError(result.anchors, extrema);
 
-    std::cout << "METRIC: ExtremeTanh15_PositionError = " << std::fixed << std::setprecision(6) << avg_error
-              << '\n';
+    std::cout << "METRIC: ExtremeTanh15_PositionError = " << std::fixed << std::setprecision(6) << avg_error << '\n';
 
     EXPECT_LT(avg_error, 0.1) << "Position error should be reasonable";
 }
@@ -609,14 +622,14 @@ TEST_F(ExtremaQualityMetrics, ExtremeTanh20_PositionError) {
     auto extrema = findNumericalExtrema(*ltf);
     auto config = dsp_core::SplineFitConfig::tight();
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Extreme tanh(20x) fit failed";
 
     double const avg_error = computeAveragePositionError(result.anchors, extrema);
 
-    std::cout << "METRIC: ExtremeTanh20_PositionError = " << std::fixed << std::setprecision(6) << avg_error
-              << '\n';
+    std::cout << "METRIC: ExtremeTanh20_PositionError = " << std::fixed << std::setprecision(6) << avg_error << '\n';
 
     EXPECT_LT(avg_error, 0.15) << "Position error should be reasonable (relaxed for extreme steepness)";
 }

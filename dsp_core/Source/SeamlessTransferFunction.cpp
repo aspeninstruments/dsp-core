@@ -61,11 +61,10 @@ class SeamlessTransferFunction::Impl {
 
     // Lane LUT for secondary visualizer overlay (selected lane's raw curve)
     std::array<double, VISUALIZER_LUT_SIZE> laneLUT{};
-    int selectedVisualizerLane = -1;  // -1 = no lane selected
+    int selectedVisualizerLane = -1; // -1 = no lane selected
 };
 
-SeamlessTransferFunction::SeamlessTransferFunction()
-    : pimpl(std::make_unique<Impl>()) {
+SeamlessTransferFunction::SeamlessTransferFunction() : pimpl(std::make_unique<Impl>()) {
     // laneMixer initialized to defaults in Impl constructor
     // audioEngine already initialized (identity LUTs)
     // Worker thread and poller NOT created yet (deferred to startSeamlessUpdates)
@@ -158,8 +157,7 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     jassert(pimpl->eventRenderer == nullptr);
 
     // Create event-driven renderer (writes directly to triple buffer, no worker thread)
-    pimpl->eventRenderer = std::make_unique<EventDrivenRenderer>(
-        pimpl->laneMixer, pimpl->audioEngine);
+    pimpl->eventRenderer = std::make_unique<EventDrivenRenderer>(pimpl->laneMixer, pimpl->audioEngine);
 
     // Create visualizer dispatcher so the version-changed callback can wake it
     pimpl->visualizerDispatcher = std::make_unique<VisualizerUpdateDispatcher>(pimpl->laneMixer);
@@ -212,9 +210,7 @@ void SeamlessTransferFunction::stopSeamlessUpdates() {
     }
 }
 
-
-const std::array<double, VISUALIZER_LUT_SIZE>&
-SeamlessTransferFunction::getVisualizerLUT() const {
+const std::array<double, VISUALIZER_LUT_SIZE>& SeamlessTransferFunction::getVisualizerLUT() const {
     return pimpl->visualizerLUT;
 }
 
@@ -236,8 +232,7 @@ void SeamlessTransferFunction::forceVisualizerUpdate() {
     }
 }
 
-const std::array<double, VISUALIZER_LUT_SIZE>&
-SeamlessTransferFunction::getLaneLUT() const {
+const std::array<double, VISUALIZER_LUT_SIZE>& SeamlessTransferFunction::getLaneLUT() const {
     return pimpl->laneLUT;
 }
 
@@ -313,8 +308,7 @@ void SeamlessTransferFunction::renderLUTImmediate() {
         const int nextIdx = std::min(idx + 1, TABLE_SIZE - 1);
         const double t = srcIdx - idx;
         pimpl->visualizerLUT[static_cast<size_t>(i)] =
-            sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
-            sumBuffer[static_cast<size_t>(nextIdx)] * t;
+            sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) + sumBuffer[static_cast<size_t>(nextIdx)] * t;
     }
 
     // Also update the lane LUT if a lane is selected
@@ -328,8 +322,7 @@ void SeamlessTransferFunction::renderLUTImmediate() {
             const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
             const double t = srcIdx - idx;
             pimpl->laneLUT[static_cast<size_t>(i)] =
-                lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
-                lane.curveData[static_cast<size_t>(nextIdx)] * t;
+                lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) + lane.curveData[static_cast<size_t>(nextIdx)] * t;
         }
     }
 

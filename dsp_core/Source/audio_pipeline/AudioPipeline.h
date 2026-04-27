@@ -37,36 +37,36 @@ enum class StageTag {
  */
 inline std::string stageTagToString(StageTag tag) {
     switch (tag) {
-        case StageTag::InputGain:
-            return "inputGain";
-        case StageTag::AudioInputWriter:
-            return "audioInputWriter";
-        case StageTag::SoftClip:
-            return "softClip";
-        case StageTag::Waveshaper:
-            return "waveshaper";
-        case StageTag::Oversampling:
-            return "oversampling";
-        case StageTag::DCBlock:
-            return "dcBlock";
-        case StageTag::OutputGain:
-            return "outputGain";
-        case StageTag::DryWetMix:
-            return "dryWetMix";
-        case StageTag::Hysteresis:
-            return "hysteresis";
-        case StageTag::Surge:
-            return "surge";
-        case StageTag::AutoSquash:
-            return "autoSquash";
-        case StageTag::AutoRestore:
-            return "autoRestore";
-        case StageTag::EnvelopeFollower:
-            return "envelopeFollower";
-        case StageTag::Modulator1:
-            return "modulator1";
-        case StageTag::Modulator2:
-            return "modulator2";
+    case StageTag::InputGain:
+        return "inputGain";
+    case StageTag::AudioInputWriter:
+        return "audioInputWriter";
+    case StageTag::SoftClip:
+        return "softClip";
+    case StageTag::Waveshaper:
+        return "waveshaper";
+    case StageTag::Oversampling:
+        return "oversampling";
+    case StageTag::DCBlock:
+        return "dcBlock";
+    case StageTag::OutputGain:
+        return "outputGain";
+    case StageTag::DryWetMix:
+        return "dryWetMix";
+    case StageTag::Hysteresis:
+        return "hysteresis";
+    case StageTag::Surge:
+        return "surge";
+    case StageTag::AutoSquash:
+        return "autoSquash";
+    case StageTag::AutoRestore:
+        return "autoRestore";
+    case StageTag::EnvelopeFollower:
+        return "envelopeFollower";
+    case StageTag::Modulator1:
+        return "modulator1";
+    case StageTag::Modulator2:
+        return "modulator2";
     }
     return "unknown";
 }

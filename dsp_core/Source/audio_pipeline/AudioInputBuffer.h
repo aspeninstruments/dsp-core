@@ -32,10 +32,7 @@ class AudioInputBuffer {
      * Example: 48000 samples * 2 channels = 96000 samples total
      */
     explicit AudioInputBuffer(int bufferSizePerChannel = 48000)
-        : bufferSize_(bufferSizePerChannel)
-        , fifo_(bufferSizePerChannel)
-        , numChannels_(0) {
-    }
+        : bufferSize_(bufferSizePerChannel), fifo_(bufferSizePerChannel), numChannels_(0) {}
 
     /**
      * Prepare buffer for a specific channel count.
@@ -135,10 +132,10 @@ class AudioInputBuffer {
     }
 
   private:
-    const int bufferSize_;           // Size per channel
-    juce::AbstractFifo fifo_;        // Lock-free read/write coordination
+    const int bufferSize_;    // Size per channel
+    juce::AbstractFifo fifo_; // Lock-free read/write coordination
     int numChannels_;
-    std::vector<std::vector<double>> channelBuffers_;  // One vector per channel
+    std::vector<std::vector<double>> channelBuffers_; // One vector per channel
 };
 
 } // namespace dsp_core::audio_pipeline

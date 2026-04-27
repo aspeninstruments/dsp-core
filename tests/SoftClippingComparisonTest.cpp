@@ -136,20 +136,20 @@ std::vector<double> computeMagnitudeSpectrum(const std::vector<double>& signal) 
  * Harmonic analysis results
  */
 struct HarmonicAnalysis {
-    double fundamentalMag = 0.0;   // Fundamental magnitude (linear)
-    double thd = 0.0;              // Total Harmonic Distortion (linear ratio)
-    double thdDB = 0.0;            // THD in dB
-    double oddTHD = 0.0;           // Odd-only THD
-    double evenTHD = 0.0;          // Even-only THD
-    double highFreqEnergy = 0.0;   // High-order harmonics (9th+) energy ratio
-    double highFreqEnergyDB = 0.0; // High-order energy in dB
+    double fundamentalMag = 0.0;      // Fundamental magnitude (linear)
+    double thd = 0.0;                 // Total Harmonic Distortion (linear ratio)
+    double thdDB = 0.0;               // THD in dB
+    double oddTHD = 0.0;              // Odd-only THD
+    double evenTHD = 0.0;             // Even-only THD
+    double highFreqEnergy = 0.0;      // High-order harmonics (9th+) energy ratio
+    double highFreqEnergyDB = 0.0;    // High-order energy in dB
     std::vector<double> harmonicMags; // Individual harmonic magnitudes (2nd through 15th)
 
     void print(const std::string& label) const {
         std::cout << std::fixed << std::setprecision(4);
         std::cout << "  " << label << ":\n";
-        std::cout << "    Fundamental: " << std::setprecision(6) << fundamentalMag << " ("
-                  << std::setprecision(2) << linearToDB(fundamentalMag) << " dBFS)\n";
+        std::cout << "    Fundamental: " << std::setprecision(6) << fundamentalMag << " (" << std::setprecision(2)
+                  << linearToDB(fundamentalMag) << " dBFS)\n";
         std::cout << "    THD: " << std::setprecision(6) << thd << " (" << std::setprecision(2) << thdDB << " dB)\n";
         std::cout << "    Odd THD: " << std::setprecision(6) << oddTHD << " (" << std::setprecision(2)
                   << linearToDB(oddTHD) << " dB)\n";
@@ -163,8 +163,7 @@ struct HarmonicAnalysis {
         for (size_t i = 0; i < std::min(harmonicMags.size(), size_t(10)); ++i) {
             if (i > 0)
                 std::cout << ", ";
-            std::cout << "H" << (i + 2) << "=" << std::setprecision(1)
-                      << linearToDB(harmonicMags[i] / fundamentalMag);
+            std::cout << "H" << (i + 2) << "=" << std::setprecision(1) << linearToDB(harmonicMags[i] / fundamentalMag);
         }
         std::cout << "\n";
     }
@@ -545,8 +544,9 @@ TEST_F(SoftClippingComparisonTest, MultiLevelComparison) {
 
     std::vector<double> levels = {-6.0, -3.0, -0.5, 0.0, 1.0, 3.0, 6.0};
 
-    std::cout << "\n" << std::setw(12) << "Level(dBFS)" << std::setw(15) << "Hard HF(dB)" << std::setw(15)
-              << "Soft HF(dB)" << std::setw(15) << "HF Benefit\n";
+    std::cout << "\n"
+              << std::setw(12) << "Level(dBFS)" << std::setw(15) << "Hard HF(dB)" << std::setw(15) << "Soft HF(dB)"
+              << std::setw(15) << "HF Benefit\n";
     std::cout << std::string(57, '-') << "\n";
 
     for (double level : levels) {

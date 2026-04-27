@@ -28,7 +28,8 @@ class SurgeStageTest : public ::testing::Test {
         juce::AudioBuffer<double> buf(numChannels, numSamples);
         for (int ch = 0; ch < numChannels; ++ch) {
             auto* data = buf.getWritePointer(ch);
-            for (int i = 0; i < numSamples; ++i) data[i] = x;
+            for (int i = 0; i < numSamples; ++i)
+                data[i] = x;
         }
         stage_->process(buf);
         return buf.getSample(0, numSamples - 1);
@@ -47,7 +48,8 @@ TEST_F(SurgeStageTest, InRangeIsIdentity) {
     for (double x : inputs) {
         for (int ch = 0; ch < 2; ++ch) {
             auto* d = buf.getWritePointer(ch);
-            for (int i = 0; i < 512; ++i) d[i] = x;
+            for (int i = 0; i < 512; ++i)
+                d[i] = x;
         }
         stage_->process(buf);
         for (int ch = 0; ch < 2; ++ch) {
@@ -68,13 +70,13 @@ TEST_F(SurgeStageTest, BypassIsPassthroughEvenForOvershoot) {
     juce::AudioBuffer<double> buf(2, 256);
     for (int ch = 0; ch < 2; ++ch) {
         auto* d = buf.getWritePointer(ch);
-        for (int i = 0; i < 256; ++i) d[i] = 1.5;
+        for (int i = 0; i < 256; ++i)
+            d[i] = 1.5;
     }
     stage_->process(buf);
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 256; ++i) {
-            EXPECT_EQ(buf.getSample(ch, i), 1.5)
-                << "bypassed stage must not alter samples; ch=" << ch << " i=" << i;
+            EXPECT_EQ(buf.getSample(ch, i), 1.5) << "bypassed stage must not alter samples; ch=" << ch << " i=" << i;
         }
     }
 }
@@ -95,33 +97,30 @@ TEST_F(SurgeStageTest, FreshOvershootReturnsLinearValue) {
 
     // With a fresh weight, w advances by one step (≈ 1 / (48000 * 0.001) = 1/48).
     // shapedWeight(1/48) ≈ 1 − (1 − (1/48)²)^8 ≈ 3.47e-3, so effective_x ≈ 1.4983.
-    EXPECT_NEAR(hit.getSample(0, 0), 1.5, 1e-2)
-        << "first overshoot sample should be ~linear (x)";
+    EXPECT_NEAR(hit.getSample(0, 0), 1.5, 1e-2) << "first overshoot sample should be ~linear (x)";
 }
 
 TEST_F(SurgeStageTest, SaturatedOvershootSettlesToClamp) {
     const int totalSamples = static_cast<int>(kSampleRate * 2.0 * kSurgeDurationSec);
     const double finalOutput = driveDC(1.5, totalSamples);
-    EXPECT_NEAR(finalOutput, 1.0, 1e-3)
-        << "after 2× surge window, output must decay to clamp value";
+    EXPECT_NEAR(finalOutput, 1.0, 1e-3) << "after 2× surge window, output must decay to clamp value";
 }
 
 TEST_F(SurgeStageTest, MidpointMatchesShapedBlendAndMonotonic) {
     const int halfSamples = static_cast<int>(kSampleRate * 0.5 * kSurgeDurationSec);
     juce::AudioBuffer<double> buf(1, halfSamples);
     auto* data = buf.getWritePointer(0);
-    for (int i = 0; i < halfSamples; ++i) data[i] = 1.5;
+    for (int i = 0; i < halfSamples; ++i)
+        data[i] = 1.5;
     stage_->process(buf);
 
     // At phase ~0.5, shapedWeight ≈ 1 − (0.75)^8 ≈ 0.8999, so blend ≈
     //   (1 − 0.9) · 1.5 + 0.9 · 1.0 = 0.15 + 0.9 = 1.05
-    EXPECT_NEAR(data[halfSamples - 1], 1.050, 1e-2)
-        << "half-window output should match Kumaraswamy-shaped blend";
+    EXPECT_NEAR(data[halfSamples - 1], 1.050, 1e-2) << "half-window output should match Kumaraswamy-shaped blend";
 
     // Monotonically non-increasing: weight grows → clamp weighting grows → output falls.
     for (int i = 1; i < halfSamples; ++i) {
-        EXPECT_LE(data[i], data[i - 1] + 1e-12)
-            << "trajectory must be monotonically decreasing; i=" << i;
+        EXPECT_LE(data[i], data[i - 1] + 1e-12) << "trajectory must be monotonically decreasing; i=" << i;
     }
 }
 
@@ -138,8 +137,7 @@ TEST_F(SurgeStageTest, DecaysBackDuringInRange) {
     juce::AudioBuffer<double> buf(1, 1);
     buf.setSample(0, 0, 1.5);
     stage_->process(buf);
-    EXPECT_NEAR(buf.getSample(0, 0), 1.5, 1e-2)
-        << "after in-range period, surge must re-trigger with ~linear output";
+    EXPECT_NEAR(buf.getSample(0, 0), 1.5, 1e-2) << "after in-range period, surge must re-trigger with ~linear output";
 }
 
 TEST_F(SurgeStageTest, PositiveAndNegativeRailsAreIndependent) {
@@ -152,8 +150,7 @@ TEST_F(SurgeStageTest, PositiveAndNegativeRailsAreIndependent) {
     juce::AudioBuffer<double> neg(1, 1);
     neg.setSample(0, 0, -1.5);
     stage_->process(neg);
-    EXPECT_NEAR(neg.getSample(0, 0), -1.5, 1e-2)
-        << "negative rail must surge independently of positive-rail history";
+    EXPECT_NEAR(neg.getSample(0, 0), -1.5, 1e-2) << "negative rail must surge independently of positive-rail history";
 }
 
 TEST_F(SurgeStageTest, StereoChannelsIndependent) {
@@ -172,11 +169,9 @@ TEST_F(SurgeStageTest, StereoChannelsIndependent) {
     hit.setSample(0, 0, 1.5);
     hit.setSample(1, 0, 1.5);
     stage_->process(hit);
-    EXPECT_NEAR(hit.getSample(1, 0), 1.5, 1e-2)
-        << "right channel must surge freshly; L-channel charge must not leak";
+    EXPECT_NEAR(hit.getSample(1, 0), 1.5, 1e-2) << "right channel must surge freshly; L-channel charge must not leak";
     // Left must remain clamped (another overshoot at saturation stays clamped).
-    EXPECT_NEAR(hit.getSample(0, 0), 1.0, 5e-3)
-        << "left channel should remain at clamp";
+    EXPECT_NEAR(hit.getSample(0, 0), 1.0, 5e-3) << "left channel should remain at clamp";
 }
 
 // =============================================================================
@@ -193,7 +188,8 @@ TEST_F(SurgeStageTest, DurationTracksWallTimeAcrossSampleRates) {
         const int samples = static_cast<int>(sr * 2.0 * kSurgeDurationSec);
         juce::AudioBuffer<double> buf(1, samples);
         auto* d = buf.getWritePointer(0);
-        for (int i = 0; i < samples; ++i) d[i] = 1.5;
+        for (int i = 0; i < samples; ++i)
+            d[i] = 1.5;
         stage->process(buf);
 
         EXPECT_NEAR(d[samples - 1], 1.0, 1e-3)
@@ -218,8 +214,7 @@ TEST_F(SurgeStageTest, PrepareToPlayReconfiguresStep) {
     stage_->setSurgeDurationSec(kSurgeDurationSec);
     stage_->reset();
     const double at96k = driveDC(1.5, samples);
-    EXPECT_GT(at96k, at48k + 0.02)
-        << "at 96kHz, step should be smaller, so less saturation after 48 samples";
+    EXPECT_GT(at96k, at48k + 0.02) << "at 96kHz, step should be smaller, so less saturation after 48 samples";
     EXPECT_LT(at96k, 1.5);
 }
 
@@ -238,8 +233,7 @@ TEST_F(SurgeStageTest, ResetClearsChargedWeights) {
     juce::AudioBuffer<double> buf(1, 1);
     buf.setSample(0, 0, 1.5);
     stage_->process(buf);
-    EXPECT_NEAR(buf.getSample(0, 0), 1.5, 1e-2)
-        << "reset() must clear surge weights";
+    EXPECT_NEAR(buf.getSample(0, 0), 1.5, 1e-2) << "reset() must clear surge weights";
 }
 
 // =============================================================================
@@ -249,7 +243,8 @@ TEST_F(SurgeStageTest, ResetClearsChargedWeights) {
 TEST_F(SurgeStageTest, FiniteOutputForLargeInputs) {
     juce::AudioBuffer<double> buf(1, 256);
     auto* d = buf.getWritePointer(0);
-    for (int i = 0; i < 256; ++i) d[i] = 1e6; // absurdly large
+    for (int i = 0; i < 256; ++i)
+        d[i] = 1e6; // absurdly large
     stage_->process(buf);
     for (int i = 0; i < 256; ++i) {
         EXPECT_TRUE(std::isfinite(d[i])) << "i=" << i;
@@ -303,7 +298,8 @@ TEST(SurgeHysteresisIntegration, DCOvershootShowsTransientHumpNotFlatTop) {
     const int stepSamples = static_cast<int>(sr * 0.005);
     juce::AudioBuffer<double> buf(1, stepSamples);
     auto* data = buf.getWritePointer(0);
-    for (int i = 0; i < stepSamples; ++i) data[i] = 1.5;
+    for (int i = 0; i < stepSamples; ++i)
+        data[i] = 1.5;
 
     surge.process(buf);
     hyst.process(buf);
@@ -317,7 +313,8 @@ TEST(SurgeHysteresisIntegration, DCOvershootShowsTransientHumpNotFlatTop) {
 
     const int ssStart = stepSamples - static_cast<int>(sr * 0.001);
     double ssSum = 0.0;
-    for (int i = ssStart; i < stepSamples; ++i) ssSum += data[i];
+    for (int i = ssStart; i < stepSamples; ++i)
+        ssSum += data[i];
     const double ss = ssSum / static_cast<double>(stepSamples - ssStart);
 
     // All outputs finite.
@@ -328,8 +325,7 @@ TEST(SurgeHysteresisIntegration, DCOvershootShowsTransientHumpNotFlatTop) {
     // The hump must rise meaningfully above the settled level. The exact margin
     // depends on the Langevin slope at H∈[1.0, 1.5]; empirically ≥ 5% of full
     // scale is a clear signal that dM/dt responded to the surge ramp.
-    EXPECT_GT(humpPeak, ss + 0.05)
-        << "surge+hysteresis should show a transient hump above steady state. "
-        << "peak=" << humpPeak << " ss=" << ss
-        << " — if these are ~equal, we have flat-top, which is the pre-migration bug.";
+    EXPECT_GT(humpPeak, ss + 0.05) << "surge+hysteresis should show a transient hump above steady state. "
+                                   << "peak=" << humpPeak << " ss=" << ss
+                                   << " — if these are ~equal, we have flat-top, which is the pre-migration bug.";
 }

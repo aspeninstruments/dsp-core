@@ -88,21 +88,19 @@ TEST_F(LaneMixerTest, DefaultInitialization_Lane0IsH1Identity) {
 TEST_F(LaneMixerTest, DefaultInitialization_Lanes1Through9AreOddHarmonics) {
     // Harmonic-foldback factory layout: lanes 1..9 = H3..H19 with halving blendDepth.
     const std::array<int, 9> expectedHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
-    const std::array<double, 9> expectedDepths = {1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625};
+    const std::array<double, 9> expectedDepths = {1.0,     0.5,      0.25,      0.125,     0.0625,
+                                                  0.03125, 0.015625, 0.0078125, 0.00390625};
 
     for (int laneIdx = 1; laneIdx <= 9; ++laneIdx) {
         const auto& lane = mixer->getLane(laneIdx);
         const int expectedN = expectedHarmonics[laneIdx - 1];
         EXPECT_EQ(lane.contentType, dsp_core::LaneContentType::Harmonic)
             << "Lane " << laneIdx << " should be Harmonic type";
-        EXPECT_EQ(lane.harmonicNumber, expectedN)
-            << "Lane " << laneIdx << " should have harmonicNumber=" << expectedN;
-        EXPECT_DOUBLE_EQ(lane.amplitude, 0.0)
-            << "Lane " << laneIdx << " should have amplitude=0.0";
+        EXPECT_EQ(lane.harmonicNumber, expectedN) << "Lane " << laneIdx << " should have harmonicNumber=" << expectedN;
+        EXPECT_DOUBLE_EQ(lane.amplitude, 0.0) << "Lane " << laneIdx << " should have amplitude=0.0";
         EXPECT_DOUBLE_EQ(lane.blendDepth, expectedDepths[laneIdx - 1])
             << "Lane " << laneIdx << " should have halving blendDepth";
-        EXPECT_TRUE(lane.oddSymmetryEnabled)
-            << "Lane " << laneIdx << " should have oddSymmetryEnabled";
+        EXPECT_TRUE(lane.oddSymmetryEnabled) << "Lane " << laneIdx << " should have oddSymmetryEnabled";
         EXPECT_EQ(static_cast<int>(lane.curveData.size()), dsp_core::LaneMixer::TABLE_SIZE)
             << "Lane " << laneIdx << " should have TABLE_SIZE curve data";
     }
@@ -112,8 +110,7 @@ TEST_F(LaneMixerTest, DefaultInitialization_Lanes1Through9AreOddHarmonics) {
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
         const double x = std::clamp(mixer->normalizeIndex(i), -1.0, 1.0);
         const double expected = std::sin(3.0 * std::asin(x));
-        EXPECT_NEAR(lane1.curveData[static_cast<size_t>(i)], expected, 1e-8)
-            << "Lane 1 (H3) at index " << i;
+        EXPECT_NEAR(lane1.curveData[static_cast<size_t>(i)], expected, 1e-8) << "Lane 1 (H3) at index " << i;
     }
 
     // Spot check: Lane 4 = H9, sin(9*asin(x))
@@ -121,16 +118,14 @@ TEST_F(LaneMixerTest, DefaultInitialization_Lanes1Through9AreOddHarmonics) {
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 2000) {
         const double x = std::clamp(mixer->normalizeIndex(i), -1.0, 1.0);
         const double expected = std::sin(9.0 * std::asin(x));
-        EXPECT_NEAR(lane4.curveData[static_cast<size_t>(i)], expected, 1e-8)
-            << "Lane 4 (H9) at index " << i;
+        EXPECT_NEAR(lane4.curveData[static_cast<size_t>(i)], expected, 1e-8) << "Lane 4 (H9) at index " << i;
     }
 }
 
 TEST_F(LaneMixerTest, DefaultInitialization_OnlyLane0HasNonZeroAmplitude) {
     EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(0), 1.0); // H1
     for (int i = 1; i < mixer->getNumLanes(); ++i) {
-        EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(i), 0.0)
-            << "Lane " << i << " should have amplitude 0.0";
+        EXPECT_DOUBLE_EQ(mixer->getLaneAmplitude(i), 0.0) << "Lane " << i << " should have amplitude 0.0";
     }
 }
 
@@ -152,8 +147,7 @@ TEST_F(LaneMixerTest, ComputeSum_SingleLaneFullAmplitude_EqualsLaneCurve) {
 
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
         const double x = mixer->normalizeIndex(i);
-        EXPECT_NEAR(sum[static_cast<size_t>(i)], x, 1e-10)
-            << "Sum should equal x (identity) at index " << i;
+        EXPECT_NEAR(sum[static_cast<size_t>(i)], x, 1e-10) << "Sum should equal x (identity) at index " << i;
     }
 }
 
@@ -173,15 +167,14 @@ TEST_F(LaneMixerTest, ComputeSum_TwoLanes_PreservesRelativeProportions) {
     std::vector<double> rawSum(dsp_core::LaneMixer::TABLE_SIZE);
     double rawMaxAbs = 0.0;
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
-        rawSum[static_cast<size_t>(i)] = 0.5 * lane1.curveData[static_cast<size_t>(i)] +
-                                          0.3 * lane2.curveData[static_cast<size_t>(i)];
+        rawSum[static_cast<size_t>(i)] =
+            0.5 * lane1.curveData[static_cast<size_t>(i)] + 0.3 * lane2.curveData[static_cast<size_t>(i)];
         rawMaxAbs = std::max(rawMaxAbs, std::abs(rawSum[static_cast<size_t>(i)]));
     }
 
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
         const double expected = rawSum[static_cast<size_t>(i)] / rawMaxAbs;
-        EXPECT_NEAR(sum[static_cast<size_t>(i)], expected, 1e-10)
-            << "Normalized two-lane sum at index " << i;
+        EXPECT_NEAR(sum[static_cast<size_t>(i)], expected, 1e-10) << "Normalized two-lane sum at index " << i;
     }
 }
 
@@ -329,9 +322,9 @@ TEST_F(LaneMixerTest, BackwardCompatibility_DefaultSumMatchesLTFDefault) {
 TEST_F(LaneMixerTest, MixingMultipleLanes_ProducesCorrectNormalizedSum) {
     // Set up: Lane 0 = H1 at 0.8, Lane 1 = H3 at 0.3, Lane 2 = H5 at 0.2
     blankMixer(*mixer);
-    mixer->setLaneAmplitude(0, 0.8);  // H1
-    mixer->setLaneAmplitude(1, 0.3);  // H3
-    mixer->setLaneAmplitude(2, 0.2);  // H5
+    mixer->setLaneAmplitude(0, 0.8); // H1
+    mixer->setLaneAmplitude(1, 0.3); // H3
+    mixer->setLaneAmplitude(2, 0.2); // H5
 
     auto mixerSum = computeSum();
 
@@ -341,10 +334,8 @@ TEST_F(LaneMixerTest, MixingMultipleLanes_ProducesCorrectNormalizedSum) {
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
         const double x = mixer->normalizeIndex(i);
         const double h1Contrib = 0.8 * x;
-        const double h3Contrib =
-            0.3 * std::sin(3.0 * std::asin(std::clamp(x, -1.0, 1.0)));
-        const double h5Contrib =
-            0.2 * std::sin(5.0 * std::asin(std::clamp(x, -1.0, 1.0)));
+        const double h3Contrib = 0.3 * std::sin(3.0 * std::asin(std::clamp(x, -1.0, 1.0)));
+        const double h5Contrib = 0.2 * std::sin(5.0 * std::asin(std::clamp(x, -1.0, 1.0)));
         rawSum[static_cast<size_t>(i)] = h1Contrib + h3Contrib + h5Contrib;
         rawMaxAbs = std::max(rawMaxAbs, std::abs(rawSum[static_cast<size_t>(i)]));
     }
@@ -387,36 +378,28 @@ TEST_F(LaneMixerTest, Serialization_ToValueTree_RoundTrips) {
         const auto& original = mixer->getLane(n);
         const auto& restored = mixer2.getLane(n);
 
-        EXPECT_DOUBLE_EQ(original.amplitude, restored.amplitude)
-            << "Lane " << n << " amplitude mismatch";
-        EXPECT_EQ(original.contentType, restored.contentType)
-            << "Lane " << n << " contentType mismatch";
-        EXPECT_EQ(original.harmonicNumber, restored.harmonicNumber)
-            << "Lane " << n << " harmonicNumber mismatch";
+        EXPECT_DOUBLE_EQ(original.amplitude, restored.amplitude) << "Lane " << n << " amplitude mismatch";
+        EXPECT_EQ(original.contentType, restored.contentType) << "Lane " << n << " contentType mismatch";
+        EXPECT_EQ(original.harmonicNumber, restored.harmonicNumber) << "Lane " << n << " harmonicNumber mismatch";
 
         // Verify curve data matches
-        ASSERT_EQ(original.curveData.size(), restored.curveData.size())
-            << "Lane " << n << " curveData size mismatch";
+        ASSERT_EQ(original.curveData.size(), restored.curveData.size()) << "Lane " << n << " curveData size mismatch";
         for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
-            EXPECT_NEAR(original.curveData[static_cast<size_t>(i)],
-                        restored.curveData[static_cast<size_t>(i)], 1e-12)
+            EXPECT_NEAR(original.curveData[static_cast<size_t>(i)], restored.curveData[static_cast<size_t>(i)], 1e-12)
                 << "Lane " << n << " curveData mismatch at index " << i;
         }
     }
-
 }
 
 TEST_F(LaneMixerTest, Serialization_SplineAnchors_RoundTrip) {
     // Set up a lane with spline anchors
     auto& lane = const_cast<dsp_core::Lane&>(mixer->getLane(3));
     lane.contentType = dsp_core::LaneContentType::Spline;
-    lane.splineAnchors = {
-        {-1.0, -1.0, false, 0.0},
-        {-0.5, 0.2, true, 1.5},
-        {0.0, 0.0, false, 0.0},
-        {0.5, -0.3, false, 0.0},
-        {1.0, 1.0, false, 0.0}
-    };
+    lane.splineAnchors = {{-1.0, -1.0, false, 0.0},
+                          {-0.5, 0.2, true, 1.5},
+                          {0.0, 0.0, false, 0.0},
+                          {0.5, -0.3, false, 0.0},
+                          {1.0, 1.0, false, 0.0}};
 
     auto vt = mixer->toValueTree();
     dsp_core::LaneMixer mixer2;
@@ -487,8 +470,7 @@ TEST_F(LaneMixerTest, NormalizeIndex_MatchesLTF) {
     dsp_core::LayeredTransferFunction ltf(dsp_core::LaneMixer::TABLE_SIZE, -1.0, 1.0);
 
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
-        EXPECT_DOUBLE_EQ(mixer->normalizeIndex(i), ltf.normalizeIndex(i))
-            << "normalizeIndex mismatch at " << i;
+        EXPECT_DOUBLE_EQ(mixer->normalizeIndex(i), ltf.normalizeIndex(i)) << "normalizeIndex mismatch at " << i;
     }
 }
 
@@ -628,9 +610,7 @@ TEST_F(LaneMixerScanTest, ComputeScan_SingleLane_EqualsLaneCurve) {
     // Lane 0 curve is identity (x), which is already normalized
     const auto& lane0 = mixer->getLane(0);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)],
-                    lane0.curveData[static_cast<size_t>(i)],
-                    1e-10) << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], lane0.curveData[static_cast<size_t>(i)], 1e-10) << "at index " << i;
     }
 }
 
@@ -643,9 +623,7 @@ TEST_F(LaneMixerScanTest, ComputeScan_TwoLanes_Position0_EqualsLane0) {
     // Lane 0 is identity (peak=1), so output = lane 0 curve
     const auto& lane0 = mixer->getLane(0);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)],
-                    lane0.curveData[static_cast<size_t>(i)],
-                    1e-10) << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], lane0.curveData[static_cast<size_t>(i)], 1e-10) << "at index " << i;
     }
 }
 
@@ -658,9 +636,7 @@ TEST_F(LaneMixerScanTest, ComputeScan_TwoLanes_Position1_EqualsLane1Normalized) 
     // So result should equal lane 0 curve (identity)
     const auto& lane0 = mixer->getLane(0);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)],
-                    lane0.curveData[static_cast<size_t>(i)],
-                    1e-10) << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], lane0.curveData[static_cast<size_t>(i)], 1e-10) << "at index " << i;
     }
 }
 
@@ -673,9 +649,7 @@ TEST_F(LaneMixerScanTest, ComputeScan_TwoLanes_Position50_Blends) {
     // Normalized by max(|1.5x|) = 1.5 → output = x (identity)
     const auto& lane0 = mixer->getLane(0);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)],
-                    lane0.curveData[static_cast<size_t>(i)],
-                    1e-10) << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], lane0.curveData[static_cast<size_t>(i)], 1e-10) << "at index " << i;
     }
 }
 
@@ -687,9 +661,7 @@ TEST_F(LaneMixerScanTest, ComputeScan_ThreeLanes_Position50_EqualsLane1) {
     // 3 lanes: f = 0.5 * 2 = 1.0 → exactly lane 1 (2x), normalized → identity
     const auto& lane0 = mixer->getLane(0);
     for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)],
-                    lane0.curveData[static_cast<size_t>(i)],
-                    1e-10) << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], lane0.curveData[static_cast<size_t>(i)], 1e-10) << "at index " << i;
     }
 }
 
@@ -763,8 +735,7 @@ TEST_F(LaneMixerSeriesTest, GainMappingIsUnityAtHalf) {
     setupIdentityChain(1);
     auto result = computeSeries();
     for (int i = 0; i < kSize; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10)
-            << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10) << "at index " << i;
     }
 }
 
@@ -777,8 +748,7 @@ TEST_F(LaneMixerSeriesTest, GainAtZeroIsQuarter) {
     // Normalization pushes it back to identity — so the shape is identity, but max is 1.0.
     EXPECT_NEAR(maxAbs(result), 1.0, 1e-10);
     for (int i = 0; i < kSize; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10)
-            << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10) << "at index " << i;
     }
 }
 
@@ -808,8 +778,7 @@ TEST_F(LaneMixerSeriesTest, EmptyMixerReturnsIdentity) {
     setupIdentityChain(3);
     auto result = computeSeries();
     for (int i = 0; i < kSize; ++i) {
-        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10)
-            << "at index " << i;
+        EXPECT_NEAR(result[static_cast<size_t>(i)], mixer->normalizeIndex(i), 1e-10) << "at index " << i;
     }
 }
 
@@ -844,8 +813,7 @@ TEST_F(LaneMixerSeriesTest, DepthModulatesGainViaMorph) {
     const auto direct = computeSeries();
 
     for (int i = 0; i < kSize; ++i) {
-        EXPECT_NEAR(modulated[static_cast<size_t>(i)], direct[static_cast<size_t>(i)], 1e-10)
-            << "at index " << i;
+        EXPECT_NEAR(modulated[static_cast<size_t>(i)], direct[static_cast<size_t>(i)], 1e-10) << "at index " << i;
     }
 }
 
@@ -872,8 +840,7 @@ TEST_F(LaneMixerSeriesTest, ChainComposesFunctionally) {
     // Expected: normalize lane1's curve to max|y|=1. Since max|x*|x|| = 1 at x=±1, no scaling.
     for (int j = 0; j < kSize; ++j) {
         const double x = mixer->normalizeIndex(j);
-        EXPECT_NEAR(result[static_cast<size_t>(j)], x * std::abs(x), 1e-10)
-            << "at index " << j;
+        EXPECT_NEAR(result[static_cast<size_t>(j)], x * std::abs(x), 1e-10) << "at index " << j;
     }
 }
 
@@ -1237,8 +1204,8 @@ TEST_F(LaneMixerTest, ComputeSum_BlendAmountZero_BehavesLikeBaseAmplitude) {
     // Set some non-zero depths but leave blendAmount=0 — depths should be inert.
     mixer->setLaneAmplitude(1, 0.8);
     mixer->setLaneAmplitude(2, 0.3);
-    mixer->setLaneBlendDepth(1, 0.7);   // would normally pull lane 1 up
-    mixer->setLaneBlendDepth(2, -0.5);  // would normally pull lane 2 down
+    mixer->setLaneBlendDepth(1, 0.7);  // would normally pull lane 1 up
+    mixer->setLaneBlendDepth(2, -0.5); // would normally pull lane 2 down
     // blendAmount is still 0, so depths should have no effect.
     const auto withDepths = computeSum();
 
@@ -1309,8 +1276,8 @@ TEST_F(LaneMixerTest, ComputeSum_BaseAmplitudeZero_DepthStillContributes) {
     // Regression guard for the old isActive() skip bug. Lane with amp=0 used to be
     // dropped before depth was even consulted. Now it must contribute.
     blankMixer(*mixer);
-    mixer->setLaneAmplitude(0, 0.0);   // zero base → would have been skipped before
-    mixer->setLaneBlendDepth(0, 0.5);  // but depth × macro = 0.5 effective
+    mixer->setLaneAmplitude(0, 0.0);  // zero base → would have been skipped before
+    mixer->setLaneBlendDepth(0, 0.5); // but depth × macro = 0.5 effective
     mixer->setBlendAmount(1.0);
     const auto buffer = computeSum();
     // Lane 0 is identity (H1) — sum should be non-zero (±1 after normalize).
@@ -1497,12 +1464,10 @@ TEST_F(LaneMixerTest, LaneModulationDepth_SlotsAreIndependent) {
     blankMixer(*mixer);
     mixer->setLaneModulationDepth(3, 0, 0.7);
     EXPECT_DOUBLE_EQ(mixer->getLaneModulationDepth(3, 0), 0.7);
-    EXPECT_DOUBLE_EQ(mixer->getLaneModulationDepth(3, 1), 0.0)
-        << "Slot 1 must not be affected by writes to slot 0";
+    EXPECT_DOUBLE_EQ(mixer->getLaneModulationDepth(3, 1), 0.0) << "Slot 1 must not be affected by writes to slot 0";
 
     mixer->setLaneModulationDepth(3, 1, -0.4);
-    EXPECT_DOUBLE_EQ(mixer->getLaneModulationDepth(3, 0), 0.7)
-        << "Slot 0 must not be affected by writes to slot 1";
+    EXPECT_DOUBLE_EQ(mixer->getLaneModulationDepth(3, 0), 0.7) << "Slot 0 must not be affected by writes to slot 1";
     EXPECT_DOUBLE_EQ(mixer->getLaneModulationDepth(3, 1), -0.4);
 }
 
@@ -1774,10 +1739,8 @@ TEST_F(LaneMixerTest, Serialization_V6_LegacyModulationDepthLoadsIntoSlot1) {
     dsp_core::LaneMixer restored;
     restored.fromValueTree(v6);
 
-    EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(0, 0), 0.6)
-        << "v6 legacy modulationDepth must load into slot 0";
-    EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(0, 1), 0.0)
-        << "Slot 1 must default to 0 for v6 presets";
+    EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(0, 0), 0.6) << "v6 legacy modulationDepth must load into slot 0";
+    EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(0, 1), 0.0) << "Slot 1 must default to 0 for v6 presets";
     EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(1, 0), -0.3);
     EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(1, 1), 0.0);
 }

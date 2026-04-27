@@ -2,11 +2,9 @@
 
 namespace dsp_core::audio_pipeline {
 
-WaveshapingStage::WaveshapingStage(dsp_core::SeamlessTransferFunction& tf)
-    : seamlessTransferFunction_(&tf) {}
+WaveshapingStage::WaveshapingStage(dsp_core::SeamlessTransferFunction& tf) : seamlessTransferFunction_(&tf) {}
 
-WaveshapingStage::WaveshapingStage(dsp_core::LayeredTransferFunction& ltf)
-    : layeredTransferFunction_(&ltf) {}
+WaveshapingStage::WaveshapingStage(dsp_core::LayeredTransferFunction& ltf) : layeredTransferFunction_(&ltf) {}
 
 void WaveshapingStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // Forward to the shared transfer function at this (possibly oversampled) rate

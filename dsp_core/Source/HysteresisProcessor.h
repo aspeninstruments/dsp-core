@@ -53,9 +53,9 @@ class HysteresisProcessor {
     // Production: use SeamlessTransferFunction pointer (thread-safe via triple buffer)
     // void setTransferFunction(const SeamlessTransferFunction* tf);
 
-    void setDrive(double drive);      // 0-1
-    void setSaturation(double sat);   // 0-1
-    void setWidth(double width);      // 0-1
+    void setDrive(double drive);    // 0-1
+    void setSaturation(double sat); // 0-1
+    void setWidth(double width);    // 0-1
 
     /**
      * Set fixed operating point for audio-range signals.
@@ -87,7 +87,7 @@ class HysteresisProcessor {
     double M_n1_ = 0.0;      // previous magnetization
     double H_n1_ = 0.0;      // previous field
     double H_d_n1_ = 0.0;    // previous field derivative (legacy, kept for reset/tests)
-    double lastDelta_ = 1.0;  // branch direction with deadband hold
+    double lastDelta_ = 1.0; // branch direction with deadband hold
 
     // Parameters (normalized, from ChowTape)
     double M_s_ = 1.0;
@@ -120,7 +120,7 @@ class HysteresisProcessor {
 
     // Safety limits
     static constexpr double upperLimit_ = 20.0;
-    static constexpr double outputLimit_ = 15.848931924611134;  // +24 dB, matches linear-extrapolation path
+    static constexpr double outputLimit_ = 15.848931924611134; // +24 dB, matches linear-extrapolation path
     static constexpr double inputLimit_ = 10.0;
     static constexpr double hdLimit_ = 1e6;
     int consecutiveResets_ = 0;
@@ -129,7 +129,7 @@ class HysteresisProcessor {
     // Internal DC blocker
     double dcX_n1_ = 0.0;
     double dcY_n1_ = 0.0;
-    double dcR_ = 0.995;  // Updated dynamically in prepareToPlay()
+    double dcR_ = 0.995; // Updated dynamically in prepareToPlay()
     double dcBlock(double x);
 
     // Operating point override (-1 = use auto scale a*4, >= 0 = fixed)
@@ -139,8 +139,8 @@ class HysteresisProcessor {
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedC_{0.17};
 
     // Derived parameter cache
-    double M_s_oa_ = 0.0;      // M_s / a
-    double M_s_oa_tc_ = 0.0;   // c * M_s / a
+    double M_s_oa_ = 0.0;    // M_s / a
+    double M_s_oa_tc_ = 0.0; // c * M_s / a
 
     void updateDerivedParams();
     double computeHDerivative(double H) const;

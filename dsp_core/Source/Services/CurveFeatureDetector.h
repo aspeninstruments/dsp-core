@@ -97,8 +97,7 @@ class CurveFeatureDetector {
      * @param config Configuration for detection and filtering (optional)
      * @return Feature indices (table indices, not normalized coordinates)
      */
-    static FeatureResult detectFeatures(const double* curveData, int tableSize,
-                                        double minValue, double maxValue,
+    static FeatureResult detectFeatures(const double* curveData, int tableSize, double minValue, double maxValue,
                                         const FeatureDetectionConfig& config = FeatureDetectionConfig{});
 
   private:
@@ -122,9 +121,8 @@ class CurveFeatureDetector {
 
     // Helper methods to reduce cognitive complexity
     static void detectLocalExtrema(const double* curveData, int tableSize, double minValue, double maxValue,
-                                   const FeatureDetectionConfig& config,
-                                   double amplitudeThreshold, double verticalCenter, FeatureResult& result,
-                                   std::vector<Feature>& features);
+                                   const FeatureDetectionConfig& config, double amplitudeThreshold,
+                                   double verticalCenter, FeatureResult& result, std::vector<Feature>& features);
 
     static void prioritizeFeatures(const FeatureDetectionConfig& config, int tableSize, FeatureResult& result,
                                    std::vector<Feature>& features);

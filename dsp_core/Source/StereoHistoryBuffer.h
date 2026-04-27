@@ -80,7 +80,7 @@ class StereoHistoryBuffer {
 
     std::vector<double> xBuffer_;
     std::vector<double> yBuffer_;
-    std::atomic<uint64_t> sequence_{0};  // Seqlock: odd = write in progress, even = stable
+    std::atomic<uint64_t> sequence_{0}; // Seqlock: odd = write in progress, even = stable
     std::atomic<int> writePos_{0};
     std::atomic<int64_t> totalSamplesWritten_{0};
     int size_;

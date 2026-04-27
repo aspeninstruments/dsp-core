@@ -40,8 +40,8 @@ namespace dsp_core {
 class SeamlessTransferFunction {
   public:
     // Constants (hardcoded for performance - not configurable)
-    static constexpr int TABLE_SIZE = 16384;          // DSP LUT size (audio thread)
-    static constexpr int VISUALIZER_LUT_SIZE = 1024;  // Visualizer LUT size (UI thread)
+    static constexpr int TABLE_SIZE = 16384;         // DSP LUT size (audio thread)
+    static constexpr int VISUALIZER_LUT_SIZE = 1024; // Visualizer LUT size (UI thread)
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
 

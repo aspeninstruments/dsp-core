@@ -16,9 +16,9 @@ namespace dsp_core {
  * Spline   → Direct spline evaluation (bypasses base+harmonics)
  */
 enum class RenderingMode {
-    Paint,      // Direct base layer output (no normalization)
-    Harmonic,   // Base + harmonics with normalization
-    Spline      // Direct spline evaluation
+    Paint,    // Direct base layer output (no normalization)
+    Harmonic, // Base + harmonics with normalization
+    Spline    // Direct spline evaluation
 };
 
 /**

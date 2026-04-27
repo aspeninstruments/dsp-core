@@ -165,8 +165,7 @@ TEST_F(AutoGainStageTest, SteadyState_DC_ConvergesToTarget) {
     const size_t tailStart = in.size() - static_cast<size_t>(sampleRate_ * 0.1);
     const double tailPeak = peakAbs(trace.internalSignal, tailStart);
 
-    EXPECT_NEAR(tailPeak, state_.k.targetPeak, 0.02)
-        << "Internal signal should converge to target peak";
+    EXPECT_NEAR(tailPeak, state_.k.targetPeak, 0.02) << "Internal signal should converge to target peak";
 }
 
 // =============================================================================
@@ -252,8 +251,8 @@ TEST_F(AutoGainStageTest, StepUp_InternalOvershootBounded) {
     // 100 ms at -40 dB (to seed envelope), then 500 ms at 0 dB.
     const int preSamples = static_cast<int>(sampleRate_ * 0.1);
     const int postSamples = static_cast<int>(sampleRate_ * 0.5);
-    const double quietAmp = 0.01;    // -40 dB
-    const double loudAmp = 1.0;      // 0 dB
+    const double quietAmp = 0.01; // -40 dB
+    const double loudAmp = 1.0;   // 0 dB
 
     std::vector<double> in;
     in.reserve(static_cast<size_t>(preSamples + postSamples));
@@ -272,8 +271,7 @@ TEST_F(AutoGainStageTest, StepUp_InternalOvershootBounded) {
     EXPECT_LE(internalPeak, overshootCap) << "Attack overshoot too high";
 
     // After ~30 ms (6×attackTau), internal should be near target.
-    const size_t settleStart =
-        static_cast<size_t>(preSamples) + static_cast<size_t>(sampleRate_ * 0.05);
+    const size_t settleStart = static_cast<size_t>(preSamples) + static_cast<size_t>(sampleRate_ * 0.05);
     const double settledPeak = peakAbs(trace.internalSignal, settleStart);
     EXPECT_NEAR(settledPeak, state_.k.targetPeak, 0.05);
 }
@@ -301,10 +299,8 @@ TEST_F(AutoGainStageTest, StepDown_ReleaseDecaysMonotonically) {
 
     // After the hold window, envelope must decay. Sample at hold+1ms vs
     // hold+50ms and assert strictly lower.
-    const size_t holdEnd =
-        static_cast<size_t>(loudSamples) + static_cast<size_t>(sampleRate_ * 0.011);
-    const size_t laterIdx =
-        static_cast<size_t>(loudSamples) + static_cast<size_t>(sampleRate_ * 0.060);
+    const size_t holdEnd = static_cast<size_t>(loudSamples) + static_cast<size_t>(sampleRate_ * 0.011);
+    const size_t laterIdx = static_cast<size_t>(loudSamples) + static_cast<size_t>(sampleRate_ * 0.060);
     const double gEarly = trace.gainPerSample[holdEnd];
     const double gLate = trace.gainPerSample[laterIdx];
     // As envelope decays, gain rises toward the cap.

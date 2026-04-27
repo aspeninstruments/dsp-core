@@ -24,7 +24,9 @@ struct GestureSample {
 struct AnchorMorphGesture {
     std::vector<GestureSample> deltas;
 
-    bool empty() const { return deltas.size() < 2; }
+    bool empty() const {
+        return deltas.size() < 2;
+    }
 
     GestureSample sampleAt(double t) const;
 

@@ -13,8 +13,8 @@ class AudioPipelineBuilderTest : public ::testing::Test {
   protected:
     void SetUp() override {
         // Initialize transfer function for waveshaping tests
-        transferFunction_ = std::make_unique<dsp_core::LayeredTransferFunction>(
-            kDefaultTableSize, kMinSignalValue, kMaxSignalValue);
+        transferFunction_ =
+            std::make_unique<dsp_core::LayeredTransferFunction>(kDefaultTableSize, kMinSignalValue, kMaxSignalValue);
     }
 
     std::unique_ptr<dsp_core::LayeredTransferFunction> transferFunction_;
@@ -33,9 +33,7 @@ TEST_F(AudioPipelineBuilderTest, EmptyPipelineBuilds) {
 }
 
 TEST_F(AudioPipelineBuilderTest, DryWetMixWraps) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .withDryWetMix()
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().withDryWetMix().build();
 
     ASSERT_NE(pipeline, nullptr);
     ASSERT_NE(stages.getDryWetMix(), nullptr);
@@ -47,9 +45,7 @@ TEST_F(AudioPipelineBuilderTest, DryWetMixWraps) {
 // =============================================================================
 
 TEST_F(AudioPipelineBuilderTest, AddSingleStage) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .addStage<GainStage>(StageTag::InputGain)
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().addStage<GainStage>(StageTag::InputGain).build();
 
     ASSERT_NE(pipeline, nullptr);
     auto* gain = stages.get<GainStage>(StageTag::InputGain);
@@ -58,24 +54,21 @@ TEST_F(AudioPipelineBuilderTest, AddSingleStage) {
 
 TEST_F(AudioPipelineBuilderTest, AddMultipleStages) {
     auto [pipeline, stages] = AudioPipelineBuilder()
-        .addStage<GainStage>(StageTag::InputGain)
-        .addStage<DCBlockingFilter>(StageTag::DCBlock)
-        .addStage<GainStage>(StageTag::OutputGain)
-        .build();
+                                  .addStage<GainStage>(StageTag::InputGain)
+                                  .addStage<DCBlockingFilter>(StageTag::DCBlock)
+                                  .addStage<GainStage>(StageTag::OutputGain)
+                                  .build();
 
     ASSERT_NE(stages.get<GainStage>(StageTag::InputGain), nullptr);
     ASSERT_NE(stages.get<DCBlockingFilter>(StageTag::DCBlock), nullptr);
     ASSERT_NE(stages.get<GainStage>(StageTag::OutputGain), nullptr);
 
     // Verify they are different instances
-    ASSERT_NE(stages.get<GainStage>(StageTag::InputGain),
-              stages.get<GainStage>(StageTag::OutputGain));
+    ASSERT_NE(stages.get<GainStage>(StageTag::InputGain), stages.get<GainStage>(StageTag::OutputGain));
 }
 
 TEST_F(AudioPipelineBuilderTest, StageHasMethod) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .addStage<GainStage>(StageTag::InputGain)
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().addStage<GainStage>(StageTag::InputGain).build();
 
     EXPECT_TRUE(stages.has(StageTag::InputGain));
     EXPECT_FALSE(stages.has(StageTag::OutputGain));
@@ -86,18 +79,14 @@ TEST_F(AudioPipelineBuilderTest, StageHasMethod) {
 // =============================================================================
 
 TEST_F(AudioPipelineBuilderTest, TypeMismatchReturnsNull) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .addStage<GainStage>(StageTag::InputGain)
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().addStage<GainStage>(StageTag::InputGain).build();
 
     // Wrong type should return nullptr
     EXPECT_EQ(stages.get<DCBlockingFilter>(StageTag::InputGain), nullptr);
 }
 
 TEST_F(AudioPipelineBuilderTest, MissingTagReturnsNull) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .addStage<GainStage>(StageTag::InputGain)
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().addStage<GainStage>(StageTag::InputGain).build();
 
     EXPECT_EQ(stages.get<GainStage>(StageTag::OutputGain), nullptr);
 }
@@ -107,10 +96,10 @@ TEST_F(AudioPipelineBuilderTest, MissingTagReturnsNull) {
 // =============================================================================
 
 TEST_F(AudioPipelineBuilderTest, AddWrappedStage) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .addWrapped<OversamplingWrapper, WaveshapingStage>(
-            StageTag::Waveshaper, *transferFunction_)
-        .build();
+    auto [pipeline, stages] =
+        AudioPipelineBuilder()
+            .addWrapped<OversamplingWrapper, WaveshapingStage>(StageTag::Waveshaper, *transferFunction_)
+            .build();
 
     auto* oversampling = stages.get<OversamplingWrapper>(StageTag::Waveshaper);
     ASSERT_NE(oversampling, nullptr);
@@ -118,11 +107,11 @@ TEST_F(AudioPipelineBuilderTest, AddWrappedStage) {
 
 TEST_F(AudioPipelineBuilderTest, AddWrappedWithOuterArgs) {
     auto [pipeline, stages] = AudioPipelineBuilder()
-        .addWrappedWithOuterArgs<OversamplingWrapper, WaveshapingStage>(
-            StageTag::Waveshaper,
-            std::make_tuple(2),  // oversamplingOrder = 2 (4x)
-            *transferFunction_)
-        .build();
+                                  .addWrappedWithOuterArgs<OversamplingWrapper, WaveshapingStage>(
+                                      StageTag::Waveshaper,
+                                      std::make_tuple(2), // oversamplingOrder = 2 (4x)
+                                      *transferFunction_)
+                                  .build();
 
     auto* oversampling = stages.get<OversamplingWrapper>(StageTag::Waveshaper);
     ASSERT_NE(oversampling, nullptr);
@@ -135,15 +124,15 @@ TEST_F(AudioPipelineBuilderTest, AddWrappedWithOuterArgs) {
 
 TEST_F(AudioPipelineBuilderTest, FullBlackDiamondPipeline) {
     auto [pipeline, stages] = AudioPipelineBuilder()
-        .withDryWetMix()
-        .addStage<GainStage>(StageTag::InputGain)
-        .addWrappedWithOuterArgs<OversamplingWrapper, WaveshapingStage>(
-            StageTag::Waveshaper,
-            std::make_tuple(0),  // No oversampling initially
-            *transferFunction_)
-        .addStage<DCBlockingFilter>(StageTag::DCBlock)
-        .addStage<GainStage>(StageTag::OutputGain)
-        .build();
+                                  .withDryWetMix()
+                                  .addStage<GainStage>(StageTag::InputGain)
+                                  .addWrappedWithOuterArgs<OversamplingWrapper, WaveshapingStage>(
+                                      StageTag::Waveshaper,
+                                      std::make_tuple(0), // No oversampling initially
+                                      *transferFunction_)
+                                  .addStage<DCBlockingFilter>(StageTag::DCBlock)
+                                  .addStage<GainStage>(StageTag::OutputGain)
+                                  .build();
 
     // Verify all stages accessible
     ASSERT_NE(stages.get<GainStage>(StageTag::InputGain), nullptr);
@@ -156,10 +145,10 @@ TEST_F(AudioPipelineBuilderTest, FullBlackDiamondPipeline) {
 
 TEST_F(AudioPipelineBuilderTest, PipelineProcessesAudio) {
     auto [pipeline, stages] = AudioPipelineBuilder()
-        .withDryWetMix()
-        .addStage<GainStage>(StageTag::InputGain)
-        .addStage<GainStage>(StageTag::OutputGain)
-        .build();
+                                  .withDryWetMix()
+                                  .addStage<GainStage>(StageTag::InputGain)
+                                  .addStage<GainStage>(StageTag::OutputGain)
+                                  .build();
 
     pipeline->prepareToPlay(44100.0, 512);
 
@@ -197,9 +186,7 @@ TEST_F(AudioPipelineBuilderTest, PipelineProcessesAudio) {
 }
 
 TEST_F(AudioPipelineBuilderTest, StageParametersCanBeModified) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .addStage<GainStage>(StageTag::InputGain)
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().addStage<GainStage>(StageTag::InputGain).build();
 
     pipeline->prepareToPlay(44100.0, 512);
 
@@ -225,10 +212,7 @@ TEST_F(AudioPipelineBuilderTest, StageParametersCanBeModified) {
 }
 
 TEST_F(AudioPipelineBuilderTest, DryWetMixCanBeModified) {
-    auto [pipeline, stages] = AudioPipelineBuilder()
-        .withDryWetMix()
-        .addStage<GainStage>(StageTag::InputGain)
-        .build();
+    auto [pipeline, stages] = AudioPipelineBuilder().withDryWetMix().addStage<GainStage>(StageTag::InputGain).build();
 
     pipeline->prepareToPlay(44100.0, 512);
 

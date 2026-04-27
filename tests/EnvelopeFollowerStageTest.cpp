@@ -10,13 +10,14 @@ using namespace dsp_core::audio_pipeline;
 namespace {
 
 constexpr double kSampleRate = 48000.0;
-constexpr double kAttackSec = 0.005;   // 5ms — matches stage default
-constexpr double kReleaseSec = 0.150;  // 150ms — matches stage default
+constexpr double kAttackSec = 0.005;  // 5ms — matches stage default
+constexpr double kReleaseSec = 0.150; // 150ms — matches stage default
 
 void fillBuffer(juce::AudioBuffer<double>& buf, double value) {
     for (int ch = 0; ch < buf.getNumChannels(); ++ch) {
         auto* d = buf.getWritePointer(ch);
-        for (int i = 0; i < buf.getNumSamples(); ++i) d[i] = value;
+        for (int i = 0; i < buf.getNumSamples(); ++i)
+            d[i] = value;
     }
 }
 
@@ -56,12 +57,10 @@ TEST_F(EnvelopeFollowerStageTest, DisabledIsPassthrough) {
 
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 256; ++i) {
-            EXPECT_EQ(buf.getSample(ch, i), 0.5)
-                << "disabled stage must not alter audio; ch=" << ch << " i=" << i;
+            EXPECT_EQ(buf.getSample(ch, i), 0.5) << "disabled stage must not alter audio; ch=" << ch << " i=" << i;
         }
     }
-    EXPECT_EQ(envelopeValue_.load(), 0.0)
-        << "disabled stage must not update the envelope atomic";
+    EXPECT_EQ(envelopeValue_.load(), 0.0) << "disabled stage must not update the envelope atomic";
 }
 
 TEST_F(EnvelopeFollowerStageTest, AudioPassthroughWhenEnabled) {
@@ -74,8 +73,7 @@ TEST_F(EnvelopeFollowerStageTest, AudioPassthroughWhenEnabled) {
         stage_->process(buf);
         for (int ch = 0; ch < 2; ++ch) {
             for (int i = 0; i < 512; ++i) {
-                EXPECT_EQ(buf.getSample(ch, i), x)
-                    << "enabled stage must be passthrough on audio; x=" << x;
+                EXPECT_EQ(buf.getSample(ch, i), x) << "enabled stage must be passthrough on audio; x=" << x;
             }
         }
     }
@@ -121,7 +119,7 @@ TEST_F(EnvelopeFollowerStageTest, AttackTimeConstant_DbDomain) {
     // to a known starting level (-40 dB / 0.01 linear) so the rising step has
     // a well-defined finite dB span.
     const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
-    (void) driveDC(0.01, chargeSamples);
+    (void)driveDC(0.01, chargeSamples);
     ASSERT_NEAR(envelopeValue_.load(), 0.01, 1e-3) << "precondition: charged to 0.01";
 
     // Step to 1.0 (target = 0 dB). After exactly one attack τ, envDb should
@@ -130,8 +128,7 @@ TEST_F(EnvelopeFollowerStageTest, AttackTimeConstant_DbDomain) {
     const double env = driveDC(1.0, attackSamples);
     const double expectedDb = -40.0 + (1.0 - 1.0 / std::exp(1.0)) * 40.0;
     const double expectedLin = std::pow(10.0, expectedDb / 20.0);
-    EXPECT_NEAR(env, expectedLin, 0.03)
-        << "dB-domain attack: 63% of dB span after one τ";
+    EXPECT_NEAR(env, expectedLin, 0.03) << "dB-domain attack: 63% of dB span after one τ";
 }
 
 TEST_F(EnvelopeFollowerStageTest, ReleaseTimeConstant_SmallDrop) {
@@ -140,7 +137,7 @@ TEST_F(EnvelopeFollowerStageTest, ReleaseTimeConstant_SmallDrop) {
 
     // Charge to 1.0 (envDb = 0).
     const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kAttackSec);
-    (void) driveDC(1.0, chargeSamples);
+    (void)driveDC(1.0, chargeSamples);
     ASSERT_NEAR(envelopeValue_.load(), 1.0, 1e-3) << "precondition: charge to 1.0";
 
     // Drop to ~-1 dB (linear ≈ 0.891). A small drop keeps the nonlinear release
@@ -187,8 +184,7 @@ TEST_F(EnvelopeFollowerStageTest, StereoLinksViaSumOfSquares) {
     }
     stage_->process(buf);
     const double expected = std::sqrt((0.2 * 0.2 + 0.8 * 0.8) / 2.0);
-    EXPECT_NEAR(envelopeValue_.load(), expected, 1e-3)
-        << "stereo RMS links via sum-of-squares";
+    EXPECT_NEAR(envelopeValue_.load(), expected, 1e-3) << "stereo RMS links via sum-of-squares";
 }
 
 TEST_F(EnvelopeFollowerStageTest, ResetClearsState) {
@@ -200,15 +196,13 @@ TEST_F(EnvelopeFollowerStageTest, ResetClearsState) {
     ASSERT_GT(envelopeValue_.load(), 0.9) << "precondition: charged";
 
     stage_->reset();
-    EXPECT_EQ(envelopeValue_.load(), 0.0)
-        << "reset must clear published envelope to 0";
+    EXPECT_EQ(envelopeValue_.load(), 0.0) << "reset must clear published envelope to 0";
 
     // Next few samples of silence should stay at 0 (no decay from lingering state)
     juce::AudioBuffer<double> silence(1, 32);
     silence.clear();
     stage_->process(silence);
-    EXPECT_NEAR(envelopeValue_.load(), 0.0, 1e-9)
-        << "after reset, silence must keep envelope at 0";
+    EXPECT_NEAR(envelopeValue_.load(), 0.0, 1e-9) << "after reset, silence must keep envelope at 0";
 }
 
 // =============================================================================
@@ -249,8 +243,7 @@ TEST_F(EnvelopeFollowerStageTest, PrepareRecomputesCoefficientsAcrossSampleRates
     const double expectedLin = std::pow(10.0, expectedDb / 20.0);
     for (double sr : {48000.0, 96000.0, 192000.0}) {
         const double env = measureAttackOneTauFromMinus40(sr);
-        EXPECT_NEAR(env, expectedLin, 0.03)
-            << "dB-domain attack τ must track wall-clock at sr=" << sr;
+        EXPECT_NEAR(env, expectedLin, 0.03) << "dB-domain attack τ must track wall-clock at sr=" << sr;
     }
 }
 
@@ -261,8 +254,7 @@ TEST_F(EnvelopeFollowerStageTest, OversamplingCoefficientRecompute) {
     const double env = measureAttackOneTauFromMinus40(osRate, 2048);
     const double expectedDb = -40.0 + (1.0 - 1.0 / std::exp(1.0)) * 40.0;
     const double expectedLin = std::pow(10.0, expectedDb / 20.0);
-    EXPECT_NEAR(env, expectedLin, 0.03)
-        << "dB-domain attack τ must track wall-clock at 4× oversampled rate";
+    EXPECT_NEAR(env, expectedLin, 0.03) << "dB-domain attack τ must track wall-clock at 4× oversampled rate";
 }
 
 // =============================================================================
@@ -353,7 +345,7 @@ TEST_F(EnvelopeFollowerStageTest, NonlinearRelease_BigDropFasterThanSmallDrop) {
     auto measureNormalizedDecay = [&](double targetLin) {
         stage_->reset();
         const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kAttackSec);
-        (void) driveDC(1.0, chargeSamples);
+        (void)driveDC(1.0, chargeSamples);
         const int releaseSamples = static_cast<int>(kSampleRate * kReleaseSec);
         const double env = driveDC(targetLin, releaseSamples);
 
@@ -367,9 +359,8 @@ TEST_F(EnvelopeFollowerStageTest, NonlinearRelease_BigDropFasterThanSmallDrop) {
     const double smallFrac = measureNormalizedDecay(std::pow(10.0, -2.0 / 20.0)); // -2 dB
     const double bigFrac = measureNormalizedDecay(std::pow(10.0, -20.0 / 20.0));  // -20 dB
 
-    EXPECT_GT(bigFrac, smallFrac)
-        << "nonlinear release: bigger drops cover a larger fraction of dB span per τ ("
-        << "small=" << smallFrac << " big=" << bigFrac << ")";
+    EXPECT_GT(bigFrac, smallFrac) << "nonlinear release: bigger drops cover a larger fraction of dB span per τ ("
+                                  << "small=" << smallFrac << " big=" << bigFrac << ")";
 }
 
 // =============================================================================
@@ -392,8 +383,7 @@ TEST_F(EnvelopeFollowerStageTest, ExternalBufferIsReadInsteadOfInPipeline) {
     stage_->setExternalInputBuffer(&external);
     stage_->process(inPipeline);
 
-    EXPECT_NEAR(envelopeValue_.load(), 0.5, 0.01)
-        << "external buffer must drive the detector when set";
+    EXPECT_NEAR(envelopeValue_.load(), 0.5, 0.01) << "external buffer must drive the detector when set";
 
     // In-pipeline buffer must remain untouched (stage is a pure read tap).
     for (int i = 0; i < samples; ++i) {
@@ -410,8 +400,7 @@ TEST_F(EnvelopeFollowerStageTest, ExternalNullptrFallsBackToInPipelineBuffer) {
     const int samples = static_cast<int>(kSampleRate * 20.0 * kAttackSec);
     const double env = driveDC(0.5, samples);
 
-    EXPECT_NEAR(env, 0.5, 0.01)
-        << "with no external buffer, stage must read the in-pipeline arg";
+    EXPECT_NEAR(env, 0.5, 0.01) << "with no external buffer, stage must read the in-pipeline arg";
 }
 
 TEST_F(EnvelopeFollowerStageTest, ExternalBufferCanBeSwappedAcrossBlocks) {

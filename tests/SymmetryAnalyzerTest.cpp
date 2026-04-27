@@ -62,7 +62,7 @@ class SymmetryAnalyzerTest : public ::testing::Test {
                 y = 4.0 * x * x * x - 3.0 * x;
             } else if (n == 5) {
                 y = 16.0 * std::pow(x, 5) - 20.0 * std::pow(x, 3) + 5.0 * x;
-}
+            }
 
             ltf->setBaseLayerValue(i, y);
         }

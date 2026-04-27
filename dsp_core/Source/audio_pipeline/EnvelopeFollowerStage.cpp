@@ -31,8 +31,7 @@ constexpr double kMaxHpfHz = 500.0;
 
 } // namespace
 
-EnvelopeFollowerStage::EnvelopeFollowerStage(std::atomic<double>& envelopeStorage)
-    : envelopeStorage_(envelopeStorage) {
+EnvelopeFollowerStage::EnvelopeFollowerStage(std::atomic<double>& envelopeStorage) : envelopeStorage_(envelopeStorage) {
     recomputeCoefficients();
 }
 
@@ -43,8 +42,7 @@ void EnvelopeFollowerStage::prepareToPlay(double sampleRate, int /*samplesPerBlo
     // Allocate the shared coefficients object once here (non-audio thread);
     // subsequent updates mutate it in place.
     const double cutoffHz = hpfCutoffHz_.load(std::memory_order_acquire);
-    hpfCoefficients_ =
-        juce::dsp::IIR::Coefficients<double>::makeFirstOrderHighPass(sampleRate_, cutoffHz);
+    hpfCoefficients_ = juce::dsp::IIR::Coefficients<double>::makeFirstOrderHighPass(sampleRate_, cutoffHz);
     resizeHpfFiltersForChannels(2);
 }
 
@@ -61,7 +59,8 @@ void EnvelopeFollowerStage::setSidechainHpfCutoffHz(double cutoffHz) {
 }
 
 void EnvelopeFollowerStage::updateHpfCoefficients() {
-    if (sampleRate_ <= 0.0 || hpfCoefficients_ == nullptr) return;
+    if (sampleRate_ <= 0.0 || hpfCoefficients_ == nullptr)
+        return;
     const double cutoffHz = hpfCutoffHz_.load(std::memory_order_acquire);
 
     // 1st-order Butterworth HPF coefficients computed in place — matches
@@ -74,9 +73,9 @@ void EnvelopeFollowerStage::updateHpfCoefficients() {
     const double n = std::tan(juce::MathConstants<double>::pi * cutoffHz / sampleRate_);
     const double c = 1.0 / (1.0 + n);
     auto& arr = hpfCoefficients_->coefficients;
-    arr.set(0, c);          // b0 / a0 =  1 / (n + 1)
-    arr.set(1, -c);         // b1 / a0 = -1 / (n + 1)
-    arr.set(2, n * c - c);  // a1 / a0 = (n - 1) / (n + 1)
+    arr.set(0, c);         // b0 / a0 =  1 / (n + 1)
+    arr.set(1, -c);        // b1 / a0 = -1 / (n + 1)
+    arr.set(2, n * c - c); // a1 / a0 = (n - 1) / (n + 1)
 }
 
 void EnvelopeFollowerStage::resizeHpfFiltersForChannels(int numChannels) {
@@ -88,13 +87,10 @@ void EnvelopeFollowerStage::resizeHpfFiltersForChannels(int numChannels) {
 }
 
 void EnvelopeFollowerStage::recomputeCoefficients() {
-    if (sampleRate_ <= 0.0) return;
-    attackCoef_ = (attackSec_ > 0.0)
-                      ? 1.0 - std::exp(-1.0 / (sampleRate_ * attackSec_))
-                      : 1.0;
-    releaseCoef_ = (releaseSec_ > 0.0)
-                       ? 1.0 - std::exp(-1.0 / (sampleRate_ * releaseSec_))
-                       : 1.0;
+    if (sampleRate_ <= 0.0)
+        return;
+    attackCoef_ = (attackSec_ > 0.0) ? 1.0 - std::exp(-1.0 / (sampleRate_ * attackSec_)) : 1.0;
+    releaseCoef_ = (releaseSec_ > 0.0) ? 1.0 - std::exp(-1.0 / (sampleRate_ * releaseSec_)) : 1.0;
     rmsCoef_ = 1.0 - std::exp(-1.0 / (sampleRate_ * kRmsTauSec));
 }
 
@@ -135,7 +131,8 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
         double sumSq = 0.0;
         for (int ch = 0; ch < numChannels; ++ch) {
             double x = src.getSample(ch, i);
-            if (hpfOn) x = hpfFilters_[static_cast<size_t>(ch)].processSample(x);
+            if (hpfOn)
+                x = hpfFilters_[static_cast<size_t>(ch)].processSample(x);
             sumSq += x * x;
         }
         const double meanSq = sumSq / std::max(1, numChannels);
@@ -144,8 +141,7 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
 
         // 2. Apply pre-detection sensitivity, clamp to unity.
         const double targetLin = std::min(detect * sens, 1.0);
-        const double targetDb =
-            juce::Decibels::gainToDecibels(targetLin, kEnvDbFloor_);
+        const double targetDb = juce::Decibels::gainToDecibels(targetLin, kEnvDbFloor_);
 
         // 3. Choose smoother coefficient. Attack is straight; release
         //    accelerates with dB-drop magnitude (nonlinear release), capped
@@ -176,7 +172,8 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
 void EnvelopeFollowerStage::reset() {
     envDb_ = kEnvDbFloor_;
     ms2_ = 0.0;
-    for (auto& f : hpfFilters_) f.reset();
+    for (auto& f : hpfFilters_)
+        f.reset();
     envelopeStorage_.store(0.0, std::memory_order_release);
 }
 

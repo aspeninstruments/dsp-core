@@ -3,8 +3,7 @@
 
 namespace dsp_core::audio_pipeline {
 
-AudioPipelineBuilder::AudioPipelineBuilder()
-    : pipeline_(std::make_unique<AudioPipeline>()) {}
+AudioPipelineBuilder::AudioPipelineBuilder() : pipeline_(std::make_unique<AudioPipeline>()) {}
 
 AudioPipelineBuilder& AudioPipelineBuilder::withDryWetMix() {
     jassert(!built_ && "Cannot modify builder after build()");

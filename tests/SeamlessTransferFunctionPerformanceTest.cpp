@@ -47,13 +47,11 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CrossfadeDuration_ScalesWithSamp
         const char* description;
     };
 
-    std::vector<TestCase> const testCases = {
-        {44100.0, 441, "44.1kHz"},
-        {48000.0, 480, "48kHz"},
-        {88200.0, 882, "88.2kHz"},
-        {96000.0, 960, "96kHz"},
-        {192000.0, 1920, "192kHz"}
-    };
+    std::vector<TestCase> const testCases = {{44100.0, 441, "44.1kHz"},
+                                             {48000.0, 480, "48kHz"},
+                                             {88200.0, 882, "88.2kHz"},
+                                             {96000.0, 960, "96kHz"},
+                                             {192000.0, 1920, "192kHz"}};
 
     for (const auto& tc : testCases) {
         stf->prepareToPlay(tc.sampleRate, 512);
@@ -67,7 +65,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CrossfadeDuration_ScalesWithSamp
 
         // Process audio and verify crossfade completes in expected sample count
         std::vector<double> samples(tc.expectedCrossfadeSamples + 100);
-        for (auto& s : samples) s = 0.5;
+        for (auto& s : samples)
+            s = 0.5;
 
         std::array<double*, 1> channelPointers = {samples.data()};
         juce::AudioBuffer<double> buffer(channelPointers.data(), 1, static_cast<int>(samples.size()));
@@ -76,8 +75,7 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CrossfadeDuration_ScalesWithSamp
         // Verify smooth transition (no clicks)
         for (size_t i = 1; i < samples.size(); ++i) {
             double const delta = std::abs(samples[i] - samples[i - 1]);
-            EXPECT_LT(delta, 0.5) << "Click detected at " << tc.description
-                                  << " sample " << i;
+            EXPECT_LT(delta, 0.5) << "Click detected at " << tc.description << " sample " << i;
         }
     }
 }
@@ -107,7 +105,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CrossfadeDuration_TradeoffAnalys
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     std::vector<double> samples(expectedCrossfadeSamples);
-    for (auto& s : samples) s = 0.0;
+    for (auto& s : samples)
+        s = 0.0;
     std::array<double*, 1> channelPointers = {samples.data()};
     juce::AudioBuffer<double> buffer(channelPointers.data(), 1, static_cast<int>(samples.size()));
     stf->processBuffer(buffer);
@@ -153,7 +152,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, Latency_InteractiveOperations) {
 
     // Process audio block (this triggers LUT swap if ready)
     std::array<double, 512> samples{};
-    for (double & sample : samples) sample = 0.5;
+    for (double& sample : samples)
+        sample = 0.5;
     std::array<double*, 1> channelPointers = {samples.data()};
     juce::AudioBuffer<double> buffer(channelPointers.data(), 1, 512);
     stf->processBuffer(buffer);
@@ -262,7 +262,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, CPUProfiler_WorkerThreadPriority
     std::array<double*, 1> channelPointers = {samples.data()};
     juce::AudioBuffer<double> buffer(channelPointers.data(), 1, 512);
     for (int i = 0; i < 100; ++i) {
-        for (double & sample : samples) sample = 0.5;
+        for (double& sample : samples)
+            sample = 0.5;
         stf->processBuffer(buffer);
     }
 
@@ -302,7 +303,8 @@ TEST_F(SeamlessTransferFunctionPerformanceTest, MemoryProfiler_NoLeaks) {
         mixer.setLaneAmplitude(1, 0.5 + i * 0.0001);
 
         // Process audio
-        for (double & sample : samples) sample = 0.5;
+        for (double& sample : samples)
+            sample = 0.5;
         stf->processBuffer(buffer);
 
         if (i % 100 == 0) {

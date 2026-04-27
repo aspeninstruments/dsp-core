@@ -421,9 +421,8 @@ TEST_F(DCBlockingFilterTest, PeakPreservationOnHotSymmetricSine) {
     const double amplitude = 1.5; // Hot: over 0dB
 
     // Warm up with continuous symmetric sine (no DC)
-    warmupFilter(*filter_,
-                 [=](int n) { return amplitude * std::sin(2.0 * M_PI * frequency * n / sampleRate); },
-                 2, 20000);
+    warmupFilter(
+        *filter_, [=](int n) { return amplitude * std::sin(2.0 * M_PI * frequency * n / sampleRate); }, 2, 20000);
 
     // Measurement buffer: one full period
     const int periodSamples = static_cast<int>(sampleRate / frequency);
@@ -460,11 +459,8 @@ TEST_F(DCBlockingFilterTest, EnvelopeDropTransientIsBoundedAndDecays) {
     const double dcOffset = 0.4; // simulates hot asymmetric waveshaper output
 
     // Warm up with asymmetric signal (sine + DC offset) so tracker converges.
-    warmupFilter(*filter_,
-                 [=](int n) {
-                     return std::sin(2.0 * M_PI * frequency * n / sampleRate) + dcOffset;
-                 },
-                 1, 30000);
+    warmupFilter(
+        *filter_, [=](int n) { return std::sin(2.0 * M_PI * frequency * n / sampleRate) + dcOffset; }, 1, 30000);
 
     // Process a block of SILENCE (envelope gate closing).
     const int silentSamples = 2048;
@@ -477,14 +473,13 @@ TEST_F(DCBlockingFilterTest, EnvelopeDropTransientIsBoundedAndDecays) {
     // for warmup convergence and numerical noise.
     const double transientPeak = measurePeak(silent);
     EXPECT_LE(transientPeak, dcOffset * 1.01)
-        << "Envelope-drop transient EXCEEDS tracked DC (peak: " << transientPeak
-        << ", tracked DC: " << dcOffset << ") — filter is amplifying, not just relaxing.";
+        << "Envelope-drop transient EXCEEDS tracked DC (peak: " << transientPeak << ", tracked DC: " << dcOffset
+        << ") — filter is amplifying, not just relaxing.";
 
     // (b) Tail must decay. With fc=5Hz at 44.1kHz, r^1024 ~ 0.48, so the second
     // half of a 2048-sample silent block should have peak < ~half of the first.
     juce::AudioBuffer<double> firstHalf(silent.getArrayOfWritePointers(), 1, 0, silentSamples / 2);
-    juce::AudioBuffer<double> secondHalf(silent.getArrayOfWritePointers(), 1, silentSamples / 2,
-                                         silentSamples / 2);
+    juce::AudioBuffer<double> secondHalf(silent.getArrayOfWritePointers(), 1, silentSamples / 2, silentSamples / 2);
     const double firstPeak = measurePeak(firstHalf);
     const double secondPeak = measurePeak(secondHalf);
     EXPECT_LT(secondPeak, firstPeak * 0.75)
@@ -503,9 +498,8 @@ TEST_F(DCBlockingFilterTest, THDIsLevelIndependent) {
 
     auto measureTHD = [&](double amplitude) {
         filter_->reset();
-        warmupFilter(*filter_,
-                     [=](int n) { return amplitude * std::sin(2.0 * M_PI * frequency * n / sampleRate); },
-                     1, 10000);
+        warmupFilter(
+            *filter_, [=](int n) { return amplitude * std::sin(2.0 * M_PI * frequency * n / sampleRate); }, 1, 10000);
 
         juce::AudioBuffer<double> buffer(1, numSamples);
         const int phaseOffset = 10000;
@@ -583,7 +577,6 @@ TEST_F(DCBlockingFilterTest, PeakPreservationOnComplexHarmonicSignal) {
     // to shift peak by 1-2%. 3% tolerates this physical bound; more would indicate
     // phase shift has grown past 1-pole HPF behavior (e.g., higher-order or
     // higher cutoff than configured).
-    EXPECT_LE(outputPeak, inputPeak * 1.03)
-        << "Peak grew through filter (in: " << inputPeak << ", out: " << outputPeak
-        << ") — phase shift is reassembling harmonics into a larger peak";
+    EXPECT_LE(outputPeak, inputPeak * 1.03) << "Peak grew through filter (in: " << inputPeak << ", out: " << outputPeak
+                                            << ") — phase shift is reassembling harmonics into a larger peak";
 }

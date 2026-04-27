@@ -54,9 +54,9 @@ class AlgorithmBenchmark : public ::testing::Test {
 
         // Time the fitting operation
         auto start = std::chrono::high_resolution_clock::now();
-        auto fitResult = dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        auto fitResult =
+            dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                       ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
         auto end = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double, std::milli> const duration = end - start;
@@ -78,7 +78,7 @@ class AlgorithmBenchmark : public ::testing::Test {
     int countSpuriousExtrema(const std::vector<dsp_core::SplineAnchor>& anchors) {
         if (anchors.size() < 3) {
             return 0;
-}
+        }
 
         const int NUM_SAMPLES = 1000;
         int extremaCount = 0;
@@ -158,10 +158,10 @@ TEST_F(AlgorithmBenchmark, ComprehensiveComparison) {
          [](double x) {
              if (x < -1.0) {
                  return -2.0 / 3.0;
-}
+             }
              if (x > 1.0) {
                  return 2.0 / 3.0;
-}
+             }
              return x - (x * x * x) / 3.0;
          }},
 
@@ -213,7 +213,9 @@ TEST_F(AlgorithmBenchmark, ComprehensiveComparison) {
             }
         }
 
-        auto avg = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
+        auto avg = [](const std::vector<double>& v) {
+            return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
+        };
         auto avgInt = [](const std::vector<int>& v) {
             return std::accumulate(v.begin(), v.end(), 0) / static_cast<double>(v.size());
         };
@@ -295,9 +297,8 @@ TEST_F(AlgorithmBenchmark, RepeatedFittingTest) {
     for (int i = 0; i < 10; ++i) {
         dsp_core::SplineFitConfig config;
         config.tangentAlgorithm = dsp_core::TangentAlgorithm::Akima;
-        dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     }
 
     // Benchmark Akima
@@ -305,9 +306,8 @@ TEST_F(AlgorithmBenchmark, RepeatedFittingTest) {
     for (int i = 0; i < NUM_ITERATIONS; ++i) {
         dsp_core::SplineFitConfig config;
         config.tangentAlgorithm = dsp_core::TangentAlgorithm::Akima;
-        dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     }
     auto akimaEnd = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> const akimaDuration = akimaEnd - akimaStart;
@@ -317,9 +317,8 @@ TEST_F(AlgorithmBenchmark, RepeatedFittingTest) {
     for (int i = 0; i < NUM_ITERATIONS; ++i) {
         dsp_core::SplineFitConfig config;
         config.tangentAlgorithm = dsp_core::TangentAlgorithm::FritschCarlson;
-        dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
     }
     auto fcEnd = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> const fcDuration = fcEnd - fcStart;

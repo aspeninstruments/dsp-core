@@ -5,26 +5,26 @@
 namespace dsp_core {
 
 namespace {
-    /**
-     * Smoothstep interpolation (cubic Hermite)
-     *
-     * Provides ease-in/ease-out S-curve with zero derivative at endpoints.
-     * Used for perceptually smooth crossfading between LUTs.
-     *
-     * Formula: t² × (3 - 2t)
-     * Properties: C¹ continuous, symmetric, computationally cheap
-     *
-     * @param t Normalized position [0, 1]
-     * @return Smoothed position [0, 1]
-     */
-    inline double smoothstep(double t) {
-        // Clamp to [0, 1] (defensive programming - shouldn't happen in normal operation)
-        t = std::clamp(t, 0.0, 1.0);
+/**
+ * Smoothstep interpolation (cubic Hermite)
+ *
+ * Provides ease-in/ease-out S-curve with zero derivative at endpoints.
+ * Used for perceptually smooth crossfading between LUTs.
+ *
+ * Formula: t² × (3 - 2t)
+ * Properties: C¹ continuous, symmetric, computationally cheap
+ *
+ * @param t Normalized position [0, 1]
+ * @return Smoothed position [0, 1]
+ */
+inline double smoothstep(double t) {
+    // Clamp to [0, 1] (defensive programming - shouldn't happen in normal operation)
+    t = std::clamp(t, 0.0, 1.0);
 
-        // Smoothstep formula: t² × (3 - 2t)
-        // Expanded: 3t² - 2t³
-        return t * t * (3.0 - 2.0 * t);
-    }
+    // Smoothstep formula: t² × (3 - 2t)
+    // Expanded: 3t² - 2t³
+    return t * t * (3.0 - 2.0 * t);
+}
 } // namespace
 
 // AudioEngine Implementation
@@ -123,8 +123,8 @@ void AudioEngine::checkForNewLUT() const {
             auto& secBuf = lutBuffers[oldSecondaryIdx];
             const auto& priBuf = lutBuffers[oldPrimaryIdx];
             for (int i = 0; i < TABLE_SIZE; ++i) {
-                secBuf.data[static_cast<size_t>(i)] = gainOld * secBuf.data[static_cast<size_t>(i)]
-                                                    + gainNew * priBuf.data[static_cast<size_t>(i)];
+                secBuf.data[static_cast<size_t>(i)] =
+                    gainOld * secBuf.data[static_cast<size_t>(i)] + gainNew * priBuf.data[static_cast<size_t>(i)];
             }
 
             // Blend edge slopes for Linear extrapolation continuity
@@ -139,7 +139,7 @@ void AudioEngine::checkForNewLUT() const {
             workerTargetIndex.store(oldPrimaryIdx, std::memory_order_release);
 
             oldLUT = &lutBuffers[oldSecondaryIdx]; // blend snapshot
-            newLUT = &lutBuffers[workerIdx];        // new incoming LUT
+            newLUT = &lutBuffers[workerIdx];       // new incoming LUT
         } else {
             // Normal rotation: no crossfade in progress
             primaryIndex.store(workerIdx, std::memory_order_release);
@@ -249,9 +249,8 @@ double AudioEngine::evaluateLUTDerivative(const LUTBuffer* lut, double x) const 
     //   dy/dt = 0.5·[(-y0+y2) + 2(2y0-5y1+4y2-y3)·t + 3(-y0+3y1-3y2+y3)·t²]
     auto crDeriv = [](double y0, double y1, double y2, double y3, double tt) {
         // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
-        return 0.5 * ((-y0 + y2)
-                      + 2.0 * (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * tt
-                      + 3.0 * (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * tt * tt);
+        return 0.5 * ((-y0 + y2) + 2.0 * (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * tt +
+                      3.0 * (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * tt * tt);
         // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
     };
 
@@ -272,8 +271,10 @@ double AudioEngine::evaluateLUTDerivative(const LUTBuffer* lut, double x) const 
     } else {
         // Linear extrapolation
         auto getSample = [lut](int i) -> double {
-            if (i < 0) return lut->data[0] + lut->leftSlope * i;
-            if (i >= TABLE_SIZE) return lut->data[TABLE_SIZE - 1] + lut->rightSlope * (i - TABLE_SIZE + 1);
+            if (i < 0)
+                return lut->data[0] + lut->leftSlope * i;
+            if (i >= TABLE_SIZE)
+                return lut->data[TABLE_SIZE - 1] + lut->rightSlope * (i - TABLE_SIZE + 1);
             return lut->data[i];
         };
         const double y0 = getSample(index - 1);
@@ -284,7 +285,8 @@ double AudioEngine::evaluateLUTDerivative(const LUTBuffer* lut, double x) const 
     }
 
     const double result = dy_dt * DT_DX * scDeriv;
-    if (std::isnan(result) || std::isinf(result)) return 0.0;
+    if (std::isnan(result) || std::isinf(result))
+        return 0.0;
     return result;
 }
 
@@ -295,8 +297,8 @@ double AudioEngine::interpolateCatmullRom(double y0, double y1, double y2, doubl
     // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 }
 
-double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT,
-                                     double x, double gainOld, double gainNew) const {
+double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT, double x, double gainOld,
+                                      double gainNew) const {
     if (newLUT->softClipEnabled) {
         x = softClipper_.process(x);
     }
@@ -394,8 +396,7 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
 // EventDrivenRenderer Implementation
 
 EventDrivenRenderer::EventDrivenRenderer(LaneMixer& mixer, AudioEngine& engine)
-    : laneMixer(mixer)
-    , audioEngine(engine) {
+    : laneMixer(mixer), audioEngine(engine) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     startTimerHz(SAFETY_TIMER_HZ);
 }
@@ -421,8 +422,8 @@ void EventDrivenRenderer::handleAsyncUpdate() {
     }
 
     // Detect whether only mix-related changes occurred (cheap to re-render)
-    const bool curveChanged = (currentFullVersion - currentMixVersion)
-                            != (lastRenderedFullVersion - lastRenderedMixVersion);
+    const bool curveChanged =
+        (currentFullVersion - currentMixVersion) != (lastRenderedFullVersion - lastRenderedMixVersion);
 
     // In scan mode, amplitude changes don't affect the output (computeScan ignores amplitudes).
     // Skip the render to avoid unnecessary crossfade artifacts from stale buffer data.
@@ -511,10 +512,9 @@ void EventDrivenRenderer::doRender() {
 
 // VisualizerUpdateDispatcher Implementation (event-driven, 60Hz rate-limited)
 
-VisualizerUpdateDispatcher::VisualizerUpdateDispatcher(LaneMixer& mixer)
-    : laneMixer(mixer) {
+VisualizerUpdateDispatcher::VisualizerUpdateDispatcher(LaneMixer& mixer) : laneMixer(mixer) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-    startTimerHz(SAFETY_TIMER_HZ);  // slow fallback; triggerAsyncUpdate() drives the hot path
+    startTimerHz(SAFETY_TIMER_HZ); // slow fallback; triggerAsyncUpdate() drives the hot path
 }
 
 VisualizerUpdateDispatcher::~VisualizerUpdateDispatcher() {
@@ -523,13 +523,13 @@ VisualizerUpdateDispatcher::~VisualizerUpdateDispatcher() {
 }
 
 void VisualizerUpdateDispatcher::setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
-                                                      std::function<void()> callback) {
+                                                     std::function<void()> callback) {
     visualizerLUTPtr = lutPtr;
     onVisualizerUpdate = std::move(callback);
 }
 
 void VisualizerUpdateDispatcher::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
-                                                   int* selectedLanePtr) {
+                                                  int* selectedLanePtr) {
     laneLUTPtr_ = lutPtr;
     selectedLanePtr_ = selectedLanePtr;
 }
@@ -597,8 +597,7 @@ void VisualizerUpdateDispatcher::runUpdate() {
             const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
             const double t = srcIdx - idx;
             (*visualizerLUTPtr)[static_cast<size_t>(i)] =
-                sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) +
-                sumBuffer[static_cast<size_t>(nextIdx)] * t;
+                sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) + sumBuffer[static_cast<size_t>(nextIdx)] * t;
         }
     }
 
@@ -613,9 +612,8 @@ void VisualizerUpdateDispatcher::runUpdate() {
                 const int idx = static_cast<int>(srcIdx);
                 const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
                 const double t = srcIdx - idx;
-                (*laneLUTPtr_)[static_cast<size_t>(i)] =
-                    lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
-                    lane.curveData[static_cast<size_t>(nextIdx)] * t;
+                (*laneLUTPtr_)[static_cast<size_t>(i)] = lane.curveData[static_cast<size_t>(idx)] * (1.0 - t) +
+                                                         lane.curveData[static_cast<size_t>(nextIdx)] * t;
             }
         }
     }

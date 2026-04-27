@@ -23,9 +23,7 @@ class ModulatorSlotStage : public AudioProcessingStage {
     enum class Type : int { Envelope = 0, Lfo = 1 };
 
     explicit ModulatorSlotStage(std::atomic<double>& slotStorage)
-        : slotStorage_(slotStorage),
-          envStage_(slotStorage),
-          lfoStage_(slotStorage) {}
+        : slotStorage_(slotStorage), envStage_(slotStorage), lfoStage_(slotStorage) {}
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override {
         envStage_.prepareToPlay(sampleRate, samplesPerBlock);
@@ -47,7 +45,9 @@ class ModulatorSlotStage : public AudioProcessingStage {
         slotStorage_.store(0.0, std::memory_order_release);
     }
 
-    juce::String getName() const override { return "ModulatorSlot"; }
+    juce::String getName() const override {
+        return "ModulatorSlot";
+    }
 
     void setType(Type t) {
         const auto previous = static_cast<Type>(type_.exchange(static_cast<int>(t), std::memory_order_acq_rel));
@@ -63,10 +63,16 @@ class ModulatorSlotStage : public AudioProcessingStage {
         }
     }
 
-    Type getType() const { return static_cast<Type>(type_.load(std::memory_order_acquire)); }
+    Type getType() const {
+        return static_cast<Type>(type_.load(std::memory_order_acquire));
+    }
 
-    EnvelopeFollowerStage& envelope() { return envStage_; }
-    LfoStage& lfo() { return lfoStage_; }
+    EnvelopeFollowerStage& envelope() {
+        return envStage_;
+    }
+    LfoStage& lfo() {
+        return lfoStage_;
+    }
 
   private:
     std::atomic<double>& slotStorage_;

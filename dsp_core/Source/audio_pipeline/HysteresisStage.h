@@ -34,7 +34,9 @@ class HysteresisStage : public AudioProcessingStage {
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
-    juce::String getName() const override { return "Hysteresis"; }
+    juce::String getName() const override {
+        return "Hysteresis";
+    }
 
     void setHysteresisEnabled(bool enabled);
     void requestWarmup();
@@ -52,7 +54,9 @@ class HysteresisStage : public AudioProcessingStage {
   private:
     enum class CrossfadeState { Inactive, WarmingUp, CrossfadingIn, CrossfadingOut };
 
-    static double smoothstep(double t) { return t * t * (3.0 - 2.0 * t); }
+    static double smoothstep(double t) {
+        return t * t * (3.0 - 2.0 * t);
+    }
 
     void processWarmup(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
     void processCrossfadeIn(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);

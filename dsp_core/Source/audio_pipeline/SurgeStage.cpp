@@ -15,9 +15,7 @@ void SurgeStage::setSurgeDurationSec(double seconds) {
 void SurgeStage::recomputeStep() {
     if (sampleRate_ > 0.0) {
         const double oneSample = 1.0 / sampleRate_;
-        stepPerSample_ = (surgeDurationSec_ > oneSample)
-                             ? (1.0 / (sampleRate_ * surgeDurationSec_))
-                             : 1.0;
+        stepPerSample_ = (surgeDurationSec_ > oneSample) ? (1.0 / (sampleRate_ * surgeDurationSec_)) : 1.0;
     }
 }
 

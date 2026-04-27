@@ -36,19 +36,18 @@ static constexpr double MAX_VALUE = SeamlessConfig::MAX_VALUE;
 
 // Buffer roles for triple-buffered LUT system
 enum class BufferRole {
-    Primary = 0,      // Active LUT for playback (audio thread reads)
-    Secondary = 1,    // Previous LUT used during crossfade (audio thread reads)
-    WorkerTarget = 2  // Worker thread writes here (isolated from audio)
+    Primary = 0,     // Active LUT for playback (audio thread reads)
+    Secondary = 1,   // Previous LUT used during crossfade (audio thread reads)
+    WorkerTarget = 2 // Worker thread writes here (isolated from audio)
 };
 
 // LUTBuffer - Triple-buffered lookup table
 struct LUTBuffer {
     std::array<double, TABLE_SIZE> data;
     uint64_t version{0};
-    LaneMixer::ExtrapolationMode extrapolationMode{
-        LaneMixer::ExtrapolationMode::Clamp};
-    double leftSlope{0.0};   // Precomputed, clamped slope at left edge (for Linear extrapolation)
-    double rightSlope{0.0};  // Precomputed, clamped slope at right edge (for Linear extrapolation)
+    LaneMixer::ExtrapolationMode extrapolationMode{LaneMixer::ExtrapolationMode::Clamp};
+    double leftSlope{0.0};       // Precomputed, clamped slope at left edge (for Linear extrapolation)
+    double rightSlope{0.0};      // Precomputed, clamped slope at right edge (for Linear extrapolation)
     bool softClipEnabled{false}; // When true, input is soft-clipped before LUT lookup
 };
 
@@ -238,8 +237,8 @@ class AudioEngine {
      * @param gainNew Gain for new LUT [0, 1]
      * @return Crossfaded output value
      */
-    double evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT,
-                            double x, double gainOld, double gainNew) const;
+    double evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* newLUT, double x, double gainOld,
+                             double gainNew) const;
 
     /**
      * Catmull-Rom interpolation on 4 pre-fetched samples
@@ -259,19 +258,20 @@ class AudioEngine {
     // TRIPLE BUFFERING (prevents data race during crossfade):
     // - lutBuffers[0,1]: Used for crossfading (audio thread reads)
     // - lutBuffers[2]: Worker thread writes here (safe from audio thread)
-    mutable LUTBuffer lutBuffers[3];  // mutable: blend snapshot writes in checkForNewLUT()
+    mutable LUTBuffer lutBuffers[3]; // mutable: blend snapshot writes in checkForNewLUT()
 
     // Atomics are mutable because they're modified in const methods (thread-safe state)
-    mutable std::atomic<int> primaryIndex{static_cast<int>(BufferRole::Primary)};      // Active LUT for playback
-    mutable std::atomic<int> secondaryIndex{static_cast<int>(BufferRole::Secondary)};    // Previous LUT (used during crossfade)
+    mutable std::atomic<int> primaryIndex{static_cast<int>(BufferRole::Primary)}; // Active LUT for playback
+    mutable std::atomic<int> secondaryIndex{
+        static_cast<int>(BufferRole::Secondary)}; // Previous LUT (used during crossfade)
     mutable std::atomic<int> workerTargetIndex{static_cast<int>(BufferRole::WorkerTarget)}; // Worker writes here
     mutable std::atomic<bool> newLUTReady{false};
 
     // Crossfade state (audio thread local - mutable for const methods)
     double sampleRate{44100.0};
-    mutable int crossfadeSamples{441};  // Recalculated in prepareToPlay()
+    mutable int crossfadeSamples{441}; // Recalculated in prepareToPlay()
     mutable int crossfadePosition{0};
-    mutable std::atomic<bool> crossfading{false};  // Atomic for worker thread reads
+    mutable std::atomic<bool> crossfading{false}; // Atomic for worker thread reads
     mutable const LUTBuffer* oldLUT{nullptr};
     mutable const LUTBuffer* newLUT{nullptr};
 };
@@ -330,8 +330,8 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
     double lastRenderedScanPosition{0.0};
     double lastCurveRenderTimeMs{0.0};
 
-    static constexpr double CURVE_RENDER_MIN_INTERVAL_MS = 16.7;  // 60Hz max
-    static constexpr int SAFETY_TIMER_HZ = 5;                      // 200ms fallback
+    static constexpr double CURVE_RENDER_MIN_INTERVAL_MS = 16.7; // 60Hz max
+    static constexpr int SAFETY_TIMER_HZ = 5;                    // 200ms fallback
 };
 
 /**
@@ -355,8 +355,7 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     explicit VisualizerUpdateDispatcher(LaneMixer& mixer);
     ~VisualizerUpdateDispatcher() override;
 
-    void setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
-                             std::function<void()> callback);
+    void setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, std::function<void()> callback);
 
     void setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, int* selectedLanePtr);
 
@@ -383,7 +382,7 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
 
     double lastUpdateTimeMs{0.0};
 
-    static constexpr int SAFETY_TIMER_HZ = 5;  // 200ms fallback for missed edges
+    static constexpr int SAFETY_TIMER_HZ = 5; // 200ms fallback for missed edges
 };
 
 } // namespace dsp_core

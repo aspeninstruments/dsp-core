@@ -21,10 +21,8 @@ class HysteresisStageTest : public ::testing::Test {
     std::unique_ptr<HysteresisStage> stage_;
 
     // Helper: create a stereo buffer filled with a sine wave
-    juce::AudioBuffer<double> makeSineBuffer(int numChannels, int numSamples,
-                                              double frequency = 100.0,
-                                              double sampleRate = 48000.0 * 16.0,
-                                              double amplitude = 0.5) {
+    juce::AudioBuffer<double> makeSineBuffer(int numChannels, int numSamples, double frequency = 100.0,
+                                             double sampleRate = 48000.0 * 16.0, double amplitude = 0.5) {
         juce::AudioBuffer<double> buffer(numChannels, numSamples);
         for (int ch = 0; ch < numChannels; ++ch) {
             auto* data = buffer.getWritePointer(ch);
@@ -59,8 +57,7 @@ TEST_F(HysteresisStageTest, ProcessStereoBuffer_HysteresisEnabled_NoCrash) {
     // Verify output is finite
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 512; ++i) {
-            EXPECT_TRUE(std::isfinite(buffer.getSample(ch, i)))
-                << "ch=" << ch << " sample=" << i;
+            EXPECT_TRUE(std::isfinite(buffer.getSample(ch, i))) << "ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -72,8 +69,7 @@ TEST_F(HysteresisStageTest, ProcessStereoBuffer_HysteresisDisabled_NoCrash) {
 
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 512; ++i) {
-            EXPECT_TRUE(std::isfinite(buffer.getSample(ch, i)))
-                << "ch=" << ch << " sample=" << i;
+            EXPECT_TRUE(std::isfinite(buffer.getSample(ch, i))) << "ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -84,8 +80,7 @@ TEST_F(HysteresisStageTest, ZeroInput_ProducesZeroOutput_HysteresisEnabled) {
 
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 512; ++i) {
-            EXPECT_NEAR(buffer.getSample(ch, i), 0.0, 1e-10)
-                << "ch=" << ch << " sample=" << i;
+            EXPECT_NEAR(buffer.getSample(ch, i), 0.0, 1e-10) << "ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -97,8 +92,7 @@ TEST_F(HysteresisStageTest, ZeroInput_ProducesZeroOutput_HysteresisDisabled) {
 
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 512; ++i) {
-            EXPECT_NEAR(buffer.getSample(ch, i), 0.0, 1e-10)
-                << "ch=" << ch << " sample=" << i;
+            EXPECT_NEAR(buffer.getSample(ch, i), 0.0, 1e-10) << "ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -132,8 +126,7 @@ TEST_F(HysteresisStageTest, SineInput_HysteresisOn_ProducesHysteresisLoop) {
     }
 
     // Most samples should differ due to hysteresis memory
-    EXPECT_GT(differingSamples, numSamples / 2)
-        << "Hysteresis should modify most samples (memory effect)";
+    EXPECT_GT(differingSamples, numSamples / 2) << "Hysteresis should modify most samples (memory effect)";
 }
 
 TEST_F(HysteresisStageTest, ToggleHysteresis_ProducesDifferentOutput) {
@@ -183,8 +176,7 @@ TEST_F(HysteresisStageTest, HysteresisDisabled_OutputMatchesTransferFunction) {
 
     // Output should match processBuffer behavior (identity for default TF)
     for (int i = 0; i < numSamples; ++i) {
-        EXPECT_NEAR(buffer.getSample(0, i), expected[i], 1e-10)
-            << "sample=" << i;
+        EXPECT_NEAR(buffer.getSample(0, i), expected[i], 1e-10) << "sample=" << i;
     }
 }
 
@@ -207,8 +199,7 @@ TEST_F(HysteresisStageTest, ChannelsHaveIndependentState) {
 
     // R channel should remain zero (independent state)
     for (int i = 0; i < numSamples; ++i) {
-        EXPECT_NEAR(buffer.getSample(1, i), 0.0, 1e-10)
-            << "R channel should be zero at sample=" << i;
+        EXPECT_NEAR(buffer.getSample(1, i), 0.0, 1e-10) << "R channel should be zero at sample=" << i;
     }
 }
 
@@ -230,8 +221,7 @@ TEST_F(HysteresisStageTest, DifferentLR_ProducesDifferentOutput) {
         if (std::abs(buffer.getSample(0, i) - buffer.getSample(1, i)) > 1e-10)
             differingSamples++;
     }
-    EXPECT_GT(differingSamples, numSamples / 2)
-        << "Different L/R input should produce different L/R output";
+    EXPECT_GT(differingSamples, numSamples / 2) << "Different L/R input should produce different L/R output";
 }
 
 // =============================================================================
@@ -272,8 +262,7 @@ TEST_F(HysteresisStageTest, ParameterChanges_MidStream_NoCrashFiniteOutput) {
 
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 256; ++i) {
-            EXPECT_TRUE(std::isfinite(buffer2.getSample(ch, i)))
-                << "ch=" << ch << " sample=" << i;
+            EXPECT_TRUE(std::isfinite(buffer2.getSample(ch, i))) << "ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -292,8 +281,7 @@ TEST_F(HysteresisStageTest, Reset_ClearsState) {
 
     for (int ch = 0; ch < 2; ++ch) {
         for (int i = 0; i < 64; ++i) {
-            EXPECT_NEAR(buffer2.getSample(ch, i), 0.0, 1e-10)
-                << "ch=" << ch << " sample=" << i;
+            EXPECT_NEAR(buffer2.getSample(ch, i), 0.0, 1e-10) << "ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -329,8 +317,7 @@ TEST_F(HysteresisStageTest, LargeInput_ProducesBoundedOutput) {
         for (int i = 0; i < 64; ++i) {
             double val = buffer.getSample(ch, i);
             EXPECT_TRUE(std::isfinite(val)) << "ch=" << ch << " sample=" << i;
-            EXPECT_LE(std::abs(val), 2.0 + 1e-10)
-                << "Output should be bounded at +-2.0, ch=" << ch << " sample=" << i;
+            EXPECT_LE(std::abs(val), 2.0 + 1e-10) << "Output should be bounded at +-2.0, ch=" << ch << " sample=" << i;
         }
     }
 }
@@ -384,8 +371,7 @@ TEST_F(HysteresisStageTest, MakeupGain_HighSaturation_CompensatesLevelDrop) {
 
     // With makeup, peak should be higher (closer to nominal level)
     EXPECT_GT(peakWithMakeup, peakNoMakeup)
-        << "Makeup gain should increase output level. Without: " << peakNoMakeup
-        << " With: " << peakWithMakeup;
+        << "Makeup gain should increase output level. Without: " << peakNoMakeup << " With: " << peakWithMakeup;
 }
 
 TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
@@ -410,8 +396,8 @@ TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
             for (int ch = 0; ch < 2; ++ch) {
                 auto* d = buf.getWritePointer(ch);
                 for (int i = 0; i < blockSize; ++i) {
-                    d[i] = amplitude * std::sin(
-                        2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                    d[i] =
+                        amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
                 }
             }
             stage_->process(buf);
@@ -423,8 +409,7 @@ TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
         for (int ch = 0; ch < 2; ++ch) {
             auto* d = meas.getWritePointer(ch);
             for (int i = 0; i < measSamples; ++i) {
-                d[i] = amplitude * std::sin(
-                    2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                d[i] = amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
             }
         }
         stage_->process(meas);
@@ -433,8 +418,7 @@ TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
         for (int i = 0; i < measSamples; ++i)
             peak = std::max(peak, std::abs(meas.getSample(0, i)));
 
-        EXPECT_NEAR(peak, amplitude, amplitude * tolerance)
-            << "width=" << w << " peak=" << peak;
+        EXPECT_NEAR(peak, amplitude, amplitude * tolerance) << "width=" << w << " peak=" << peak;
     }
 }
 
@@ -459,8 +443,8 @@ TEST_F(HysteresisStageTest, MakeupGain_FrequencySweep_PeakWithinFivePercent) {
                 for (int ch = 0; ch < 2; ++ch) {
                     auto* d = buf.getWritePointer(ch);
                     for (int i = 0; i < blockSize; ++i) {
-                        d[i] = amplitude * std::sin(
-                            2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                        d[i] = amplitude *
+                               std::sin(2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
                     }
                 }
                 stage_->process(buf);
@@ -473,8 +457,8 @@ TEST_F(HysteresisStageTest, MakeupGain_FrequencySweep_PeakWithinFivePercent) {
             for (int ch = 0; ch < 2; ++ch) {
                 auto* d = meas.getWritePointer(ch);
                 for (int i = 0; i < measSamples; ++i) {
-                    d[i] = amplitude * std::sin(
-                        2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                    d[i] =
+                        amplitude * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
                 }
             }
             stage_->process(meas);
@@ -515,8 +499,7 @@ TEST_F(HysteresisStageTest, MakeupGain_AmplitudeSweep_NeverOvershoots) {
                 for (int ch = 0; ch < 2; ++ch) {
                     auto* d = buf.getWritePointer(ch);
                     for (int i = 0; i < blockSize; ++i) {
-                        d[i] = amp * std::sin(
-                            2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                        d[i] = amp * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
                     }
                 }
                 stage_->process(buf);
@@ -528,8 +511,7 @@ TEST_F(HysteresisStageTest, MakeupGain_AmplitudeSweep_NeverOvershoots) {
             for (int ch = 0; ch < 2; ++ch) {
                 auto* d = meas.getWritePointer(ch);
                 for (int i = 0; i < measSamples; ++i) {
-                    d[i] = amp * std::sin(
-                        2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
+                    d[i] = amp * std::sin(2.0 * juce::MathConstants<double>::pi * freq * (phase + i) / sampleRate);
                 }
             }
             stage_->process(meas);
@@ -539,8 +521,8 @@ TEST_F(HysteresisStageTest, MakeupGain_AmplitudeSweep_NeverOvershoots) {
                 peak = std::max(peak, std::abs(meas.getSample(0, i)));
 
             EXPECT_LE(peak, amp * (1.0 + overshootTolerance))
-                << "amp=" << amp << " width=" << w << " peak=" << peak
-                << " (overshoot by " << 100.0 * (peak - amp) / amp << "%)";
+                << "amp=" << amp << " width=" << w << " peak=" << peak << " (overshoot by "
+                << 100.0 * (peak - amp) / amp << "%)";
         }
     }
 }
@@ -624,11 +606,9 @@ TEST_F(HysteresisStageTest, EnableHysteresis_MidSignal_NoCrossfadeClick) {
     double maxNaturalDelta = 2.0 * juce::MathConstants<double>::pi * freq * amplitude / sampleRate;
     double clickThreshold = maxNaturalDelta * 50.0; // generous: 50x natural slope
 
-    EXPECT_LT(maxDelta, clickThreshold)
-        << "Click detected at sample " << maxDeltaIdx
-        << ": delta=" << maxDelta
-        << " threshold=" << clickThreshold
-        << " (natural max delta=" << maxNaturalDelta << ")";
+    EXPECT_LT(maxDelta, clickThreshold) << "Click detected at sample " << maxDeltaIdx << ": delta=" << maxDelta
+                                        << " threshold=" << clickThreshold << " (natural max delta=" << maxNaturalDelta
+                                        << ")";
 }
 
 TEST_F(HysteresisStageTest, EnableHysteresis_MidSignal_DiagnosticDeltas) {
@@ -683,32 +663,35 @@ TEST_F(HysteresisStageTest, EnableHysteresis_MidSignal_DiagnosticDeltas) {
     }
 
     // Find and print top 10 largest deltas
-    struct DeltaInfo { double delta; int idx; double prevSample; double curSample; };
+    struct DeltaInfo {
+        double delta;
+        int idx;
+        double prevSample;
+        double curSample;
+    };
     std::vector<DeltaInfo> deltas;
     for (size_t i = 1; i < output.size(); ++i) {
         double d = std::abs(output[i] - output[i - 1]);
-        deltas.push_back({d, static_cast<int>(i), output[i-1], output[i]});
+        deltas.push_back({d, static_cast<int>(i), output[i - 1], output[i]});
     }
     std::sort(deltas.begin(), deltas.end(), [](auto& a, auto& b) { return a.delta > b.delta; });
 
     double maxNaturalDelta = 2.0 * juce::MathConstants<double>::pi * freq * amplitude / sampleRate;
     std::cout << "\n=== Enable Hysteresis Crossfade Diagnostic ===" << std::endl;
-    std::cout << "Max natural delta for " << freq << "Hz sine at " << sampleRate << "Hz: " << maxNaturalDelta << std::endl;
+    std::cout << "Max natural delta for " << freq << "Hz sine at " << sampleRate << "Hz: " << maxNaturalDelta
+              << std::endl;
     std::cout << "Transition starts at sample " << blockSize << std::endl;
     std::cout << "Top 10 largest sample-to-sample deltas:" << std::endl;
     for (int i = 0; i < std::min(10, static_cast<int>(deltas.size())); ++i) {
-        std::cout << "  [" << deltas[i].idx << "] delta=" << deltas[i].delta
-                  << " prev=" << deltas[i].prevSample
-                  << " cur=" << deltas[i].curSample
-                  << " (ratio to natural: " << deltas[i].delta / maxNaturalDelta << "x)"
-                  << std::endl;
+        std::cout << "  [" << deltas[i].idx << "] delta=" << deltas[i].delta << " prev=" << deltas[i].prevSample
+                  << " cur=" << deltas[i].curSample << " (ratio to natural: " << deltas[i].delta / maxNaturalDelta
+                  << "x)" << std::endl;
     }
     std::cout << "===============================================\n" << std::endl;
 
     // Still assert no click
     double clickThreshold = maxNaturalDelta * 50.0;
-    EXPECT_LT(deltas[0].delta, clickThreshold)
-        << "Click detected at sample " << deltas[0].idx;
+    EXPECT_LT(deltas[0].delta, clickThreshold) << "Click detected at sample " << deltas[0].idx;
 }
 
 TEST_F(HysteresisStageTest, DisableHysteresis_MidSignal_NoCrossfadeClick) {
@@ -773,11 +756,9 @@ TEST_F(HysteresisStageTest, DisableHysteresis_MidSignal_NoCrossfadeClick) {
     double maxNaturalDelta = 2.0 * juce::MathConstants<double>::pi * freq * amplitude / sampleRate;
     double clickThreshold = maxNaturalDelta * 50.0;
 
-    EXPECT_LT(maxDelta, clickThreshold)
-        << "Click detected at sample " << maxDeltaIdx
-        << ": delta=" << maxDelta
-        << " threshold=" << clickThreshold
-        << " (natural max delta=" << maxNaturalDelta << ")";
+    EXPECT_LT(maxDelta, clickThreshold) << "Click detected at sample " << maxDeltaIdx << ": delta=" << maxDelta
+                                        << " threshold=" << clickThreshold << " (natural max delta=" << maxNaturalDelta
+                                        << ")";
 }
 
 TEST_F(HysteresisStageTest, MakeupGain_HysteresisDisabled_NoMakeup) {
@@ -810,8 +791,7 @@ TEST_F(HysteresisStageTest, MakeupGain_HysteresisDisabled_NoMakeup) {
         }
     }
 
-    EXPECT_GT(matchCount, 400)
-        << "With hysteresis disabled, makeup gain should not be applied";
+    EXPECT_GT(matchCount, 400) << "With hysteresis disabled, makeup gain should not be applied";
 }
 
 // =============================================================================

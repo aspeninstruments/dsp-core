@@ -27,8 +27,8 @@ class EventDrivenRendererTest : public ::testing::Test {
     /// Helper: render and flush crossfade so audio reflects the latest LUT
     void renderAndFlushCrossfade() {
         stf->renderLUTImmediate();
-        const int crossfadeSamples = static_cast<int>(
-            44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
+        const int crossfadeSamples =
+            static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
         juce::AudioBuffer<double> warmup(1, crossfadeSamples + 100);
         warmup.clear();
         stf->processBuffer(warmup);
@@ -78,10 +78,9 @@ TEST_F(EventDrivenRendererTest, ForceRender_SumMatchesLaneMixer) {
 
     // Evaluate at x=0.5 via table lookup (index for x=0.5)
     const int idx = static_cast<int>((0.5 - dsp_core::LaneMixer::MIN_VALUE) /
-        (dsp_core::LaneMixer::MAX_VALUE - dsp_core::LaneMixer::MIN_VALUE) *
-        (dsp_core::LaneMixer::TABLE_SIZE - 1));
-    EXPECT_NEAR(output, expected[static_cast<size_t>(idx)], 0.02)
-        << "Audio output should match direct computeSum";
+                                     (dsp_core::LaneMixer::MAX_VALUE - dsp_core::LaneMixer::MIN_VALUE) *
+                                     (dsp_core::LaneMixer::TABLE_SIZE - 1));
+    EXPECT_NEAR(output, expected[static_cast<size_t>(idx)], 0.02) << "Audio output should match direct computeSum";
 }
 
 // ============================================================================
@@ -119,8 +118,7 @@ TEST_F(EventDrivenRendererTest, ScanChange_MixVersionIncremented) {
     auto& mixer = stf->getLaneMixer();
     const auto mv0 = mixer.getMixVersion();
     mixer.setScanPosition(0.5);
-    EXPECT_GT(mixer.getMixVersion(), mv0)
-        << "Scan position change should increment mix version";
+    EXPECT_GT(mixer.getMixVersion(), mv0) << "Scan position change should increment mix version";
 }
 
 TEST_F(EventDrivenRendererTest, ScanMode_AmplitudeChange_DoesNotAffectAudio) {
@@ -143,10 +141,8 @@ TEST_F(EventDrivenRendererTest, ScanMode_AmplitudeChange_DoesNotAffectAudio) {
     mixer.setLaneAmplitude(2, 1.0);
     renderAndFlushCrossfade();
 
-    EXPECT_NEAR(evaluateAt(0.5), baselineAt05, 1e-10)
-        << "Amplitude change in scan mode should not affect audio output";
-    EXPECT_NEAR(evaluateAt(0.3), baselineAt03, 1e-10)
-        << "Amplitude change in scan mode should not affect audio output";
+    EXPECT_NEAR(evaluateAt(0.5), baselineAt05, 1e-10) << "Amplitude change in scan mode should not affect audio output";
+    EXPECT_NEAR(evaluateAt(0.3), baselineAt03, 1e-10) << "Amplitude change in scan mode should not affect audio output";
 
     // Change another amplitude
     mixer.setLaneAmplitude(1, 0.0);
@@ -173,8 +169,7 @@ TEST_F(EventDrivenRendererTest, VersionTracking_MultipleChangesCoalesce) {
 
     // Final amplitude was 0.99 → should be close to identity * 0.99
     // But with normalization, it's still scaled to [-1,1]
-    EXPECT_NEAR(evaluateAt(0.5), 0.5, 0.01)
-        << "After many changes, render should reflect final state";
+    EXPECT_NEAR(evaluateAt(0.5), 0.5, 0.01) << "After many changes, render should reflect final state";
 }
 
 // ============================================================================
@@ -206,8 +201,7 @@ TEST_F(EventDrivenRendererTest, Integration_CurveDataChange_ReflectedInAudio) {
 
     // Verify it's NOT the identity function anymore
     // (Identity would give 0.0 at x=0.0 and 0.5 at x=0.5)
-    EXPECT_GT(std::abs(evaluateAt(0.0) - 0.0), 0.5)
-        << "Should differ from identity at x=0";
+    EXPECT_GT(std::abs(evaluateAt(0.0) - 0.0), 0.5) << "Should differ from identity at x=0";
 }
 
 // ============================================================================

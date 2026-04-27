@@ -169,14 +169,14 @@ class AnchorClusteringAnalysisTest : public ::testing::Test {
     }
 
     static std::map<std::string, double> computeRegionalErrors(const std::vector<Sample>& samples,
-                                                        const std::vector<dsp_core::SplineAnchor>& anchors) {
+                                                               const std::vector<dsp_core::SplineAnchor>& anchors) {
         std::map<std::string, double> regionErrors;
 
         std::map<std::string, std::pair<double, double>> const regions = {{"x<-0.9", {-1.0, -0.9}},
-                                                                    {"[-0.9,-0.3]", {-0.9, -0.3}},
-                                                                    {"[-0.3,0.3]", {-0.3, 0.3}},
-                                                                    {"[0.3,0.9]", {0.3, 0.9}},
-                                                                    {"x>0.9", {0.9, 1.0}}};
+                                                                          {"[-0.9,-0.3]", {-0.9, -0.3}},
+                                                                          {"[-0.3,0.3]", {-0.3, 0.3}},
+                                                                          {"[0.3,0.9]", {0.3, 0.9}},
+                                                                          {"x>0.9", {0.9, 1.0}}};
 
         for (const auto& [name, range] : regions) {
             double maxErr = 0.0;
@@ -266,7 +266,8 @@ TEST_F(AnchorClusteringAnalysisTest, H3_GreedyFittingStepByStep) {
     std::cout << "\n=== SUMMARY ===" << '\n';
     std::cout << "Total anchor additions: " << records.size() << '\n';
     std::cout << "Symmetry violations: " << symmetryViolations << '\n';
-    std::cout << "Percentage: " << (100.0 * static_cast<double>(symmetryViolations) / static_cast<double>(records.size())) << "%" << '\n';
+    std::cout << "Percentage: "
+              << (100.0 * static_cast<double>(symmetryViolations) / static_cast<double>(records.size())) << "%" << '\n';
 
     if (symmetryViolations > records.size() / 4) {
         std::cout << "\n⚠️  ROOT CAUSE IDENTIFIED: POOR ANCHOR INFLUENCE RADIUS" << '\n';

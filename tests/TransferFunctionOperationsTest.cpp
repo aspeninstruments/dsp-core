@@ -175,7 +175,7 @@ TEST_F(CurveDataOperationsTest, Smooth_SoftensStepFunction) {
     TransferFunctionOperations::smooth(step);
     // Transition region should have intermediate values
     const size_t mid = step.size() / 2;
-    EXPECT_GT(step[mid], -0.9);     // No longer a hard -1→1 jump
+    EXPECT_GT(step[mid], -0.9); // No longer a hard -1→1 jump
     EXPECT_LT(step[mid - 1], 0.9);
 }
 

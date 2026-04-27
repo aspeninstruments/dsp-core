@@ -79,9 +79,9 @@ TEST_F(AnchorEfficiencyMetrics, Tanh_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -102,9 +102,9 @@ TEST_F(AnchorEfficiencyMetrics, Sin_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -120,9 +120,9 @@ TEST_F(AnchorEfficiencyMetrics, H3_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -138,9 +138,9 @@ TEST_F(AnchorEfficiencyMetrics, H5_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -156,9 +156,9 @@ TEST_F(AnchorEfficiencyMetrics, H10_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -174,9 +174,9 @@ TEST_F(AnchorEfficiencyMetrics, H15_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -192,9 +192,9 @@ TEST_F(AnchorEfficiencyMetrics, H20_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -210,9 +210,9 @@ TEST_F(AnchorEfficiencyMetrics, H30_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -228,9 +228,9 @@ TEST_F(AnchorEfficiencyMetrics, H40_AnchorCount) {
 
     auto config = dsp_core::SplineFitConfig::tight();
     auto curveData = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(
-        curveData.data(), static_cast<int>(curveData.size()),
-        ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result =
+        dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                   ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 

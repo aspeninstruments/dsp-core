@@ -46,9 +46,9 @@ TEST_F(AudioEngineTest, Constructor_AllBuffersInitialized) {
     for (int bufIdx = 0; bufIdx < 3; ++bufIdx) {
         for (int i = 0; i < dsp_core::TABLE_SIZE; ++i) {
             const double x = dsp_core::MIN_VALUE + (i / static_cast<double>(dsp_core::TABLE_SIZE - 1)) *
-                                                        (dsp_core::MAX_VALUE - dsp_core::MIN_VALUE);
-            EXPECT_DOUBLE_EQ(buffers[bufIdx].data[i], x) << "Buffer " << bufIdx << " index " << i
-                                                          << " should contain identity value";
+                                                       (dsp_core::MAX_VALUE - dsp_core::MIN_VALUE);
+            EXPECT_DOUBLE_EQ(buffers[bufIdx].data[i], x)
+                << "Buffer " << bufIdx << " index " << i << " should contain identity value";
         }
         EXPECT_EQ(buffers[bufIdx].version, 0u) << "Buffer " << bufIdx << " should have version 0";
     }
@@ -132,7 +132,8 @@ TEST_F(AudioEngineTest, Crossfade_GainsSumToOne) {
     engine->getNewLUTReadyFlag().store(true, std::memory_order_release);
 
     // Process samples for the crossfade duration
-    const int expectedCrossfadeSamples = static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
+    const int expectedCrossfadeSamples =
+        static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
     juce::AudioBuffer<double> buffer(1, expectedCrossfadeSamples);
     buffer.clear(); // Test with x = 0.0
 
@@ -169,7 +170,8 @@ TEST_F(AudioEngineTest, Crossfade_CompletesInCorrectSampleCount) {
     engine->getNewLUTReadyFlag().store(true, std::memory_order_release);
 
     // Process exactly the crossfade duration
-    const int crossfadeSamples = static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0); // 2205
+    const int crossfadeSamples =
+        static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0); // 2205
     juce::AudioBuffer<double> buffer(1, crossfadeSamples);
     for (int i = 0; i < crossfadeSamples; ++i) {
         buffer.setSample(0, i, 0.5);
@@ -240,7 +242,7 @@ TEST_F(AudioEngineTest, Interpolation_CatmullRomWorks) {
     dsp_core::LUTBuffer* buffers = engine->getLUTBuffers();
     for (int i = 0; i < dsp_core::TABLE_SIZE; ++i) {
         const double x = dsp_core::MIN_VALUE + (i / static_cast<double>(dsp_core::TABLE_SIZE - 1)) *
-                                                    (dsp_core::MAX_VALUE - dsp_core::MIN_VALUE);
+                                                   (dsp_core::MAX_VALUE - dsp_core::MIN_VALUE);
         buffers[2].data[i] = x * x; // y = x^2
     }
     buffers[2].version = 1;
@@ -304,10 +306,10 @@ TEST_F(AudioEngineTest, ProcessBlock_HandlesEmptyBlock) {
  * Used for unit testing the smoothstep curve properties
  */
 namespace {
-    inline double smoothstep(double t) {
-        t = std::clamp(t, 0.0, 1.0);
-        return t * t * (3.0 - 2.0 * t);
-    }
+inline double smoothstep(double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
 } // namespace
 
 /**
@@ -408,9 +410,9 @@ TEST_F(AudioEngineTest, SCurveCrossfade_SmoothTransition) {
     engine->processBuffer(buffer);
 
     // Analyze crossfade progression using relative positions
-    const int earlyIdx = crossfadeSamples / 10;       // ~10% through
-    const int midIdx = crossfadeSamples / 2;            // 50% through
-    const int lateIdx = crossfadeSamples - crossfadeSamples / 10;  // ~90% through
+    const int earlyIdx = crossfadeSamples / 10;                   // ~10% through
+    const int midIdx = crossfadeSamples / 2;                      // 50% through
+    const int lateIdx = crossfadeSamples - crossfadeSamples / 10; // ~90% through
 
     const double startOutput = buffer.getSample(0, 0);
     const double earlyOutput = buffer.getSample(0, earlyIdx);
@@ -449,9 +451,9 @@ TEST_F(AudioEngineTest, SCurveCrossfade_GainsConserved) {
     // Both LUTs return 1.0 at x=1.0
     for (int i = 0; i < dsp_core::TABLE_SIZE; ++i) {
         const double x = dsp_core::MIN_VALUE + (i / static_cast<double>(dsp_core::TABLE_SIZE - 1)) *
-                                                    (dsp_core::MAX_VALUE - dsp_core::MIN_VALUE);
-        buffers[0].data[i] = x;  // Identity
-        buffers[2].data[i] = x;  // Also identity (no change expected)
+                                                   (dsp_core::MAX_VALUE - dsp_core::MIN_VALUE);
+        buffers[0].data[i] = x; // Identity
+        buffers[2].data[i] = x; // Also identity (no change expected)
     }
     buffers[2].version = 1;
 
@@ -471,8 +473,7 @@ TEST_F(AudioEngineTest, SCurveCrossfade_GainsConserved) {
     // Since both LUTs return 0.5 at x=0.5, output should be constant 0.5
     // This verifies gains sum to 1.0 (otherwise we'd see a dip or peak)
     for (int i = 0; i < crossfadeSamples; ++i) {
-        EXPECT_NEAR(buffer.getSample(0, i), 0.5, 1e-6)
-            << "Sample " << i << " should be 0.5 (gains sum to 1.0)";
+        EXPECT_NEAR(buffer.getSample(0, i), 0.5, 1e-6) << "Sample " << i << " should be 0.5 (gains sum to 1.0)";
     }
 }
 
@@ -492,7 +493,8 @@ TEST_F(AudioEngineTest, Crossfade_CompletesIn5ms_At44100) {
     engine->getNewLUTReadyFlag().store(true, std::memory_order_release);
 
     // 5ms at 44100Hz = 220 samples
-    const int expectedCrossfadeSamples = static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
+    const int expectedCrossfadeSamples =
+        static_cast<int>(44100.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
     juce::AudioBuffer<double> buffer(1, expectedCrossfadeSamples);
     for (int i = 0; i < expectedCrossfadeSamples; ++i) {
         buffer.setSample(0, i, 0.5);
@@ -517,7 +519,8 @@ TEST_F(AudioEngineTest, Crossfade_CompletesIn5ms_At96000) {
     engine->getNewLUTReadyFlag().store(true, std::memory_order_release);
 
     // 5ms at 96000Hz = 480 samples
-    const int expectedCrossfadeSamples = static_cast<int>(96000.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
+    const int expectedCrossfadeSamples =
+        static_cast<int>(96000.0 * dsp_core::SeamlessConfig::CROSSFADE_DURATION_MS / 1000.0);
     juce::AudioBuffer<double> buffer(1, expectedCrossfadeSamples);
     for (int i = 0; i < expectedCrossfadeSamples; ++i) {
         buffer.setSample(0, i, 0.5);
@@ -569,8 +572,7 @@ TEST_F(AudioEngineTest, CrossfadeInterruption_AcceptsNewLUTDuringCrossfade) {
     juce::AudioBuffer<double> testBuffer(1, 1);
     testBuffer.setSample(0, 0, 0.0);
     engine->processBuffer(testBuffer);
-    EXPECT_NEAR(testBuffer.getSample(0, 0), 0.8, 1e-6)
-        << "After interrupted crossfade, should use the second LUT";
+    EXPECT_NEAR(testBuffer.getSample(0, 0), 0.8, 1e-6) << "After interrupted crossfade, should use the second LUT";
 }
 
 TEST_F(AudioEngineTest, CrossfadeInterruption_TripleBufferSafety) {
@@ -603,8 +605,7 @@ TEST_F(AudioEngineTest, CrossfadeInterruption_TripleBufferSafety) {
     juce::AudioBuffer<double> testBuffer(1, 1);
     testBuffer.setSample(0, 0, 0.0);
     engine->processBuffer(testBuffer);
-    EXPECT_NEAR(testBuffer.getSample(0, 0), 0.6, 1e-6)
-        << "After rapid updates, should converge to latest LUT value";
+    EXPECT_NEAR(testBuffer.getSample(0, 0), 0.6, 1e-6) << "After rapid updates, should converge to latest LUT value";
 }
 
 TEST_F(AudioEngineTest, CrossfadeInterruption_NoContinuityGap) {
@@ -650,13 +651,11 @@ TEST_F(AudioEngineTest, CrossfadeInterruption_NoContinuityGap) {
     // NOT from the crossfade target (0.5). The gap should be tiny.
     const double gap = std::abs(firstSampleAfterInterrupt - lastSampleBeforeInterrupt);
     EXPECT_LT(gap, 0.05) << "Continuity gap should be < 0.05. "
-        << "Before=" << lastSampleBeforeInterrupt
-        << " After=" << firstSampleAfterInterrupt
-        << " Gap=" << gap;
+                         << "Before=" << lastSampleBeforeInterrupt << " After=" << firstSampleAfterInterrupt
+                         << " Gap=" << gap;
 }
 
 // Surge tests removed — surge is no longer in the LUT. Coverage moved to
 // SurgeStageTest.cpp (unit tests) and the SurgeHysteresisIntegration suite.
-
 
 } // namespace dsp_core_test

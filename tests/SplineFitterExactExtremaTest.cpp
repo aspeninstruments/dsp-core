@@ -213,7 +213,8 @@ TEST_F(ExactExtremaTest, SinX_SingleExtremum) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success) << "Fit failed: " << result.message.toStdString();
 
@@ -246,7 +247,8 @@ TEST_F(ExactExtremaTest, Sin2X_ThreeExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -276,7 +278,8 @@ TEST_F(ExactExtremaTest, Sin3X_FiveExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -314,7 +317,8 @@ TEST_F(ExactExtremaTest, Sin5X_NineExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -355,7 +359,8 @@ TEST_F(ExactExtremaTest, Sin10X_NineteenExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -398,7 +403,8 @@ TEST_F(ExactExtremaTest, Sin15X_TwentyNineExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -440,7 +446,8 @@ TEST_F(ExactExtremaTest, CubicPolynomial_InflectionPoint) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -473,7 +480,8 @@ TEST_F(ExactExtremaTest, TanhCurve_InflectionPoint) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -509,7 +517,8 @@ TEST_F(ExactExtremaTest, Harmonic2_NumericalExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -542,7 +551,8 @@ TEST_F(ExactExtremaTest, Harmonic3_NumericalExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -574,7 +584,8 @@ TEST_F(ExactExtremaTest, Harmonic5_NumericalExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -606,7 +617,8 @@ TEST_F(ExactExtremaTest, Harmonic10_NumericalExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -638,7 +650,8 @@ TEST_F(ExactExtremaTest, Harmonic15_NumericalExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 
@@ -671,7 +684,8 @@ TEST_F(ExactExtremaTest, Harmonic20_NumericalExtrema) {
     config.enableFeatureDetection = true;
 
     auto curve = extractCurveData();
-    auto result = dsp_core::Services::SplineFitter::fitCurve(curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
+    auto result = dsp_core::Services::SplineFitter::fitCurve(
+        curve.data(), static_cast<int>(curve.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(), config);
 
     ASSERT_TRUE(result.success);
 

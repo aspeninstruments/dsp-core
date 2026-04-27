@@ -16,8 +16,8 @@ enum class TangentAlgorithm {
 
 // Symmetry detection for anchor placement
 enum class SymmetryDetection {
-    Auto,  // Detect symmetry, enable paired anchors if score >= threshold (default)
-    Never  // Disable symmetric fitting (original greedy algorithm)
+    Auto, // Detect symmetry, enable paired anchors if score >= threshold (default)
+    Never // Disable symmetric fitting (original greedy algorithm)
 };
 
 // Control point with optional tangent override
@@ -236,8 +236,7 @@ struct SplineFitConfig {
     static SplineFitConfig tight() {
         SplineFitConfig cfg;
         cfg.positionTolerance = 0.005; // Relaxed from 0.002 for backtranslation stability
-        cfg.maxAnchors =
-            128; // Optimal for perfect stability (3→3, 4→4) + exceptional quality (0.01% error)
+        cfg.maxAnchors = 128;          // Optimal for perfect stability (3→3, 4→4) + exceptional quality (0.01% error)
         cfg.tangentAlgorithm = TangentAlgorithm::FritschCarlson;
         return cfg;
     }

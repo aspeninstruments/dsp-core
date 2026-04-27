@@ -4,7 +4,7 @@
 namespace dsp_core::audio_pipeline {
 
 namespace {
-constexpr int kMaxChannels = 8; // Support stereo, 5.1, 7.1
+constexpr int kMaxChannels = 8;              // Support stereo, 5.1, 7.1
 constexpr double kMixRampTimeSeconds = 0.01; // 10ms ramp, matches GainStage
 } // namespace
 

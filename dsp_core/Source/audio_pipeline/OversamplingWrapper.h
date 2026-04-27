@@ -51,11 +51,21 @@ class OversamplingWrapper : public AudioProcessingStage {
     }
 
     // Factory helpers for common oversampling factors
-    static constexpr int orderForNone() { return 0; }
-    static constexpr int orderFor2x() { return 1; }
-    static constexpr int orderFor4x() { return 2; }
-    static constexpr int orderFor8x() { return 3; }
-    static constexpr int orderFor16x() { return 4; }
+    static constexpr int orderForNone() {
+        return 0;
+    }
+    static constexpr int orderFor2x() {
+        return 1;
+    }
+    static constexpr int orderFor4x() {
+        return 2;
+    }
+    static constexpr int orderFor8x() {
+        return 3;
+    }
+    static constexpr int orderFor16x() {
+        return 4;
+    }
 
   private:
     std::unique_ptr<AudioProcessingStage> wrappedStage_;

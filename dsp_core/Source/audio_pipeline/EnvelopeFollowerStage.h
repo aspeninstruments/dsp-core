@@ -109,8 +109,8 @@ class EnvelopeFollowerStage : public AudioProcessingStage {
     double rmsCoef_{0.0};
 
     // Audio-thread-only state.
-    double envDb_{kEnvDbFloor_};   // smoother state in dB domain
-    double ms2_{0.0};              // RMS leaky-integrator state (mean-square)
+    double envDb_{kEnvDbFloor_}; // smoother state in dB domain
+    double ms2_{0.0};            // RMS leaky-integrator state (mean-square)
 
     // Per-channel sidechain HPF filters, all sharing one Coefficients object
     // (mutated in-place on cutoff changes — allocation-free per block).

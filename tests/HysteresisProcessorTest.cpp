@@ -53,7 +53,7 @@ class HysteresisProcessorTest : public ::testing::Test {
         return true;
     }
 
-    static constexpr double sampleRate_ = 48000.0 * 16.0;  // 768 kHz (oversampled)
+    static constexpr double sampleRate_ = 48000.0 * 16.0; // 768 kHz (oversampled)
     HysteresisProcessor proc_;
 };
 
@@ -89,8 +89,7 @@ TEST_F(HysteresisProcessorTest, Langevin_KnownValue_MatchesAnalytical) {
 TEST_F(HysteresisProcessorTest, Langevin_OddSymmetry) {
     // L(-x) = -L(x) for various x
     for (double x : {0.1, 0.5, 1.0, 2.0, 5.0}) {
-        EXPECT_NEAR(proc_.langevin(-x), -proc_.langevin(x), 1e-14)
-            << "Odd symmetry violated at x=" << x;
+        EXPECT_NEAR(proc_.langevin(-x), -proc_.langevin(x), 1e-14) << "Odd symmetry violated at x=" << x;
     }
 }
 
@@ -105,8 +104,7 @@ TEST_F(HysteresisProcessorTest, LangevinDeriv_MatchesFiniteDifference) {
     for (double x : {0.5, 1.0, 2.0, 5.0}) {
         double analytical = proc_.langevinDeriv(x);
         double numerical = (proc_.langevin(x + h) - proc_.langevin(x - h)) / (2.0 * h);
-        EXPECT_NEAR(analytical, numerical, 1e-6)
-            << "Derivative mismatch at x=" << x;
+        EXPECT_NEAR(analytical, numerical, 1e-6) << "Derivative mismatch at x=" << x;
     }
 }
 
@@ -117,7 +115,7 @@ TEST_F(HysteresisProcessorTest, CustomNL_ReplacesLangevin) {
     // The custom NL replaces the entire Langevin function
     // langevin(Q) should now apply input mapping then tanh
     // Just verify it's different from standard Langevin
-    double standardResult = 1.0 / std::tanh(1.0) - 1.0;  // L(1.0) ≈ 0.3103
+    double standardResult = 1.0 / std::tanh(1.0) - 1.0; // L(1.0) ≈ 0.3103
     double customResult = proc_.langevin(1.0);
     // tanh-based result will differ from coth-1/x result
     EXPECT_NE(customResult, standardResult);
@@ -137,8 +135,7 @@ TEST_F(HysteresisProcessorTest, DMdt_ReturnsFinite_ForAllParameterExtremes) {
                 proc_.setWidth(width);
                 double result = proc_.dMdt(0.5, 0.5, 1000.0, 1.0);
                 EXPECT_TRUE(std::isfinite(result))
-                    << "dMdt not finite at drive=" << drive
-                    << " sat=" << sat << " width=" << width;
+                    << "dMdt not finite at drive=" << drive << " sat=" << sat << " width=" << width;
             }
         }
     }
@@ -198,7 +195,7 @@ TEST_F(HysteresisProcessorTest, CustomNL_ProducesDifferentLoop) {
     // Reset and use hard clip NL
     proc_.reset();
     proc_.setNonlinearity([](double x) {
-        return std::max(-1.0, std::min(1.0, x * 3.0));  // hard clip at ±1/3
+        return std::max(-1.0, std::min(1.0, x * 3.0)); // hard clip at ±1/3
     });
     auto M_custom = processSignal(H);
     double area_custom = computeLoopArea(H, M_custom);
@@ -214,26 +211,11 @@ TEST_F(HysteresisProcessorTest, GoldenTest_MatchesPythonReference) {
     // Uses same normalized parameters and alpha-transform derivative
     // Regenerated after fix: unified raw derivative for both t1 and t2, delta with deadband
     static const double kReferenceM[] = {
-        0.000000000000000000e+00,
-        1.862820783428839500e-04,
-        3.741089222468699100e-04,
-        5.634769726238643000e-04,
-        7.543826640926138600e-04,
-        9.468224250339505800e-04,
-        1.140792677629677000e-03,
-        1.336289837908787500e-03,
-        1.533310315790437200e-03,
-        1.731850515127762600e-03,
-        1.931906833752000300e-03,
-        2.133475663517463300e-03,
-        2.336553390345533100e-03,
-        2.541136394269726100e-03,
-        2.747221049480261700e-03,
-        2.954803724369233200e-03,
-        3.163880781575850900e-03,
-        3.374448578031558800e-03,
-        3.586503465005659800e-03,
-        3.800041788150730500e-03,
+        0.000000000000000000e+00, 1.862820783428839500e-04, 3.741089222468699100e-04, 5.634769726238643000e-04,
+        7.543826640926138600e-04, 9.468224250339505800e-04, 1.140792677629677000e-03, 1.336289837908787500e-03,
+        1.533310315790437200e-03, 1.731850515127762600e-03, 1.931906833752000300e-03, 2.133475663517463300e-03,
+        2.336553390345533100e-03, 2.541136394269726100e-03, 2.747221049480261700e-03, 2.954803724369233200e-03,
+        3.163880781575850900e-03, 3.374448578031558800e-03, 3.586503465005659800e-03, 3.800041788150730500e-03,
     };
 
     // Generate same 100 Hz sine at 768 kHz
@@ -242,8 +224,7 @@ TEST_F(HysteresisProcessorTest, GoldenTest_MatchesPythonReference) {
         double H = std::sin(2.0 * juce::MathConstants<double>::pi * freq * n / sampleRate_);
         double M = proc_.process(H);
         EXPECT_NEAR(M, kReferenceM[n], 1e-8)
-            << "Golden test mismatch at sample " << n
-            << ": expected " << kReferenceM[n] << " got " << M;
+            << "Golden test mismatch at sample " << n << ": expected " << kReferenceM[n] << " got " << M;
     }
 }
 
@@ -278,33 +259,25 @@ TEST_F(HysteresisProcessorTest, InfInput_ReturnsZero_ResetsState) {
 
 TEST_F(HysteresisProcessorTest, StepFunctionNL_BoundedOutput) {
     // Step function: extreme non-smooth NL
-    proc_.setNonlinearity([](double x) {
-        return (x >= 0.0) ? 1.0 : -1.0;
-    });
+    proc_.setNonlinearity([](double x) { return (x >= 0.0) ? 1.0 : -1.0; });
 
     auto H = generateSine(100.0);
     auto M = processSignal(H);
-    EXPECT_TRUE(allFiniteAndBounded(M, 2.0))
-        << "Step function NL produced unbounded output";
+    EXPECT_TRUE(allFiniteAndBounded(M, 2.0)) << "Step function NL produced unbounded output";
 }
 
 TEST_F(HysteresisProcessorTest, NonMonotonicNL_BoundedOutput) {
     // sin(x) is non-monotonic — can cause ODE divergence
-    proc_.setNonlinearity([](double x) {
-        return std::sin(x * juce::MathConstants<double>::pi);
-    });
+    proc_.setNonlinearity([](double x) { return std::sin(x * juce::MathConstants<double>::pi); });
 
     auto H = generateSine(100.0);
     auto M = processSignal(H);
-    EXPECT_TRUE(allFiniteAndBounded(M, 2.0))
-        << "Non-monotonic NL produced unbounded output";
+    EXPECT_TRUE(allFiniteAndBounded(M, 2.0)) << "Non-monotonic NL produced unbounded output";
 }
 
 TEST_F(HysteresisProcessorTest, AsymmetricNL_DCBlocked) {
     // Asymmetric NL: f(x) = x + 0.1 (biased)
-    proc_.setNonlinearity([](double x) {
-        return std::max(-1.0, std::min(1.0, x + 0.1));
-    });
+    proc_.setNonlinearity([](double x) { return std::max(-1.0, std::min(1.0, x + 0.1)); });
 
     // Process multiple cycles to let DC accumulate
     auto H = generateSine(100.0);
@@ -326,8 +299,7 @@ TEST_F(HysteresisProcessorTest, ConstantNL_BoundedOutput) {
 
     auto H = generateSine(100.0);
     auto M = processSignal(H);
-    EXPECT_TRUE(allFiniteAndBounded(M, 2.0))
-        << "Constant NL produced unbounded output";
+    EXPECT_TRUE(allFiniteAndBounded(M, 2.0)) << "Constant NL produced unbounded output";
 }
 
 TEST_F(HysteresisProcessorTest, IdentityNL_BoundedOutput) {
@@ -336,21 +308,19 @@ TEST_F(HysteresisProcessorTest, IdentityNL_BoundedOutput) {
 
     auto H = generateSine(100.0);
     auto M = processSignal(H);
-    EXPECT_TRUE(allFiniteAndBounded(M, 2.0))
-        << "Identity NL produced unbounded output";
+    EXPECT_TRUE(allFiniteAndBounded(M, 2.0)) << "Identity NL produced unbounded output";
 }
 
 TEST_F(HysteresisProcessorTest, ConsecutiveResets_MutesOutput) {
     // If solver resets > 10 times consecutively, output should be muted
     // Create a pathological NL that always produces NaN
-    proc_.setNonlinearity([](double) {
-        return std::numeric_limits<double>::quiet_NaN();
-    });
+    proc_.setNonlinearity([](double) { return std::numeric_limits<double>::quiet_NaN(); });
 
     int zeroCount = 0;
     for (int i = 0; i < 200; ++i) {
         double out = proc_.process(std::sin(0.1 * i));
-        if (out == 0.0) zeroCount++;
+        if (out == 0.0)
+            zeroCount++;
     }
 
     // Most output should be zero (muted)
@@ -359,12 +329,11 @@ TEST_F(HysteresisProcessorTest, ConsecutiveResets_MutesOutput) {
 
 TEST_F(HysteresisProcessorTest, OutputNeverExceedsBound) {
     // Sweep various NLs and verify output clamp
-    auto H = generateSine(100.0, 5.0);  // large amplitude
+    auto H = generateSine(100.0, 5.0); // large amplitude
 
     auto M = processSignal(H);
     for (size_t n = 0; n < M.size(); ++n) {
-        EXPECT_LE(std::abs(M[n]), 2.0)
-            << "Output exceeded ±2.0 at sample " << n << ": " << M[n];
+        EXPECT_LE(std::abs(M[n]), 2.0) << "Output exceeded ±2.0 at sample " << n << ": " << M[n];
     }
 }
 
@@ -385,8 +354,7 @@ TEST_F(HysteresisProcessorTest, ParameterExtremes_ProduceFiniteOutput) {
 
                 auto M = processSignal(H);
                 EXPECT_TRUE(allFiniteAndBounded(M))
-                    << "Non-finite output at drive=" << drive
-                    << " sat=" << sat << " width=" << width;
+                    << "Non-finite output at drive=" << drive << " sat=" << sat << " width=" << width;
             }
         }
     }
@@ -401,8 +369,7 @@ TEST_F(HysteresisProcessorTest, Reset_ZerosAllState) {
 
     // After reset, zero input should produce zero output
     for (int i = 0; i < 10; ++i) {
-        EXPECT_NEAR(proc_.process(0.0), 0.0, 1e-15)
-            << "State not fully reset at sample " << i;
+        EXPECT_NEAR(proc_.process(0.0), 0.0, 1e-15) << "State not fully reset at sample " << i;
     }
 }
 
@@ -481,10 +448,8 @@ TEST_F(HysteresisProcessorTest, Stress_RapidParameterSweep_Stable) {
         proc_.setWidth(std::abs(std::sin(t * 10.0)));
 
         double out = proc_.process(H[n]);
-        EXPECT_TRUE(std::isfinite(out))
-            << "Non-finite output during parameter sweep at sample " << n;
-        EXPECT_LE(std::abs(out), 2.0)
-            << "Unbounded output during parameter sweep at sample " << n;
+        EXPECT_TRUE(std::isfinite(out)) << "Non-finite output during parameter sweep at sample " << n;
+        EXPECT_LE(std::abs(out), 2.0) << "Unbounded output during parameter sweep at sample " << n;
     }
 }
 
@@ -567,8 +532,7 @@ TEST_F(HysteresisLoopTest, FullyReversible_NoLoop) {
     double area = absLoopArea(H, M);
 
     // Area should be negligible (< 1% of max possible area, which is ~π for unit circle)
-    EXPECT_LT(area, 0.03)
-        << "width=0 (c=1.0, fully reversible) should produce near-zero loop area, got " << area;
+    EXPECT_LT(area, 0.03) << "width=0 (c=1.0, fully reversible) should produce near-zero loop area, got " << area;
 }
 
 TEST_F(HysteresisLoopTest, FullyIrreversible_MaxLoop) {
@@ -576,8 +540,7 @@ TEST_F(HysteresisLoopTest, FullyIrreversible_MaxLoop) {
     auto [H, M] = measureLoop(1.0);
     double area = absLoopArea(H, M);
 
-    EXPECT_GT(area, 0.01)
-        << "width=1 (c≈0, fully irreversible) should produce significant loop area, got " << area;
+    EXPECT_GT(area, 0.01) << "width=1 (c≈0, fully irreversible) should produce significant loop area, got " << area;
 }
 
 TEST_F(HysteresisLoopTest, LoopAreaMonotonicallyIncreasesWithWidth) {
@@ -593,9 +556,8 @@ TEST_F(HysteresisLoopTest, LoopAreaMonotonicallyIncreasesWithWidth) {
 
     for (size_t i = 1; i < areas.size(); ++i) {
         EXPECT_GE(areas[i], areas[i - 1])
-            << "Loop area not monotonically increasing: width=" << widths[i]
-            << " area=" << areas[i] << " < width=" << widths[i - 1]
-            << " area=" << areas[i - 1];
+            << "Loop area not monotonically increasing: width=" << widths[i] << " area=" << areas[i]
+            << " < width=" << widths[i - 1] << " area=" << areas[i - 1];
     }
 }
 
@@ -609,18 +571,16 @@ TEST_F(HysteresisLoopTest, MidWidth_HasModeratLoop) {
     auto [H_max, M_max] = measureLoop(1.0);
     double maxArea = absLoopArea(H_max, M_max);
 
-    EXPECT_GT(area, maxArea * 0.1)
-        << "width=0.5 loop area (" << area << ") is too small relative to width=1.0 (" << maxArea << ")";
+    EXPECT_GT(area, maxArea * 0.1) << "width=0.5 loop area (" << area << ") is too small relative to width=1.0 ("
+                                   << maxArea << ")";
 }
 
 TEST_F(HysteresisLoopTest, AllWidths_ProduceFiniteOutput) {
     for (double w = 0.0; w <= 1.0; w += 0.1) {
         auto [H, M] = measureLoop(w);
         for (size_t i = 0; i < M.size(); ++i) {
-            ASSERT_TRUE(std::isfinite(M[i]))
-                << "Non-finite output at width=" << w << " sample=" << i;
-            ASSERT_LE(std::abs(M[i]), 2.0)
-                << "Unbounded output at width=" << w << " sample=" << i << " value=" << M[i];
+            ASSERT_TRUE(std::isfinite(M[i])) << "Non-finite output at width=" << w << " sample=" << i;
+            ASSERT_LE(std::abs(M[i]), 2.0) << "Unbounded output at width=" << w << " sample=" << i << " value=" << M[i];
         }
     }
 }
@@ -628,7 +588,8 @@ TEST_F(HysteresisLoopTest, AllWidths_ProduceFiniteOutput) {
 TEST_F(HysteresisLoopTest, SignalLevel_ConsistentAcrossWidthRange) {
     auto peakOf = [](const std::vector<double>& M) {
         double peak = 0.0;
-        for (double m : M) peak = std::max(peak, std::abs(m));
+        for (double m : M)
+            peak = std::max(peak, std::abs(m));
         return peak;
     };
 
@@ -647,11 +608,11 @@ TEST_F(HysteresisLoopTest, NoDCBias_AcrossWidthRange) {
     for (double w : {0.0, 0.01, 0.1, 0.5, 1.0}) {
         auto [H, M] = measureLoop(w);
         double mean = 0.0;
-        for (double m : M) mean += m;
+        for (double m : M)
+            mean += m;
         mean /= static_cast<double>(M.size());
 
-        EXPECT_LT(std::abs(mean), 0.01)
-            << "DC bias at width=" << w << ": mean=" << mean;
+        EXPECT_LT(std::abs(mean), 0.01) << "DC bias at width=" << w << ": mean=" << mean;
     }
 }
 
@@ -666,8 +627,7 @@ TEST_F(HysteresisLoopTest, FineResolution_SmallWidthIncrements) {
 
     for (size_t i = 1; i < areas.size(); ++i) {
         EXPECT_GE(areas[i], areas[i - 1])
-            << "Loop area not monotonic at fine resolution: width=" << widths[i]
-            << " area=" << areas[i] << " < width=" << widths[i - 1]
-            << " area=" << areas[i - 1];
+            << "Loop area not monotonic at fine resolution: width=" << widths[i] << " area=" << areas[i]
+            << " < width=" << widths[i - 1] << " area=" << areas[i - 1];
     }
 }

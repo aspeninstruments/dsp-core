@@ -59,7 +59,6 @@ TEST_F(LayeredTransferFunctionTest, UpdateComposite_NormalizesNegativeValues) {
     // Compute normalization scalar (simulates what renderer does)
     ltf->updateNormalizationScalar();
 
-
     // Composite should be normalized to [-1, 1]
     for (int i = 0; i < 256; ++i) {
         double const value = ltf->computeCompositeAt(i);
@@ -73,7 +72,6 @@ TEST_F(LayeredTransferFunctionTest, UpdateComposite_MaintainsRelativeProportions
     ltf->setBaseLayerValue(100, 2.0);
     ltf->setBaseLayerValue(150, 4.0); // Double the value at index 100
     ltf->setCoefficient(0, 1.0);      // 100% WT mix
-
 
     // After normalization, proportions should be maintained
     double const value100 = ltf->computeCompositeAt(100);
@@ -183,7 +181,6 @@ TEST_F(LayeredTransferFunctionTest, HarmonicMixing_WeightedSum) {
     // Set known base layer value
     ltf->setBaseLayerValue(100, 1.0);
 
-
     // Composite should be weighted sum (after normalization)
     // Exact value depends on harmonic evaluation, but should be in range
     double const composite = ltf->computeCompositeAt(100);
@@ -200,7 +197,6 @@ TEST_F(LayeredTransferFunctionTest, HarmonicMixing_ZeroWTCoeff) {
     for (int i = 0; i < 256; ++i) {
         ltf->setBaseLayerValue(i, 1.0);
     }
-
 
     // Composite should only reflect harmonic contribution
     // (base layer is ignored when WT coeff = 0)
@@ -221,7 +217,6 @@ TEST_F(LayeredTransferFunctionTest, HarmonicMixing_MultipleHarmonics) {
     for (int i = 0; i < 256; ++i) {
         ltf->setBaseLayerValue(i, static_cast<double>(i) / 256.0);
     }
-
 
     // All composites should be in valid range
     for (int i = 0; i < 256; ++i) {
@@ -339,11 +334,11 @@ TEST_F(LayeredTransferFunctionTest, ComputeCompositeAtMatchesGetCompositeValue) 
     auto ltf16k = std::make_unique<dsp_core::LayeredTransferFunction>(16384, -1.0, 1.0);
 
     // Set some harmonic coefficients
-    ltf16k->setCoefficient(1, 0.5);  // h1 = 0.5
-    ltf16k->setCoefficient(2, 0.3);  // h2 = 0.3
+    ltf16k->setCoefficient(1, 0.5); // h1 = 0.5
+    ltf16k->setCoefficient(2, 0.3); // h2 = 0.3
 
     // Verify on-demand composite computation works correctly
-    for (int i = 0; i < 16384; i += 1000) {  // Sample every 1000 points
+    for (int i = 0; i < 16384; i += 1000) { // Sample every 1000 points
         const double value = ltf16k->computeCompositeAt(i);
         // Value should be valid (no NaN/inf)
         EXPECT_TRUE(std::isfinite(value)) << "Invalid value at index " << i;
@@ -360,7 +355,7 @@ TEST_F(LayeredTransferFunctionTest, ComputeCompositeAtBoundsCheck) {
     EXPECT_DOUBLE_EQ(ltf16k->computeCompositeAt(100000), 0.0);
 
     // In bounds should return valid value (identity function at center)
-    double const centerValue = ltf16k->computeCompositeAt(8192);  // Identity at x=0 is 0
+    double const centerValue = ltf16k->computeCompositeAt(8192); // Identity at x=0 is 0
     EXPECT_NEAR(centerValue, 0.0, 0.01);
 }
 
@@ -809,8 +804,7 @@ TEST_F(LayeredTransferFunctionTest, BatchUpdate_NestedGuardsNotSupported) {
 TEST_F(LayeredTransferFunctionTest, SetSplineAnchors_IncrementsVersion) {
     uint64_t const versionBefore = ltf->getVersion();
 
-    std::vector<dsp_core::SplineAnchor> const anchors = {
-        {-1.0, -1.0, false, 0.0}, {1.0, 1.0, false, 0.0}};
+    std::vector<dsp_core::SplineAnchor> const anchors = {{-1.0, -1.0, false, 0.0}, {1.0, 1.0, false, 0.0}};
     ltf->setSplineAnchors(anchors);
 
     EXPECT_EQ(ltf->getVersion(), versionBefore + 1);
@@ -818,8 +812,7 @@ TEST_F(LayeredTransferFunctionTest, SetSplineAnchors_IncrementsVersion) {
 
 TEST_F(LayeredTransferFunctionTest, ClearSplineAnchors_IncrementsVersion) {
     // First set some anchors
-    std::vector<dsp_core::SplineAnchor> const anchors = {
-        {-1.0, -1.0, false, 0.0}, {1.0, 1.0, false, 0.0}};
+    std::vector<dsp_core::SplineAnchor> const anchors = {{-1.0, -1.0, false, 0.0}, {1.0, 1.0, false, 0.0}};
     ltf->setSplineAnchors(anchors);
 
     uint64_t const versionBefore = ltf->getVersion();

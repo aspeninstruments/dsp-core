@@ -59,8 +59,8 @@ class SoftClippingSolver {
         b_ = a_ + (1.0 - a_) * kPiOver2;
 
         // Precompute for efficiency
-        outputRange_ = 1.0 - a_;       // Output goes from a to 1
-        inputRange_ = b_ - a_;         // Input goes from a to b
+        outputRange_ = 1.0 - a_; // Output goes from a to 1
+        inputRange_ = b_ - a_;   // Input goes from a to b
         invInputRange_ = 1.0 / inputRange_;
     }
 
@@ -97,7 +97,7 @@ class SoftClippingSolver {
         }
 
         // Quarter sine transition from (a, a) to (b, 1)
-        double t = (u - a_) * invInputRange_;  // t ∈ [0, 1]
+        double t = (u - a_) * invInputRange_; // t ∈ [0, 1]
         constexpr double kPiOver2 = juce::MathConstants<double>::pi / 2.0;
         double y = a_ + outputRange_ * std::sin(kPiOver2 * t);
 
@@ -116,18 +116,20 @@ class SoftClippingSolver {
      */
     [[nodiscard]] double derivative(double x) const {
         const double u = std::abs(x);
-        if (u <= a_) return 1.0;
-        if (u >= b_) return 0.0;
+        if (u <= a_)
+            return 1.0;
+        if (u >= b_)
+            return 0.0;
         constexpr double kPiOver2 = juce::MathConstants<double>::pi / 2.0;
         const double t = (u - a_) * invInputRange_;
         return std::cos(kPiOver2 * t);
     }
 
   private:
-    double a_ = 0.95;           // Knee threshold (input level where limiting starts)
-    double b_ = 1.0285;         // Saturation threshold (input level where output = 1)
-    double outputRange_ = 0.05; // 1 - a
-    double inputRange_ = 0.0785; // b - a
+    double a_ = 0.95;              // Knee threshold (input level where limiting starts)
+    double b_ = 1.0285;            // Saturation threshold (input level where output = 1)
+    double outputRange_ = 0.05;    // 1 - a
+    double inputRange_ = 0.0785;   // b - a
     double invInputRange_ = 12.74; // 1 / (b - a)
 };
 
@@ -157,8 +159,7 @@ class SoftClippingStage : public AudioProcessingStage {
      * Construct with custom transition point.
      * @param transitionPoint Transition from linear to sine (0.001 to 0.999)
      */
-    explicit SoftClippingStage(double transitionPoint) : solver_(transitionPoint) {
-    }
+    explicit SoftClippingStage(double transitionPoint) : solver_(transitionPoint) {}
 
     // AudioProcessingStage interface
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;

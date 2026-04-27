@@ -29,22 +29,42 @@ class LfoStage : public AudioProcessingStage {
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
-    juce::String getName() const override { return "Lfo"; }
+    juce::String getName() const override {
+        return "Lfo";
+    }
 
-    void setEnabled(bool shouldBeEnabled) { enabled_.store(shouldBeEnabled, std::memory_order_release); }
-    bool isEnabled() const { return enabled_.load(std::memory_order_acquire); }
+    void setEnabled(bool shouldBeEnabled) {
+        enabled_.store(shouldBeEnabled, std::memory_order_release);
+    }
+    bool isEnabled() const {
+        return enabled_.load(std::memory_order_acquire);
+    }
 
-    void setShape(Shape s) { shape_.store(static_cast<int>(s), std::memory_order_release); }
-    void setUnits(Units u) { units_.store(static_cast<int>(u), std::memory_order_release); }
-    void setRateHz(double hz) { rateHz_.store(hz, std::memory_order_release); }
-    void setDivision(Division d) { division_.store(static_cast<int>(d), std::memory_order_release); }
-    void setFlavor(Flavor f) { flavor_.store(static_cast<int>(f), std::memory_order_release); }
-    void setSeed(unsigned int seed) { seed_.store(seed, std::memory_order_release); }
+    void setShape(Shape s) {
+        shape_.store(static_cast<int>(s), std::memory_order_release);
+    }
+    void setUnits(Units u) {
+        units_.store(static_cast<int>(u), std::memory_order_release);
+    }
+    void setRateHz(double hz) {
+        rateHz_.store(hz, std::memory_order_release);
+    }
+    void setDivision(Division d) {
+        division_.store(static_cast<int>(d), std::memory_order_release);
+    }
+    void setFlavor(Flavor f) {
+        flavor_.store(static_cast<int>(f), std::memory_order_release);
+    }
+    void setSeed(unsigned int seed) {
+        seed_.store(seed, std::memory_order_release);
+    }
 
     /// Phase offset in normalized cycles (degrees / 360). Applied before wave
     /// evaluation so it shifts where the cycle starts relative to the beat in
     /// BPM mode (and the free-run cycle in Hz mode).
-    void setPhaseOffset(double normalized) { phaseOffset_.store(normalized, std::memory_order_release); }
+    void setPhaseOffset(double normalized) {
+        phaseOffset_.store(normalized, std::memory_order_release);
+    }
 
     /// Set once per block from the audio thread before process(). bpm and
     /// ppqPosition come straight from juce::AudioPlayHead. isPlaying gates

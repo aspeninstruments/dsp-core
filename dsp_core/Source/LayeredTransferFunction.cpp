@@ -11,17 +11,17 @@ namespace dsp_core {
 std::atomic<int> LayeredTransferFunction::instanceCounter{0};
 
 namespace {
-    // Number of harmonics for harmonic layer synthesis
-    constexpr int kNumHarmonics = 40;
-    // Total coefficients: [0] = wavetable mix, [1..40] = harmonic amplitudes
-    constexpr int kTotalCoefficients = kNumHarmonics + 1;
-    // Epsilon for zero comparison in normalization
-    constexpr double kNormalizationEpsilon = 1e-12;
+// Number of harmonics for harmonic layer synthesis
+constexpr int kNumHarmonics = 40;
+// Total coefficients: [0] = wavetable mix, [1..40] = harmonic amplitudes
+constexpr int kTotalCoefficients = kNumHarmonics + 1;
+// Epsilon for zero comparison in normalization
+constexpr double kNormalizationEpsilon = 1e-12;
 } // namespace
 
 LayeredTransferFunction::LayeredTransferFunction(int tableSize, double minVal, double maxVal)
-    : instanceId(instanceCounter.fetch_add(1, std::memory_order_relaxed)),
-      tableSize(tableSize), minValue(minVal), maxValue(maxVal), harmonicLayer(std::make_unique<HarmonicLayer>(kNumHarmonics)),
+    : instanceId(instanceCounter.fetch_add(1, std::memory_order_relaxed)), tableSize(tableSize), minValue(minVal),
+      maxValue(maxVal), harmonicLayer(std::make_unique<HarmonicLayer>(kNumHarmonics)),
       splineLayer(std::make_unique<SplineLayer>()), // NEW: Initialize spline layer
       coefficients(kTotalCoefficients, 0.0),        // kTotalCoefficients: [0] = WT, [1..40] = harmonics
       baseTable(tableSize) {
@@ -178,7 +178,7 @@ bool LayeredTransferFunction::bakeHarmonicsToBase() {
     // If WT != 1.0, we must bake even with no harmonics because composite = WT * base
     const bool wtIsOne = std::abs(coefficients[0] - 1.0) <= HARMONIC_EPSILON;
     if (wtIsOne && !hasNonZeroHarmonics()) {
-        return false;  // Composite already equals base layer, nothing to bake
+        return false; // Composite already equals base layer, nothing to bake
     }
 
     // Batch update guard: Defer version increment until end of function
@@ -194,7 +194,7 @@ bool LayeredTransferFunction::bakeHarmonicsToBase() {
     // computeCompositeAt() will use the cached scalar we just computed
     for (int i = 0; i < tableSize; ++i) {
         const double compositeValue = computeCompositeAt(i);
-        setBaseLayerValue(i, compositeValue);  // No version increment (batched)
+        setBaseLayerValue(i, compositeValue); // No version increment (batched)
     }
 
     // Step 3: Set WT coefficient to 1.0 (enables the baked base layer)
@@ -230,7 +230,7 @@ void LayeredTransferFunction::bakeCompositeToBase() {
     // computeCompositeAt() will use the cached scalar we just computed
     for (int i = 0; i < tableSize; ++i) {
         const double compositeValue = computeCompositeAt(i);
-        setBaseLayerValue(i, compositeValue);  // No version increment (batched)
+        setBaseLayerValue(i, compositeValue); // No version increment (batched)
     }
 
     // Step 3: Set WT coefficient to 1.0 (enable base layer)
@@ -257,7 +257,7 @@ void LayeredTransferFunction::bakeSplineToBase() {
     // Step 1: Get current spline anchors
     const auto& anchors = splineLayer->getAnchors();
     if (anchors.empty()) {
-        return;  // No spline to bake
+        return; // No spline to bake
     }
 
     // Step 2: Batch evaluate spline at all table indices
@@ -610,36 +610,34 @@ double LayeredTransferFunction::evaluateForRendering(double x, double normScalar
     const RenderingMode mode = getRenderingMode();
 
     switch (mode) {
-        case RenderingMode::Spline:
-            // Direct spline evaluation (bypasses base + harmonics)
-            return splineLayer->evaluate(x);
+    case RenderingMode::Spline:
+        // Direct spline evaluation (bypasses base + harmonics)
+        return splineLayer->evaluate(x);
 
-        case RenderingMode::Paint:
-        {
-            // Paint mode: Direct base layer output (no normalization, no harmonics)
-            // Invariant: Harmonics should be baked into base layer (wtCoeff = 1.0, harmonics = 0)
-            // We skip wtCoeff multiplication for performance (always 1.0 in Paint mode)
-            return getBaseValueAt(x);  // Direct base read, NO NORMALIZATION
+    case RenderingMode::Paint: {
+        // Paint mode: Direct base layer output (no normalization, no harmonics)
+        // Invariant: Harmonics should be baked into base layer (wtCoeff = 1.0, harmonics = 0)
+        // We skip wtCoeff multiplication for performance (always 1.0 in Paint mode)
+        return getBaseValueAt(x); // Direct base read, NO NORMALIZATION
+    }
+
+    case RenderingMode::Harmonic:
+    default: {
+        // Harmonic mode: Base + harmonics with normalization
+        const double wtCoeff = coefficients[0];
+        const double baseValue = getBaseValueAt(x);
+
+        // OPTIMIZATION: Early-exit if all harmonics are zero
+        // Saves 40 coefficient loads + harmonic evaluation (sin/cos computations)
+        if (!hasNonZeroHarmonics()) {
+            const double unnormalized = wtCoeff * baseValue;
+            return normScalar * unnormalized; // Base only, WITH NORMALIZATION
         }
 
-        case RenderingMode::Harmonic:
-        default:
-        {
-            // Harmonic mode: Base + harmonics with normalization
-            const double wtCoeff = coefficients[0];
-            const double baseValue = getBaseValueAt(x);
-
-            // OPTIMIZATION: Early-exit if all harmonics are zero
-            // Saves 40 coefficient loads + harmonic evaluation (sin/cos computations)
-            if (!hasNonZeroHarmonics()) {
-                const double unnormalized = wtCoeff * baseValue;
-                return normScalar * unnormalized;  // Base only, WITH NORMALIZATION
-            }
-
-            const double harmonicValue = harmonicLayer->evaluate(x, coefficients, tableSize);
-            const double unnormalized = wtCoeff * baseValue + harmonicValue;
-            return normScalar * unnormalized;  // WITH NORMALIZATION
-        }
+        const double harmonicValue = harmonicLayer->evaluate(x, coefficients, tableSize);
+        const double unnormalized = wtCoeff * baseValue + harmonicValue;
+        return normScalar * unnormalized; // WITH NORMALIZATION
+    }
     }
 }
 
@@ -741,9 +739,7 @@ void LayeredTransferFunction::fromValueTree(const juce::ValueTree& vt) {
         // That enum value is gone — fall back to Linear (no crash, sensible default).
         // The user is responsible for re-saving presets that relied on Surge mode.
         const int raw = static_cast<int>(vt.getProperty("extrapolationMode"));
-        extrapMode = (raw >= 0 && raw <= 2)
-                         ? static_cast<ExtrapolationMode>(raw)
-                         : ExtrapolationMode::Linear;
+        extrapMode = (raw >= 0 && raw <= 2) ? static_cast<ExtrapolationMode>(raw) : ExtrapolationMode::Linear;
     }
 
     // Increment version to trigger LUT render on preset load

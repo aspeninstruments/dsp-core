@@ -56,8 +56,8 @@ TEST(FeatureDetectionDiagnostic, ArbitraryPositions_FeatureAnalysis) {
         featureConfig.derivativeThreshold = 1e-6;
 
         auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
+            curveData.data(), static_cast<int>(curveData.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(),
+            featureConfig);
 
         std::cout << "\nConfig: significanceThreshold=0.0 (detect all)" << '\n';
         std::cout << "  Local extrema: " << features.localExtrema.size() << '\n';
@@ -65,8 +65,7 @@ TEST(FeatureDetectionDiagnostic, ArbitraryPositions_FeatureAnalysis) {
             int const idx = features.localExtrema[i];
             double const x = ltf->normalizeIndex(idx);
             double const y = ltf->evaluateBaseAndHarmonics(x);
-            std::cout << "    [" << i << "] idx=" << idx << ", x=" << std::setprecision(6) << x << ", y=" << y
-                      << '\n';
+            std::cout << "    [" << i << "] idx=" << idx << ", x=" << std::setprecision(6) << x << ", y=" << y << '\n';
         }
 
         std::cout << "  Total mandatory anchors: " << features.mandatoryAnchors.size() << '\n';
@@ -79,8 +78,8 @@ TEST(FeatureDetectionDiagnostic, ArbitraryPositions_FeatureAnalysis) {
         featureConfig.derivativeThreshold = 1e-6;
 
         auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
+            curveData.data(), static_cast<int>(curveData.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(),
+            featureConfig);
 
         std::cout << "\nConfig: significanceThreshold=0.001 (production)" << '\n';
         std::cout << "  Local extrema: " << features.localExtrema.size() << '\n';
@@ -94,8 +93,8 @@ TEST(FeatureDetectionDiagnostic, ArbitraryPositions_FeatureAnalysis) {
         featureConfig.derivativeThreshold = 1e-5; // 10x higher
 
         auto features = dsp_core::Services::CurveFeatureDetector::detectFeatures(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), featureConfig);
+            curveData.data(), static_cast<int>(curveData.size()), ltf->getMinSignalValue(), ltf->getMaxSignalValue(),
+            featureConfig);
 
         std::cout << "\nConfig: Higher derivative threshold (1e-5)" << '\n';
         std::cout << "  Local extrema: " << features.localExtrema.size() << '\n';
@@ -111,9 +110,9 @@ TEST(FeatureDetectionDiagnostic, ArbitraryPositions_FeatureAnalysis) {
         fitConfig.featureConfig.significanceThreshold = 0.001;
         fitConfig.featureConfig.derivativeThreshold = 1e-6;
 
-        auto result = dsp_core::Services::SplineFitter::fitCurve(
-            curveData.data(), static_cast<int>(curveData.size()),
-            ltf->getMinSignalValue(), ltf->getMaxSignalValue(), fitConfig);
+        auto result =
+            dsp_core::Services::SplineFitter::fitCurve(curveData.data(), static_cast<int>(curveData.size()),
+                                                       ltf->getMinSignalValue(), ltf->getMaxSignalValue(), fitConfig);
 
         std::cout << "\nRefit with feature detection: " << result.anchors.size() << " anchors" << '\n';
         for (size_t i = 0; i < result.anchors.size(); ++i) {

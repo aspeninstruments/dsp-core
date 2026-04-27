@@ -76,8 +76,7 @@ void applyBoxFilter(std::vector<double>& curveData, int requestedRadius) {
             slope = std::clamp(slope, -kMaxSlope, kMaxSlope);
             return curveData[0] + slope * k;
         }
-        double slope = curveData[static_cast<size_t>(tableSize - 1)] -
-                        curveData[static_cast<size_t>(tableSize - 2)];
+        double slope = curveData[static_cast<size_t>(tableSize - 1)] - curveData[static_cast<size_t>(tableSize - 2)];
         slope = std::clamp(slope, -kMaxSlope, kMaxSlope);
         return curveData[static_cast<size_t>(tableSize - 1)] + slope * (k - (tableSize - 1));
     };
@@ -141,23 +140,20 @@ void remapWithPivot(std::vector<double>& curveData, double pivotFromX, double pi
     }
 
     std::vector<double> out(static_cast<size_t>(n));
-    const double leftScale = (pivotFromX + 1.0) / (pivotToX + 1.0);    // new→orig on [-1, pivot]
-    const double rightScale = (1.0 - pivotFromX) / (1.0 - pivotToX);   // new→orig on [pivot, 1]
+    const double leftScale = (pivotFromX + 1.0) / (pivotToX + 1.0);  // new→orig on [-1, pivot]
+    const double rightScale = (1.0 - pivotFromX) / (1.0 - pivotToX); // new→orig on [pivot, 1]
     const auto lastIdx = static_cast<double>(n - 1);
 
     for (int i = 0; i < n; ++i) {
         const double nx = -1.0 + 2.0 * static_cast<double>(i) / lastIdx;
-        const double ox = (nx <= pivotToX)
-                              ? -1.0 + (nx + 1.0) * leftScale
-                              : pivotFromX + (nx - pivotToX) * rightScale;
+        const double ox = (nx <= pivotToX) ? -1.0 + (nx + 1.0) * leftScale : pivotFromX + (nx - pivotToX) * rightScale;
 
         const double fIdx = std::clamp((ox + 1.0) * 0.5 * lastIdx, 0.0, lastIdx);
         const int i0 = static_cast<int>(std::floor(fIdx));
         const int i1 = std::min(i0 + 1, n - 1);
         const double f = fIdx - static_cast<double>(i0);
         out[static_cast<size_t>(i)] =
-            curveData[static_cast<size_t>(i0)] * (1.0 - f) +
-            curveData[static_cast<size_t>(i1)] * f;
+            curveData[static_cast<size_t>(i0)] * (1.0 - f) + curveData[static_cast<size_t>(i1)] * f;
     }
     curveData = std::move(out);
 }
@@ -206,11 +202,9 @@ std::optional<double> findNearestZeroCrossing(const std::vector<double>& curveDa
     // Scan outward from mid; within each offset return the nearer (to x=0) of left/right.
     for (int off = 0; off <= maxOffset; ++off) {
         auto leftCandidate = crossingInSegment(curveData, mid - off, n);
-        auto rightCandidate = (off == 0) ? std::nullopt
-                                         : crossingInSegment(curveData, mid + off - 1, n);
+        auto rightCandidate = (off == 0) ? std::nullopt : crossingInSegment(curveData, mid + off - 1, n);
         if (leftCandidate && rightCandidate) {
-            return std::abs(*leftCandidate) <= std::abs(*rightCandidate) ? leftCandidate
-                                                                         : rightCandidate;
+            return std::abs(*leftCandidate) <= std::abs(*rightCandidate) ? leftCandidate : rightCandidate;
         }
         if (leftCandidate) {
             return leftCandidate;

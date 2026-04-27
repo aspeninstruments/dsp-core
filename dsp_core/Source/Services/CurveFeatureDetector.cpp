@@ -6,7 +6,8 @@
 namespace dsp_core::Services {
 
 double CurveFeatureDetector::normalizeIndex(int index, int tableSize, double minValue, double maxValue) {
-    if (tableSize <= 1) return minValue;
+    if (tableSize <= 1)
+        return minValue;
     return minValue + (maxValue - minValue) * static_cast<double>(index) / static_cast<double>(tableSize - 1);
 }
 
@@ -29,7 +30,8 @@ CurveFeatureDetector::FeatureResult CurveFeatureDetector::detectFeatures(const d
 
     // Detect features
     std::vector<Feature> features;
-    detectLocalExtrema(curveData, tableSize, minValue, maxValue, config, amplitudeThreshold, verticalCenter, result, features);
+    detectLocalExtrema(curveData, tableSize, minValue, maxValue, config, amplitudeThreshold, verticalCenter, result,
+                       features);
 
     // Build mandatory anchors list
     prioritizeFeatures(config, tableSize, result, features);
@@ -43,8 +45,8 @@ CurveFeatureDetector::FeatureResult CurveFeatureDetector::detectFeatures(const d
 }
 
 void CurveFeatureDetector::detectLocalExtrema(const double* curveData, int tableSize, double minValue, double maxValue,
-                                              const FeatureDetectionConfig& config,
-                                              double amplitudeThreshold, double verticalCenter, FeatureResult& result,
+                                              const FeatureDetectionConfig& config, double amplitudeThreshold,
+                                              double verticalCenter, FeatureResult& result,
                                               std::vector<Feature>& features) {
 
     for (int i = 1; i < tableSize - 1; ++i) {
@@ -125,7 +127,8 @@ void CurveFeatureDetector::prioritizeFeatures(const FeatureDetectionConfig& conf
     }
 }
 
-double CurveFeatureDetector::estimateDerivative(const double* curveData, int tableSize, double minValue, double maxValue, int idx) {
+double CurveFeatureDetector::estimateDerivative(const double* curveData, int tableSize, double minValue,
+                                                double maxValue, int idx) {
     // Forward difference for first point
     if (idx == 0) {
         const double x0 = normalizeIndex(0, tableSize, minValue, maxValue);

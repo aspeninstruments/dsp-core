@@ -4,9 +4,9 @@
 namespace dsp_core::audio_pipeline {
 
 namespace {
-    // Cutoff frequency limits (safety: preserve low-end, avoid audible filtering)
-    constexpr double kMinFrequencyHz = 1.0;
-    constexpr double kMaxFrequencyHz = 20.0;
+// Cutoff frequency limits (safety: preserve low-end, avoid audible filtering)
+constexpr double kMinFrequencyHz = 1.0;
+constexpr double kMaxFrequencyHz = 20.0;
 } // namespace
 
 void DCBlockingFilter::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {

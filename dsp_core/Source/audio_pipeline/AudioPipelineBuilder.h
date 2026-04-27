@@ -36,8 +36,7 @@ class AudioPipelineBuilder {
      * @param args Arguments forwarded to StageType constructor
      * @return Reference to this builder for chaining
      */
-    template <typename StageType, typename... Args>
-    AudioPipelineBuilder& addStage(StageTag tag, Args&&... args) {
+    template <typename StageType, typename... Args> AudioPipelineBuilder& addStage(StageTag tag, Args&&... args) {
         jassert(!built_ && "Cannot modify builder after build()");
 
         auto stage = std::make_unique<StageType>(std::forward<Args>(args)...);
@@ -95,19 +94,19 @@ class AudioPipelineBuilder {
      * @return Reference to this builder for chaining
      */
     template <typename OuterType, typename InnerType, typename... OuterArgs, typename... InnerArgs>
-    AudioPipelineBuilder& addWrappedWithOuterArgs(
-        StageTag tag,
-        std::tuple<OuterArgs...> outerArgs,
-        InnerArgs&&... innerArgs) {
+    AudioPipelineBuilder& addWrappedWithOuterArgs(StageTag tag, std::tuple<OuterArgs...> outerArgs,
+                                                  InnerArgs&&... innerArgs) {
 
         jassert(!built_ && "Cannot modify builder after build()");
 
         auto inner = std::make_unique<InnerType>(std::forward<InnerArgs>(innerArgs)...);
 
         // Apply tuple as additional constructor arguments after inner stage
-        auto outer = std::apply([&inner](auto&&... args) {
-            return std::make_unique<OuterType>(std::move(inner), std::forward<decltype(args)>(args)...);
-        }, std::move(outerArgs));
+        auto outer = std::apply(
+            [&inner](auto&&... args) {
+                return std::make_unique<OuterType>(std::move(inner), std::forward<decltype(args)>(args)...);
+            },
+            std::move(outerArgs));
 
         auto* rawPtr = outer.get();
         pipeline_->addStage(std::move(outer), tag);

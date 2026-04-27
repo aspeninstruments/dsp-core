@@ -31,8 +31,7 @@ class StageHandles {
      * @param tag StageTag used when adding the stage
      * @return Pointer to stage, or nullptr if not found or type mismatch
      */
-    template <typename StageType>
-    StageType* get(StageTag tag) const {
+    template <typename StageType> StageType* get(StageTag tag) const {
         auto it = handles_.find(stageTagToString(tag));
         if (it == handles_.end()) {
             return nullptr;

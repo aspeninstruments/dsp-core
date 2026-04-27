@@ -34,8 +34,7 @@ class SplineFitter {
      * @param config     Fitting configuration
      * @return Fit result with anchors and error metrics
      */
-    static SplineFitResult fitCurve(const double* curveData, int tableSize,
-                                    double minValue, double maxValue,
+    static SplineFitResult fitCurve(const double* curveData, int tableSize, double minValue, double maxValue,
                                     const SplineFitConfig& config = SplineFitConfig::tight());
 
     // Tangent computation (exposed for manual anchor manipulation)
@@ -48,9 +47,8 @@ class SplineFitter {
     struct Sample {
         double x, y;
     };
-    static std::vector<Sample> sampleAndSanitize(const double* curveData, int tableSize,
-                                                  double minValue, double maxValue,
-                                                  const SplineFitConfig& config);
+    static std::vector<Sample> sampleAndSanitize(const double* curveData, int tableSize, double minValue,
+                                                 double maxValue, const SplineFitConfig& config);
 
     // Sub-steps of sanitize
     static void sortByX(std::vector<Sample>& samples);
@@ -84,9 +82,9 @@ class SplineFitter {
                                              const std::vector<SplineAnchor>& anchors);
 
     // Helper methods for greedySplineFit to reduce cognitive complexity
-    static std::vector<SplineAnchor> initializeAnchorsFromIndices(const std::vector<Sample>& samples,
-                                                                   int tableSize, double minValue, double maxValue,
-                                                                   const std::vector<int>& mandatoryIndices);
+    static std::vector<SplineAnchor> initializeAnchorsFromIndices(const std::vector<Sample>& samples, int tableSize,
+                                                                  double minValue, double maxValue,
+                                                                  const std::vector<int>& mandatoryIndices);
 
     // Insert anchor pair in symmetric mode. Returns number of anchors added (1 or 2)
     static int insertAnchorSymmetric(std::vector<SplineAnchor>& anchors, const std::vector<Sample>& samples,

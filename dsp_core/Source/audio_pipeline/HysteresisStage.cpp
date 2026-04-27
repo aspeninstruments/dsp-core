@@ -2,8 +2,7 @@
 
 namespace dsp_core::audio_pipeline {
 
-HysteresisStage::HysteresisStage(dsp_core::SeamlessTransferFunction& tf)
-    : transferFunction_(&tf) {}
+HysteresisStage::HysteresisStage(dsp_core::SeamlessTransferFunction& tf) : transferFunction_(&tf) {}
 
 void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // Forward to the shared transfer function at this (possibly oversampled) rate
@@ -16,12 +15,10 @@ void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
         // LUT is now a pure memoryless function (Surge lives upstream as its own
         // pipeline stage). RK4's 4× intra-sample NL evaluations are safe to route
         // through applyTransferFunction directly.
-        processors_[ch].setNonlinearity([this, ch](double x) {
-            return transferFunction_->applyTransferFunction(x, ch);
-        });
-        processors_[ch].setNonlinearityDerivative([this, ch](double x) {
-            return transferFunction_->applyTransferFunctionDerivative(x, ch);
-        });
+        processors_[ch].setNonlinearity(
+            [this, ch](double x) { return transferFunction_->applyTransferFunction(x, ch); });
+        processors_[ch].setNonlinearityDerivative(
+            [this, ch](double x) { return transferFunction_->applyTransferFunctionDerivative(x, ch); });
     }
 
     smoothedMakeupGain_.reset(sampleRate, 0.01); // 10ms ramp
@@ -55,56 +52,56 @@ int HysteresisStage::advanceCrossfadePhase(juce::AudioBuffer<double>& buffer, in
     const int toProcess = std::min(remaining, samplesLeft);
 
     switch (crossfadeState_) {
-        case CrossfadeState::WarmingUp:
-            processWarmup(buffer, pos, toProcess);
-            crossfadePosition_ += toProcess;
-            if (crossfadePosition_ >= phaseSamples_) {
-                crossfadeState_ = CrossfadeState::CrossfadingIn;
+    case CrossfadeState::WarmingUp:
+        processWarmup(buffer, pos, toProcess);
+        crossfadePosition_ += toProcess;
+        if (crossfadePosition_ >= phaseSamples_) {
+            crossfadeState_ = CrossfadeState::CrossfadingIn;
+            crossfadePosition_ = 0;
+        }
+        return toProcess;
+
+    case CrossfadeState::CrossfadingIn:
+        processCrossfadeIn(buffer, pos, toProcess);
+        crossfadePosition_ += toProcess;
+        if (crossfadePosition_ >= phaseSamples_) {
+            previousEnabled_ = true;
+            // Check for deferred disable toggle
+            if (!enabled) {
+                crossfadeState_ = CrossfadeState::CrossfadingOut;
                 crossfadePosition_ = 0;
-            }
-            return toProcess;
-
-        case CrossfadeState::CrossfadingIn:
-            processCrossfadeIn(buffer, pos, toProcess);
-            crossfadePosition_ += toProcess;
-            if (crossfadePosition_ >= phaseSamples_) {
-                previousEnabled_ = true;
-                // Check for deferred disable toggle
-                if (!enabled) {
-                    crossfadeState_ = CrossfadeState::CrossfadingOut;
-                    crossfadePosition_ = 0;
-                } else {
-                    crossfadeState_ = CrossfadeState::Inactive;
-                }
-            }
-            return toProcess;
-
-        case CrossfadeState::CrossfadingOut:
-            processCrossfadeOut(buffer, pos, toProcess);
-            crossfadePosition_ += toProcess;
-            if (crossfadePosition_ >= phaseSamples_) {
-                previousEnabled_ = false;
-                // Check for deferred enable toggle
-                if (enabled) {
-                    crossfadeState_ = CrossfadeState::WarmingUp;
-                    crossfadePosition_ = 0;
-                    for (auto& proc : processors_) {
-                        proc.reset();
-                    }
-                } else {
-                    crossfadeState_ = CrossfadeState::Inactive;
-                }
-            }
-            return toProcess;
-
-        case CrossfadeState::Inactive:
-            // Phase just completed mid-buffer — process remainder in steady state
-            if (enabled) {
-                processSteadyHysteresis(buffer, pos, remaining);
             } else {
-                processSteadyWaveshaping(buffer, pos, remaining);
+                crossfadeState_ = CrossfadeState::Inactive;
             }
-            return remaining;
+        }
+        return toProcess;
+
+    case CrossfadeState::CrossfadingOut:
+        processCrossfadeOut(buffer, pos, toProcess);
+        crossfadePosition_ += toProcess;
+        if (crossfadePosition_ >= phaseSamples_) {
+            previousEnabled_ = false;
+            // Check for deferred enable toggle
+            if (enabled) {
+                crossfadeState_ = CrossfadeState::WarmingUp;
+                crossfadePosition_ = 0;
+                for (auto& proc : processors_) {
+                    proc.reset();
+                }
+            } else {
+                crossfadeState_ = CrossfadeState::Inactive;
+            }
+        }
+        return toProcess;
+
+    case CrossfadeState::Inactive:
+        // Phase just completed mid-buffer — process remainder in steady state
+        if (enabled) {
+            processSteadyHysteresis(buffer, pos, remaining);
+        } else {
+            processSteadyWaveshaping(buffer, pos, remaining);
+        }
+        return remaining;
     }
     return 0;
 }
@@ -142,8 +139,8 @@ void HysteresisStage::processWarmup(juce::AudioBuffer<double>& buffer, int start
     const int channelsToProcess = std::min(numChannels, 2);
 
     for (int i = startSample; i < startSample + numSamples; ++i) {
-        const double t = static_cast<double>(crossfadePosition_ + (i - startSample))
-                       / static_cast<double>(phaseSamples_);
+        const double t =
+            static_cast<double>(crossfadePosition_ + (i - startSample)) / static_cast<double>(phaseSamples_);
         const double s = smoothstep(t);
         smoothedMakeupGain_.getNextValue(); // keep makeup gain smoother advancing
 
@@ -166,8 +163,8 @@ void HysteresisStage::processCrossfadeIn(juce::AudioBuffer<double>& buffer, int 
     const int channelsToProcess = std::min(numChannels, 2);
 
     for (int i = startSample; i < startSample + numSamples; ++i) {
-        const double t = static_cast<double>(crossfadePosition_ + (i - startSample))
-                       / static_cast<double>(phaseSamples_);
+        const double t =
+            static_cast<double>(crossfadePosition_ + (i - startSample)) / static_cast<double>(phaseSamples_);
         const double s = smoothstep(t);
         const double gain = smoothedMakeupGain_.getNextValue();
 
@@ -188,8 +185,8 @@ void HysteresisStage::processCrossfadeOut(juce::AudioBuffer<double>& buffer, int
     const int channelsToProcess = std::min(numChannels, 2);
 
     for (int i = startSample; i < startSample + numSamples; ++i) {
-        const double t = static_cast<double>(crossfadePosition_ + (i - startSample))
-                       / static_cast<double>(phaseSamples_);
+        const double t =
+            static_cast<double>(crossfadePosition_ + (i - startSample)) / static_cast<double>(phaseSamples_);
         const double s = smoothstep(t);
         const double gain = smoothedMakeupGain_.getNextValue();
 
@@ -292,17 +289,17 @@ double HysteresisStage::computeMakeupForWidth(double width) {
     // M_s ≈ 1), which is the preferred failure mode. Measurements from
     // DIAGNOSTIC_WidthSweep_Amp1_NewK. Re-run if J-A operating point changes.
     static constexpr std::array<double, 11> kTable = {
-        1.000,  // w=0.0
-        1.039,  // w=0.1
-        1.081,  // w=0.2
-        1.126,  // w=0.3
-        1.175,  // w=0.4
-        1.229,  // w=0.5
-        1.288,  // w=0.6
-        1.352,  // w=0.7
-        1.424,  // w=0.8
-        1.504,  // w=0.9
-        1.593,  // w=1.0
+        1.000, // w=0.0
+        1.039, // w=0.1
+        1.081, // w=0.2
+        1.126, // w=0.3
+        1.175, // w=0.4
+        1.229, // w=0.5
+        1.288, // w=0.6
+        1.352, // w=0.7
+        1.424, // w=0.8
+        1.504, // w=0.9
+        1.593, // w=1.0
     };
     static constexpr int kN = static_cast<int>(kTable.size());
     static constexpr double kStep = 1.0 / (kN - 1);

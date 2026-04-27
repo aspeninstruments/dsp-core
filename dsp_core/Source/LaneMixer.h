@@ -79,8 +79,12 @@ class LaneMixer {
 
     const Lane& getLane(int index) const;
     Lane& getMutableLane(int index);
-    int getNumLanes() const { return activeLaneCount_; }
-    int getActiveLaneCount() const { return activeLaneCount_; }
+    int getNumLanes() const {
+        return activeLaneCount_;
+    }
+    int getActiveLaneCount() const {
+        return activeLaneCount_;
+    }
 
     // ========================================================================
     // Dynamic Lane Management (message thread only)
@@ -116,7 +120,9 @@ class LaneMixer {
     // Version Counter Access (for Phase 9 audio-thread-safe writes)
     // ========================================================================
 
-    std::atomic<uint64_t>& getVersionCounter() { return versionCounter_; }
+    std::atomic<uint64_t>& getVersionCounter() {
+        return versionCounter_;
+    }
 
     // ========================================================================
     // Lane Mutations (message thread only)
@@ -267,7 +273,9 @@ class LaneMixer {
     // ========================================================================
 
     void setMixerMode(MixerMode mode);
-    MixerMode getMixerMode() const { return mixerMode_; }
+    MixerMode getMixerMode() const {
+        return mixerMode_;
+    }
 
     /**
      * Set the scan position for Scan mode.
@@ -275,7 +283,9 @@ class LaneMixer {
      * Increments version counter so the render pipeline picks up the change.
      */
     void setScanPosition(double position);
-    double getScanPosition() const { return scanPosition_.load(std::memory_order_acquire); }
+    double getScanPosition() const {
+        return scanPosition_.load(std::memory_order_acquire);
+    }
 
     /**
      * Global blend amount [0, 1] driving per-lane depth modulation in Blend mode.
@@ -285,21 +295,27 @@ class LaneMixer {
      * is non-zero at any time, enforced by PluginAudioProcessor::setMixerMode.
      */
     void setBlendAmount(double amount);
-    double getBlendAmount() const { return blendAmount_.load(std::memory_order_acquire); }
+    double getBlendAmount() const {
+        return blendAmount_.load(std::memory_order_acquire);
+    }
 
     // ========================================================================
     // Extrapolation Mode
     // ========================================================================
 
     void setExtrapolationMode(ExtrapolationMode mode);
-    ExtrapolationMode getExtrapolationMode() const { return extrapolationMode_; }
+    ExtrapolationMode getExtrapolationMode() const {
+        return extrapolationMode_;
+    }
 
     // ========================================================================
     // Soft Clipping (unified with extrapolation — controls LUT input bounding)
     // ========================================================================
 
     void setSoftClipEnabled(bool enabled);
-    bool getSoftClipEnabled() const { return softClipEnabled_; }
+    bool getSoftClipEnabled() const {
+        return softClipEnabled_;
+    }
 
     // ========================================================================
     // Convenience Accessors
@@ -336,7 +352,9 @@ class LaneMixer {
     /**
      * Get a reference to the mix version counter atomic (for AutomationSlot).
      */
-    std::atomic<uint64_t>& getMixVersionCounter() { return mixVersionCounter_; }
+    std::atomic<uint64_t>& getMixVersionCounter() {
+        return mixVersionCounter_;
+    }
 
     /**
      * Set a callback invoked whenever the version counter increments.
@@ -386,15 +404,15 @@ class LaneMixer {
      * Case B (harmonic, no symmetry): Lane 0 + H1-H39 (41 lanes)
      * Case C (non-harmonic): Lane 0 = saved state, Lanes 1-12 = default H1-H12 (13 lanes)
      */
-    void fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
-                                 bool wasHarmonicMode,
-                                 bool oddSymmetryWasEnabled);
+    void fromLegacyLTFValueTree(const juce::ValueTree& ltfVT, bool wasHarmonicMode, bool oddSymmetryWasEnabled);
 
     // ========================================================================
     // Utilities
     // ========================================================================
 
-    int getTableSize() const { return TABLE_SIZE; }
+    int getTableSize() const {
+        return TABLE_SIZE;
+    }
     static double normalizeIndex(int index);
 
   private:
@@ -416,9 +434,8 @@ class LaneMixer {
                                       const std::vector<SplineAnchor>& legacySplineAnchors,
                                       LaneContentType lane0ContentType);
     static void initializeLegacyLane0(Lane& lane0, LaneContentType contentType,
-                                       const std::vector<SplineAnchor>& anchors,
-                                       double amplitude,
-                                       const std::vector<double>& baseLayerData);
+                                      const std::vector<SplineAnchor>& anchors, double amplitude,
+                                      const std::vector<double>& baseLayerData);
 
     std::array<Lane, MAX_LANES> lanes_;
     int activeLaneCount_ = 0;
@@ -439,15 +456,16 @@ class LaneMixer {
 
     // Version tracking (same pattern as LayeredTransferFunction)
     std::atomic<uint64_t> versionCounter_{0};
-    std::atomic<uint64_t> mixVersionCounter_{0};  // Incremented only for amplitude/scan changes
+    std::atomic<uint64_t> mixVersionCounter_{0}; // Incremented only for amplitude/scan changes
     bool batchUpdateActive_ = false;
-    bool batchHasMixChange_ = false;  // Track if batch contains amplitude/scan changes
-    std::function<void()> onVersionChanged_;  // Callback for event-driven rendering
+    bool batchHasMixChange_ = false;         // Track if batch contains amplitude/scan changes
+    std::function<void()> onVersionChanged_; // Callback for event-driven rendering
 
     void incrementVersionIfNotBatching() {
         if (!batchUpdateActive_) {
             versionCounter_.fetch_add(1, std::memory_order_release);
-            if (onVersionChanged_) onVersionChanged_();
+            if (onVersionChanged_)
+                onVersionChanged_();
         }
     }
 
@@ -460,7 +478,9 @@ class LaneMixer {
     }
 
     void initializeDefaults();
-    bool isValidIndex(int index) const { return index >= 0 && index < activeLaneCount_; }
+    bool isValidIndex(int index) const {
+        return index >= 0 && index < activeLaneCount_;
+    }
 
     int findNextUnusedHarmonicNumber() const;
     void shiftLanesRight(int fromIndex);
