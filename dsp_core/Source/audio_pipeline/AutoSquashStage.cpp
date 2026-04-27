@@ -71,9 +71,23 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
 
         const double g = 1.0 + state_.enableMix * (rawGain - 1.0);
 
-        gainBuf[n] = g;
+        // Asymmetric one-pole on the applied gain. When gain is dropping
+        // (attack — input got louder, must reduce gain immediately to keep
+        // the internal signal bounded by target), pass through instantly so
+        // the no-overshoot guarantee is preserved. When gain is rising
+        // (release — input got quieter, gain ramps back up), smooth across
+        // ~gainSmoothTauSeconds to spread out per-sample steps that would
+        // otherwise become audible zipper through the 1/envelope nonlinearity.
+        if (g < state_.smoothedGain) {
+            state_.smoothedGain = g;
+        } else {
+            state_.smoothedGain += state_.gainSmoothAlpha * (g - state_.smoothedGain);
+        }
+        const double appliedGain = state_.smoothedGain;
+
+        gainBuf[n] = appliedGain;
         for (int ch = 0; ch < numChannels; ++ch) {
-            buffer.getWritePointer(ch)[n] *= g;
+            buffer.getWritePointer(ch)[n] *= appliedGain;
         }
     }
 }
