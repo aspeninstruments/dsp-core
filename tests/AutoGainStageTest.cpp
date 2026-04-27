@@ -447,3 +447,214 @@ TEST_F(AutoGainStageTest, VariableBlockSize_HandledSafely) {
     for (size_t i = tailStart; i < in.size(); ++i)
         EXPECT_NEAR(out[i], in[i], 1e-9);
 }
+
+// =============================================================================
+// =============================================================================
+// Speed/Smoothness characterization tests
+// =============================================================================
+//
+// These tests measure the gain-trajectory smoothness ("zipper proxy") and the
+// normalization speed (release time, step-up settling) as numbers we can
+// assert against, so we can tune the auto-gain constants while keeping the
+// speed↔smoothness tradeoff inside an explicit envelope.
+//
+// On every run the measured values are printed via std::cout under a
+// "[CHARACTERIZATION]" tag — run with `ctest -V` to read them. Initial
+// assertions are intentionally loose (sanity bounds only); tighten them once
+// the constants are tuned and we want to lock in the new behavior.
+//
+// Baseline numbers (default constants in AutoGainState.h: releaseTau=120ms,
+// hold=10ms, no gain smoothing) — captured 2026-04-27 — to be filled in after
+// first run:
+//   SteadyStateSine_GainRipple   maxAbsDeltaGain = ?   rmsDeltaGain = ?
+//   StepUp_NormalizationSettle   settlingTimeMs   = ?
+//   StepDown_ReleaseTime         t90Ms            = ?
+//   BurstTrain_TransientZipper   maxAbsDeltaGain = ?   rmsDeltaGain = ?
+// =============================================================================
+
+namespace {
+constexpr const char* kCharTag = "[CHARACTERIZATION] ";
+}
+
+// 13. Steady-state sine — gain should be (nearly) constant once converged.
+// Per-sample |Δgain| is the most direct zipper proxy.
+TEST_F(AutoGainStageTest, SteadyStateSine_GainRippleIsSmall) {
+    setEnabled(true);
+    state_.resetRuntime();
+    state_.enableMix = 1.0;
+
+    const double amp = 0.25118864315; // -12 dBFS
+    auto in = generateSine(1000.0, amp, static_cast<int>(sampleRate_ * 0.5));
+    const auto trace = runSquashOnly(in);
+
+    // Inspect the last 200 ms, after envelope has converged (5×releaseTau).
+    const size_t tailStart = trace.gainPerSample.size() - static_cast<size_t>(sampleRate_ * 0.2);
+    double maxAbsDelta = 0.0;
+    double sumSqDelta = 0.0;
+    size_t count = 0;
+    for (size_t i = tailStart + 1; i < trace.gainPerSample.size(); ++i) {
+        const double d = trace.gainPerSample[i] - trace.gainPerSample[i - 1];
+        maxAbsDelta = std::max(maxAbsDelta, std::abs(d));
+        sumSqDelta += d * d;
+        ++count;
+    }
+    const double rmsDelta = std::sqrt(sumSqDelta / static_cast<double>(count));
+
+    std::cout << kCharTag << "SteadyStateSine_GainRipple maxAbsDeltaGain=" << maxAbsDelta
+              << " rmsDeltaGain=" << rmsDelta << std::endl;
+
+    // Loose sanity: gain trajectory must be finite and bounded. Tighten after
+    // tuning.
+    EXPECT_TRUE(std::isfinite(maxAbsDelta));
+    EXPECT_LT(maxAbsDelta, 1.0) << "Gain stepping more than 1.0/sample is a clear zipper.";
+    EXPECT_LT(rmsDelta, 0.1);
+}
+
+// 14. Step-up: silence → -24 dBFS sine. Time from onset until gain converges
+// to within 5% of its steady-state value and stays there. This is "how fast
+// does normalization kick in on a quiet onset" — the speed we don't want to
+// lose. With instant attack today this should be ~sub-millisecond.
+TEST_F(AutoGainStageTest, StepUp_NormalizationSettlingTime_Ms) {
+    setEnabled(true);
+    state_.resetRuntime();
+    state_.enableMix = 1.0;
+
+    const int silenceSamples = static_cast<int>(sampleRate_ * 0.05); // 50 ms silence
+    const int sineSamples = static_cast<int>(sampleRate_ * 0.5);     // 500 ms sine
+    const double amp = 0.06309573445;                                // -24 dBFS
+
+    std::vector<double> in;
+    in.reserve(static_cast<size_t>(silenceSamples + sineSamples));
+    for (int i = 0; i < silenceSamples; ++i)
+        in.push_back(0.0);
+    auto sine = generateSine(1000.0, amp, sineSamples);
+    in.insert(in.end(), sine.begin(), sine.end());
+
+    const auto trace = runSquashOnly(in);
+
+    // Steady-state target gain: targetPeak/amp.
+    const double finalGain = state_.k.targetPeak / amp;
+    const double tol = 0.05 * finalGain;
+
+    // Walk forward from the onset; settlingSample is the LAST sample where
+    // |gain - finalGain| > tol. Add 1 → first sample inside the band; the
+    // remainder of the buffer must stay inside.
+    int lastOutOfBand = silenceSamples; // pre-onset state doesn't count
+    for (size_t i = static_cast<size_t>(silenceSamples); i < trace.gainPerSample.size(); ++i) {
+        if (std::abs(trace.gainPerSample[i] - finalGain) > tol) {
+            lastOutOfBand = static_cast<int>(i);
+        }
+    }
+    const int settlingSamples = (lastOutOfBand + 1) - silenceSamples;
+    const double settlingMs = 1000.0 * settlingSamples / sampleRate_;
+
+    std::cout << kCharTag << "StepUp_NormalizationSettle settlingTimeMs=" << settlingMs
+              << " (samples=" << settlingSamples << ", finalGain=" << finalGain << ")" << std::endl;
+
+    // Sanity: settles in at most a few hundred ms.
+    EXPECT_GE(settlingMs, 0.0);
+    EXPECT_LT(settlingMs, 500.0);
+}
+
+// 15. Step-down: loud → quiet. Time for gain to traverse 90% of the way from
+// its initial converged value to its new converged value. This is the
+// release-side normalization speed — the dominant axis we'll trade against
+// smoothness.
+TEST_F(AutoGainStageTest, StepDown_ReleaseTime_Ms) {
+    setEnabled(true);
+    state_.resetRuntime();
+    state_.enableMix = 1.0;
+
+    const int loudSamples = static_cast<int>(sampleRate_ * 0.3);  // 300 ms to converge
+    const int quietSamples = static_cast<int>(sampleRate_ * 1.5); // 1.5 s to fully release
+    const double loudAmp = 0.5;                                   // gain ≈ 1.8
+    const double quietAmp = 0.1;                                  // gain ≈ 9.0
+
+    std::vector<double> in;
+    in.reserve(static_cast<size_t>(loudSamples + quietSamples));
+    auto loudSine = generateSine(1000.0, loudAmp, loudSamples);
+    auto quietSine = generateSine(1000.0, quietAmp, quietSamples);
+    in.insert(in.end(), loudSine.begin(), loudSine.end());
+    in.insert(in.end(), quietSine.begin(), quietSine.end());
+
+    const auto trace = runSquashOnly(in);
+
+    const double initialGain = trace.gainPerSample[static_cast<size_t>(loudSamples) - 1];
+    // Converged gain in the very last 50 ms.
+    const size_t finalStart = trace.gainPerSample.size() - static_cast<size_t>(sampleRate_ * 0.05);
+    double finalGain = 0.0;
+    for (size_t i = finalStart; i < trace.gainPerSample.size(); ++i)
+        finalGain += trace.gainPerSample[i];
+    finalGain /= static_cast<double>(trace.gainPerSample.size() - finalStart);
+
+    const double threshold = initialGain + 0.9 * (finalGain - initialGain);
+
+    int crossingSample = -1;
+    for (size_t i = static_cast<size_t>(loudSamples); i < trace.gainPerSample.size(); ++i) {
+        if (trace.gainPerSample[i] >= threshold) {
+            crossingSample = static_cast<int>(i);
+            break;
+        }
+    }
+    ASSERT_GE(crossingSample, loudSamples) << "Gain never reached 90% of new steady-state";
+
+    const int releaseSamples = crossingSample - loudSamples;
+    const double t90Ms = 1000.0 * releaseSamples / sampleRate_;
+
+    std::cout << kCharTag << "StepDown_ReleaseTime t90Ms=" << t90Ms << " (initialGain=" << initialGain
+              << " finalGain=" << finalGain << ")" << std::endl;
+
+    EXPECT_GT(t90Ms, 0.0);
+    EXPECT_LT(t90Ms, 5000.0);
+}
+
+// 16. Burst train (program-material proxy): alternating 30ms loud / 30ms
+// quiet sine bursts. Each loud→quiet edge invokes a release; each quiet→loud
+// edge invokes the instant attack. Max |Δgain|/sample over the back half is
+// the transient zipper proxy — what the user actually hears on percussive
+// material.
+TEST_F(AutoGainStageTest, BurstTrain_TransientZipperProxy) {
+    setEnabled(true);
+    state_.resetRuntime();
+    state_.enableMix = 1.0;
+
+    const int burstLen = static_cast<int>(sampleRate_ * 0.030);
+    const int numBursts = 16; // ~960 ms total
+    const double loudAmp = 0.5;
+    const double quietAmp = 0.05;
+
+    std::vector<double> in;
+    in.reserve(static_cast<size_t>(burstLen * numBursts * 2));
+    int phase = 0;
+    for (int b = 0; b < numBursts; ++b) {
+        const double amp = (b % 2 == 0) ? loudAmp : quietAmp;
+        for (int n = 0; n < burstLen; ++n) {
+            const double t = static_cast<double>(phase++) / sampleRate_;
+            in.push_back(amp * std::sin(2.0 * juce::MathConstants<double>::pi * 1000.0 * t));
+        }
+    }
+
+    const auto trace = runSquashOnly(in);
+
+    // Use the second half so the system is past initial convergence.
+    const size_t halfStart = trace.gainPerSample.size() / 2;
+    double maxAbsDelta = 0.0;
+    double sumSqDelta = 0.0;
+    size_t count = 0;
+    for (size_t i = halfStart + 1; i < trace.gainPerSample.size(); ++i) {
+        const double d = trace.gainPerSample[i] - trace.gainPerSample[i - 1];
+        maxAbsDelta = std::max(maxAbsDelta, std::abs(d));
+        sumSqDelta += d * d;
+        ++count;
+    }
+    const double rmsDelta = std::sqrt(sumSqDelta / static_cast<double>(count));
+
+    std::cout << kCharTag << "BurstTrain_TransientZipper maxAbsDeltaGain=" << maxAbsDelta
+              << " rmsDeltaGain=" << rmsDelta << std::endl;
+
+    EXPECT_TRUE(std::isfinite(maxAbsDelta));
+    // Loose: gain delta per sample on transient material must be bounded.
+    // Without smoothing the instant-attack edge can produce a single large
+    // step — allow up to the gain ratio between the two amps for now.
+    EXPECT_LT(maxAbsDelta, 20.0);
+}

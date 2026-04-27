@@ -33,6 +33,12 @@ struct AutoGainState {
         double releaseTauSeconds = 0.120; // 120 ms — opto-style release
         double holdSeconds = 0.010;       // 10 ms hold before release can start
         double enableFadeSeconds = 0.020; // 20 ms crossfade on toggle
+        // Asymmetric one-pole on the applied gain: instant when gain drops
+        // (attack — preserves no-overshoot guarantee), smoothed when gain
+        // rises (release — kills per-sample zipper from envelope/1-over-x
+        // nonlinearity). 2 ms is fast enough to be inaudible as added latency
+        // on quiet→loud transitions.
+        double gainSmoothTauSeconds = 0.002;
     };
 
     Constants k{};
@@ -58,9 +64,15 @@ struct AutoGainState {
     // Ramps on enable/disable to avoid clicks.
     double enableMix = 0.0;
 
+    // Last applied gain after asymmetric smoothing — carried sample-to-sample
+    // so the smoother is stateful across blocks.
+    double smoothedGain = 1.0;
+
     // Pre-computed one-pole release coefficient set in prepareToPlay.
     // Attack is instantaneous (peak follower) so no attack alpha is needed.
     double releaseAlpha = 0.0;
+    // One-pole coefficient for the applied-gain rise smoother.
+    double gainSmoothAlpha = 0.0;
     int holdSamples = 0;
     int enableFadeSamples = 1;
 
@@ -77,6 +89,7 @@ struct AutoGainState {
         sampleRate = newSampleRate;
         const double fs = sampleRate > 0.0 ? sampleRate : 44100.0;
         releaseAlpha = 1.0 - std::exp(-1.0 / (k.releaseTauSeconds * fs));
+        gainSmoothAlpha = 1.0 - std::exp(-1.0 / (k.gainSmoothTauSeconds * fs));
         holdSamples = static_cast<int>(k.holdSeconds * fs);
         enableFadeSamples = std::max(1, static_cast<int>(k.enableFadeSeconds * fs));
     }
@@ -89,6 +102,7 @@ struct AutoGainState {
         envelope = 0.0;
         holdCounter = 0;
         enableMix = enabled.load(std::memory_order_acquire) ? 1.0 : 0.0;
+        smoothedGain = 1.0;
         gainHistory.clear();
     }
 
@@ -106,6 +120,7 @@ struct AutoGainState {
         enableMix = enabled.load(std::memory_order_acquire) ? 1.0 : 0.0;
         envelope = 0.0;
         holdCounter = 0;
+        smoothedGain = 1.0;
     }
 };
 
