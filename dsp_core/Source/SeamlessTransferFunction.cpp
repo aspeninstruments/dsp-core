@@ -56,7 +56,7 @@ class SeamlessTransferFunction::Impl {
     std::unique_ptr<VisualizerUpdateDispatcher> visualizerDispatcher;
 
     // Visualizer state (message thread only)
-    std::array<double, VISUALIZER_LUT_SIZE> visualizerLUT;
+    std::array<double, VISUALIZER_LUT_SIZE> visualizerLUT{};
     std::function<void()> visualizerCallback;
 
     // Lane LUT for secondary visualizer overlay (selected lane's raw curve)

@@ -60,6 +60,11 @@ class HysteresisStage : public AudioProcessingStage {
     void processSteadyHysteresis(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
     void processSteadyWaveshaping(juce::AudioBuffer<double>& buffer, int startSample, int numSamples);
 
+    // Detect enabled/disabled toggle and start a transition crossfade if needed.
+    void detectTransition(bool enabled);
+    // Process one crossfade phase chunk; returns samples consumed.
+    int advanceCrossfadePhase(juce::AudioBuffer<double>& buffer, int pos, int remaining, bool enabled);
+
     dsp_core::SeamlessTransferFunction* transferFunction_;
     std::array<dsp_core::HysteresisProcessor, 2> processors_; // stereo
     std::atomic<bool> hysteresisEnabled_{true};

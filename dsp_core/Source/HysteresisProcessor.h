@@ -143,7 +143,7 @@ class HysteresisProcessor {
     double M_s_oa_tc_ = 0.0;   // c * M_s / a
 
     void updateDerivedParams();
-    double computeHDerivative(double H);
+    double computeHDerivative(double H) const;
 
     // Standard Langevin (used when no custom NL is set)
     static double standardLangevin(double x);

@@ -46,8 +46,9 @@ double HysteresisProcessor::process(double inputH) {
     if (!std::isfinite(inputH)) {
         reset();
         consecutiveResets_++;
-        if (consecutiveResets_ > 10)
+        if (consecutiveResets_ > 10) {
             muteCountdown_ = static_cast<int>(sampleRate_ * 0.1);
+        }
         return 0.0;
     }
 
@@ -56,32 +57,36 @@ double HysteresisProcessor::process(double inputH) {
     M_s_oa_tc_ = c_ * M_s_oa_;
 
     // Input clamping
-    double H = std::clamp(inputH, -inputLimit_, inputLimit_);
+    const double H = std::clamp(inputH, -inputLimit_, inputLimit_);
 
     // Field derivative: constant across the timestep (linear interpolation of H between samples)
     double dH_dt = (H - H_n1_) / T_;
     dH_dt = std::clamp(dH_dt, -hdLimit_, hdLimit_);
 
     // Branch direction with deadband (hold last direction when dH is negligible)
-    double dH_raw = H - H_n1_;
+    const double dH_raw = H - H_n1_;
     constexpr double eps = 1e-12;
-    if (dH_raw > eps) lastDelta_ = 1.0;
-    else if (dH_raw < -eps) lastDelta_ = -1.0;
+    if (dH_raw > eps) {
+        lastDelta_ = 1.0;
+    } else if (dH_raw < -eps) {
+        lastDelta_ = -1.0;
+    }
 
     // RK4 integration — dH_dt and delta are constant across all stages
-    double k1 = T_ * dMdt(M_n1_, H_n1_, dH_dt, lastDelta_);
-    double k2 = T_ * dMdt(M_n1_ + k1 / 2.0, (H + H_n1_) / 2.0, dH_dt, lastDelta_);
-    double k3 = T_ * dMdt(M_n1_ + k2 / 2.0, (H + H_n1_) / 2.0, dH_dt, lastDelta_);
-    double k4 = T_ * dMdt(M_n1_ + k3, H, dH_dt, lastDelta_);
+    const double k1 = T_ * dMdt(M_n1_, H_n1_, dH_dt, lastDelta_);
+    const double k2 = T_ * dMdt(M_n1_ + k1 / 2.0, (H + H_n1_) / 2.0, dH_dt, lastDelta_);
+    const double k3 = T_ * dMdt(M_n1_ + k2 / 2.0, (H + H_n1_) / 2.0, dH_dt, lastDelta_);
+    const double k4 = T_ * dMdt(M_n1_ + k3, H, dH_dt, lastDelta_);
 
-    double M = M_n1_ + k1 / 6.0 + k2 / 3.0 + k3 / 3.0 + k4 / 6.0;
+    const double M = M_n1_ + k1 / 6.0 + k2 / 3.0 + k3 / 3.0 + k4 / 6.0;
 
     // Post-solver safety: NaN/Inf/runaway detection
     if (!std::isfinite(M) || std::abs(M) > upperLimit_) {
         reset();
         consecutiveResets_++;
-        if (consecutiveResets_ > 10)
+        if (consecutiveResets_ > 10) {
             muteCountdown_ = static_cast<int>(sampleRate_ * 0.1);
+        }
         return 0.0;
     }
 
@@ -151,7 +156,7 @@ double HysteresisProcessor::langevin(double Q) const {
     if (useCustomNL_) {
         // Scale Q into transfer function range; soft clipping (if enabled)
         // is handled inside the LUT evaluation (SeamlessTransferFunction)
-        double mapped = Q / scale_;
+        const double mapped = Q / scale_;
         return customNL_(mapped);
     }
     return standardLangevin(Q);
@@ -172,26 +177,28 @@ double HysteresisProcessor::langevinDeriv(double Q) const {
 }
 
 double HysteresisProcessor::dMdt(double M, double H, double dH_dt, double delta) const {
-    double Q = (H + alpha_ * M) / a_;
-    double M_diff = M_s_ * langevin(Q) - M;
-    double delta_M = (std::signbit(delta) == std::signbit(M_diff)) ? 1.0 : 0.0;
+    const double Q = (H + alpha_ * M) / a_;
+    const double M_diff = M_s_ * langevin(Q) - M;
+    const double delta_M = (std::signbit(delta) == std::signbit(M_diff)) ? 1.0 : 0.0;
 
-    double L_prime = langevinDeriv(Q);
-    double denominator = 1.0 - c_ * alpha_ * M_s_oa_ * L_prime;
+    const double L_prime = langevinDeriv(Q);
+    const double denominator = 1.0 - c_ * alpha_ * M_s_oa_ * L_prime;
 
-    if (std::abs(denominator) < 1e-15)
+    if (std::abs(denominator) < 1e-15) {
         return 0.0;
+    }
 
     // Irreversible term
-    double t1_den = (1.0 - c_) * delta * k_ - alpha_ * M_diff;
-    if (std::abs(t1_den) < 1e-15)
+    const double t1_den = (1.0 - c_) * delta * k_ - alpha_ * M_diff;
+    if (std::abs(t1_den) < 1e-15) {
         return (c_ * M_s_oa_ * dH_dt * L_prime) / denominator;
+    }
 
-    double t1_num = (1.0 - c_) * delta_M * M_diff;
-    double t1 = (t1_num / t1_den) * dH_dt;
+    const double t1_num = (1.0 - c_) * delta_M * M_diff;
+    const double t1 = (t1_num / t1_den) * dH_dt;
 
     // Reversible term — same dH_dt as t1, no mixed-derivative artifacts
-    double t2 = c_ * M_s_oa_ * dH_dt * L_prime;
+    const double t2 = c_ * M_s_oa_ * dH_dt * L_prime;
 
     return (t1 + t2) / denominator;
 }
@@ -200,12 +207,12 @@ double HysteresisProcessor::dMdt(double M, double H, double dH_dt, double delta)
 // Private
 // =============================================================================
 
-double HysteresisProcessor::computeHDerivative(double H) {
+double HysteresisProcessor::computeHDerivative(double H) const {
     return ((1.0 + dAlpha_) / Talpha_) * (H - H_n1_) - dAlpha_ * H_d_n1_;
 }
 
 double HysteresisProcessor::dcBlock(double x) {
-    double y = x - dcX_n1_ + dcR_ * dcY_n1_;
+    const double y = x - dcX_n1_ + dcR_ * dcY_n1_;
     dcX_n1_ = x;
     dcY_n1_ = y;
     return y;
@@ -222,14 +229,15 @@ void HysteresisProcessor::updateDerivedParams() {
 }
 
 double HysteresisProcessor::standardLangevin(double x) {
-    if (std::abs(x) > 1e-4)
+    if (std::abs(x) > 1e-4) {
         return (1.0 / std::tanh(x)) - (1.0 / x);
+    }
     return x / 3.0;
 }
 
 double HysteresisProcessor::standardLangevinDeriv(double x) {
     if (std::abs(x) > 1e-4) {
-        double cothx = 1.0 / std::tanh(x);
+        const double cothx = 1.0 / std::tanh(x);
         return (1.0 / (x * x)) - cothx * cothx + 1.0;
     }
     return 1.0 / 3.0;

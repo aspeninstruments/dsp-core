@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_core/juce_core.h>
+#include <juce_data_structures/juce_data_structures.h>
 #include <vector>
 
 namespace dsp_core {
@@ -78,7 +79,7 @@ class HarmonicLayer {
     static double evaluateChebyshevTrig(double x, const std::vector<double>& coeffs);
     static double evaluateChebyshevPolynomial(double x, const std::vector<double>& coeffs);
 
-    int xToTableIndex(double x, int tableSize, double minVal, double maxVal) const;
+    static int xToTableIndex(double x, int tableSize, double minVal, double maxVal);
 };
 
 } // namespace dsp_core

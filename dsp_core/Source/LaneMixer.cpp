@@ -37,8 +37,9 @@ Lane& LaneMixer::getMutableLane(int index) {
 // ============================================================================
 
 int LaneMixer::addLane(int insertAfterIndex) {
-    if (activeLaneCount_ >= MAX_LANES)
+    if (activeLaneCount_ >= MAX_LANES) {
         return -1;
+    }
 
     // Compute insertion index
     const int insertionIndex = (insertAfterIndex < 0)
@@ -73,10 +74,12 @@ int LaneMixer::addLane(int insertAfterIndex) {
 }
 
 int LaneMixer::duplicateLane(int sourceLaneIndex) {
-    if (activeLaneCount_ >= MAX_LANES)
+    if (activeLaneCount_ >= MAX_LANES) {
         return -1;
-    if (!isValidIndex(sourceLaneIndex))
+    }
+    if (!isValidIndex(sourceLaneIndex)) {
         return -1;
+    }
 
     // Copy the source lane BEFORE shifting (shift uses move semantics)
     Lane sourceCopy(lanes_[static_cast<size_t>(sourceLaneIndex)]);
@@ -107,8 +110,9 @@ int LaneMixer::duplicateLane(int sourceLaneIndex) {
 }
 
 bool LaneMixer::removeLane(int index) {
-    if (!isValidIndex(index) || activeLaneCount_ <= 1)
+    if (!isValidIndex(index) || activeLaneCount_ <= 1) {
         return false;
+    }
 
     // Clear removed lane's curveData (release memory)
     lanes_[static_cast<size_t>(index)].curveData.clear();
@@ -137,8 +141,9 @@ uint32_t LaneMixer::getLaneId(int index) const {
 
 int LaneMixer::findLaneById(uint32_t laneId) const {
     for (int i = 0; i < activeLaneCount_; ++i) {
-        if (lanes_[static_cast<size_t>(i)].laneId == laneId)
+        if (lanes_[static_cast<size_t>(i)].laneId == laneId) {
             return i;
+        }
     }
     return -1;
 }
@@ -148,8 +153,9 @@ int LaneMixer::findLaneById(uint32_t laneId) const {
 // ============================================================================
 
 void LaneMixer::setLaneAmplitude(int index, double amplitude) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
     auto& slot = lanes_[static_cast<size_t>(index)];
     const double current = slot.amplitude.load(std::memory_order_acquire);
     if (current == amplitude) {
@@ -161,14 +167,16 @@ void LaneMixer::setLaneAmplitude(int index, double amplitude) {
 }
 
 double LaneMixer::getLaneAmplitude(int index) const {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return 0.0;
+    }
     return lanes_[static_cast<size_t>(index)].amplitude.load(std::memory_order_acquire);
 }
 
 void LaneMixer::setLaneBlendDepth(int index, double depth) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
     const double clamped = std::clamp(depth, -1.0, 1.0);
     auto& slot = lanes_[static_cast<size_t>(index)];
     const double current = slot.blendDepth.load(std::memory_order_acquire);
@@ -181,14 +189,16 @@ void LaneMixer::setLaneBlendDepth(int index, double depth) {
 }
 
 double LaneMixer::getLaneBlendDepth(int index) const {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return 0.0;
+    }
     return lanes_[static_cast<size_t>(index)].blendDepth.load(std::memory_order_acquire);
 }
 
 void LaneMixer::setLaneModulationDepth(int index, int slotIdx, double depth) {
-    if (!isValidIndex(index) || slotIdx < 0 || slotIdx >= 2)
+    if (!isValidIndex(index) || slotIdx < 0 || slotIdx >= 2) {
         return;
+    }
     const double clamped = std::clamp(depth, -1.0, 1.0);
     auto& slot = lanes_[static_cast<size_t>(index)];
     auto& depthSlot = slot.modulationDepth[static_cast<size_t>(slotIdx)];
@@ -202,8 +212,9 @@ void LaneMixer::setLaneModulationDepth(int index, int slotIdx, double depth) {
 }
 
 double LaneMixer::getLaneModulationDepth(int index, int slotIdx) const {
-    if (!isValidIndex(index) || slotIdx < 0 || slotIdx >= 2)
+    if (!isValidIndex(index) || slotIdx < 0 || slotIdx >= 2) {
         return 0.0;
+    }
     return lanes_[static_cast<size_t>(index)]
         .modulationDepth[static_cast<size_t>(slotIdx)]
         .load(std::memory_order_acquire);
@@ -244,47 +255,54 @@ void LaneMixer::setModulationEnvValue(int slotIdx, double env) {
 }
 
 void LaneMixer::setLaneContentType(int index, LaneContentType type) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
     lanes_[static_cast<size_t>(index)].contentType = type;
     incrementVersionIfNotBatching();
 }
 
 LaneContentType LaneMixer::getLaneContentType(int index) const {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return LaneContentType::Harmonic;
+    }
     return lanes_[static_cast<size_t>(index)].contentType;
 }
 
 void LaneMixer::setLaneHarmonicNumber(int index, int harmonicNumber) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
     lanes_[static_cast<size_t>(index)].harmonicNumber = harmonicNumber;
     incrementVersionIfNotBatching();
 }
 
 int LaneMixer::getLaneHarmonicNumber(int index) const {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return 0;
+    }
     return lanes_[static_cast<size_t>(index)].harmonicNumber;
 }
 
 void LaneMixer::setLaneOddSymmetryEnabled(int index, bool enabled) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
     lanes_[static_cast<size_t>(index)].oddSymmetryEnabled = enabled;
     // No version increment — symmetry is a UI/editing constraint, not an audio change
 }
 
 bool LaneMixer::isLaneOddSymmetryEnabled(int index) const {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return false;
+    }
     return lanes_[static_cast<size_t>(index)].oddSymmetryEnabled;
 }
 
 void LaneMixer::setLaneCurveData(int index, const std::vector<double>& data) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
     auto& lane = lanes_[static_cast<size_t>(index)];
     lane.curveData = data;
     lane.curveData.resize(TABLE_SIZE, 0.0); // Pad or truncate to TABLE_SIZE
@@ -292,8 +310,9 @@ void LaneMixer::setLaneCurveData(int index, const std::vector<double>& data) {
 }
 
 void LaneMixer::setLaneCurveData(int index, const double* data, int size) {
-    if (!isValidIndex(index) || data == nullptr)
+    if (!isValidIndex(index) || data == nullptr) {
         return;
+    }
     auto& lane = lanes_[static_cast<size_t>(index)];
     lane.curveData.assign(data, data + std::min(size, TABLE_SIZE));
     lane.curveData.resize(TABLE_SIZE, 0.0);
@@ -301,8 +320,9 @@ void LaneMixer::setLaneCurveData(int index, const double* data, int size) {
 }
 
 void LaneMixer::setLaneCurveValue(int laneIndex, int sampleIndex, double value) {
-    if (!isValidIndex(laneIndex) || sampleIndex < 0 || sampleIndex >= TABLE_SIZE)
+    if (!isValidIndex(laneIndex) || sampleIndex < 0 || sampleIndex >= TABLE_SIZE) {
         return;
+    }
     lanes_[static_cast<size_t>(laneIndex)].curveData[static_cast<size_t>(sampleIndex)] = value;
     // NOTE: Does not increment version — caller is responsible for version management
     // (e.g., via BatchUpdateGuard or explicit incrementVersion() call)
@@ -310,12 +330,15 @@ void LaneMixer::setLaneCurveValue(int laneIndex, int sampleIndex, double value) 
 
 void LaneMixer::incrementVersion() {
     versionCounter_.fetch_add(1, std::memory_order_release);
-    if (onVersionChanged_) onVersionChanged_();
+    if (onVersionChanged_) {
+        onVersionChanged_();
+    }
 }
 
 void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber, double strength) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
 
     auto& lane = lanes_[static_cast<size_t>(index)];
     lane.curveData.resize(TABLE_SIZE);
@@ -352,8 +375,9 @@ void LaneMixer::fillLaneWithHarmonic(int index, int harmonicNumber, double stren
 }
 
 void LaneMixer::fillLaneWithTanh2x(int index) {
-    if (!isValidIndex(index))
+    if (!isValidIndex(index)) {
         return;
+    }
 
     auto& lane = lanes_[static_cast<size_t>(index)];
     lane.curveData.resize(TABLE_SIZE);
@@ -718,20 +742,58 @@ void LaneMixer::initializeDefaults() {
 // Serialization
 // ============================================================================
 
-juce::ValueTree LaneMixer::toValueTree() const {
-    juce::ValueTree vt("LaneMixer");
-    vt.setProperty("formatVersion", 7, nullptr);
-    vt.setProperty("numLanes", activeLaneCount_, nullptr);
-    vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
-    vt.setProperty("tableSize", TABLE_SIZE, nullptr);
-    vt.setProperty("mixerMode", static_cast<int>(mixerMode_), nullptr);
-    vt.setProperty("blendAmount", blendAmount_.load(std::memory_order_acquire), nullptr);
+namespace {
+    juce::ValueTree serializeSplineAnchor(const SplineAnchor& anchor) {
+        juce::ValueTree anchorVT("Anchor");
+        anchorVT.setProperty("x", anchor.x, nullptr);
+        anchorVT.setProperty("y", anchor.y, nullptr);
+        if (anchor.hasCustomTangent) {
+            anchorVT.setProperty("tangent", anchor.tangent, nullptr);
+        }
+        if (!anchor.morphGesture.empty()) {
+            anchorVT.setProperty("homeX", anchor.homeX, nullptr);
+            anchorVT.setProperty("homeY", anchor.homeY, nullptr);
+            anchorVT.appendChild(anchor.morphGesture.toValueTree(), nullptr);
+        }
+        return anchorVT;
+    }
 
-    for (int i = 0; i < activeLaneCount_; ++i) {
-        const auto& lane = lanes_[static_cast<size_t>(i)];
+    juce::ValueTree serializeSplineAnchors(const std::vector<SplineAnchor>& anchors) {
+        juce::ValueTree anchorsVT("SplineAnchors");
+        for (const auto& anchor : anchors) {
+            anchorsVT.appendChild(serializeSplineAnchor(anchor), nullptr);
+        }
+        return anchorsVT;
+    }
 
+    juce::var compressCurveData(const std::vector<double>& curveData) {
+        const juce::MemoryBlock rawData(curveData.data(), curveData.size() * sizeof(double));
+        juce::MemoryOutputStream compressedStream;
+        {
+            juce::GZIPCompressorOutputStream compressor(compressedStream);
+            compressor.write(rawData.getData(), rawData.getSize());
+        }
+        return {compressedStream.getMemoryBlock()};
+    }
+
+    void writeOptionalLaneStrings(juce::ValueTree& laneVT, const Lane& lane) {
+        if (!lane.equationText.isEmpty()) {
+            laneVT.setProperty("equationText", lane.equationText, nullptr);
+        }
+        if (!lane.presetSourcePath.isEmpty()) {
+            laneVT.setProperty("presetSourcePath", lane.presetSourcePath, nullptr);
+        }
+        if (!lane.customName.isEmpty()) {
+            laneVT.setProperty("customName", lane.customName, nullptr);
+        }
+        if (lane.oddSymmetryEnabled) {
+            laneVT.setProperty("oddSymmetryEnabled", true, nullptr);
+        }
+    }
+
+    juce::ValueTree serializeLane(const Lane& lane, int index) {
         juce::ValueTree laneVT("Lane");
-        laneVT.setProperty("index", i, nullptr);
+        laneVT.setProperty("index", index, nullptr);
         laneVT.setProperty("laneId", static_cast<int>(lane.laneId), nullptr);
         laneVT.setProperty("amplitude", lane.amplitude.load(std::memory_order_acquire), nullptr);
         laneVT.setProperty("blendDepth", lane.blendDepth.load(std::memory_order_acquire), nullptr);
@@ -744,40 +806,10 @@ juce::ValueTree LaneMixer::toValueTree() const {
         laneVT.setProperty("harmonicNumber", lane.harmonicNumber, nullptr);
         laneVT.setProperty("harmonicStrength", lane.harmonicStrength, nullptr);
 
-        if (!lane.equationText.isEmpty()) {
-            laneVT.setProperty("equationText", lane.equationText, nullptr);
-        }
+        writeOptionalLaneStrings(laneVT, lane);
 
-        if (!lane.presetSourcePath.isEmpty()) {
-            laneVT.setProperty("presetSourcePath", lane.presetSourcePath, nullptr);
-        }
-
-        if (!lane.customName.isEmpty()) {
-            laneVT.setProperty("customName", lane.customName, nullptr);
-        }
-
-        if (lane.oddSymmetryEnabled) {
-            laneVT.setProperty("oddSymmetryEnabled", true, nullptr);
-        }
-
-        // Serialize spline anchors if present
         if (!lane.splineAnchors.empty()) {
-            juce::ValueTree anchorsVT("SplineAnchors");
-            for (const auto& anchor : lane.splineAnchors) {
-                juce::ValueTree anchorVT("Anchor");
-                anchorVT.setProperty("x", anchor.x, nullptr);
-                anchorVT.setProperty("y", anchor.y, nullptr);
-                if (anchor.hasCustomTangent) {
-                    anchorVT.setProperty("tangent", anchor.tangent, nullptr);
-                }
-                if (!anchor.morphGesture.empty()) {
-                    anchorVT.setProperty("homeX", anchor.homeX, nullptr);
-                    anchorVT.setProperty("homeY", anchor.homeY, nullptr);
-                    anchorVT.appendChild(anchor.morphGesture.toValueTree(), nullptr);
-                }
-                anchorsVT.appendChild(anchorVT, nullptr);
-            }
-            laneVT.appendChild(anchorsVT, nullptr);
+            laneVT.appendChild(serializeSplineAnchors(lane.splineAnchors), nullptr);
         }
 
         // Skip curveData for Harmonic lanes — regenerated from harmonicNumber on load.
@@ -786,27 +818,152 @@ juce::ValueTree LaneMixer::toValueTree() const {
         const bool canRegenerate = (lane.contentType == LaneContentType::Harmonic
                                     && lane.harmonicNumber != 0);
         if (!canRegenerate && !lane.curveData.empty()) {
-            juce::MemoryBlock rawData(lane.curveData.data(),
-                                      lane.curveData.size() * sizeof(double));
-            juce::MemoryOutputStream compressedStream;
-            {
-                juce::GZIPCompressorOutputStream compressor(compressedStream);
-                compressor.write(rawData.getData(), rawData.getSize());
-            }
-            laneVT.setProperty("curveData",
-                                juce::var(compressedStream.getMemoryBlock()),
-                                nullptr);
+            laneVT.setProperty("curveData", compressCurveData(lane.curveData), nullptr);
         }
+        return laneVT;
+    }
+} // namespace
 
-        vt.appendChild(laneVT, nullptr);
+juce::ValueTree LaneMixer::toValueTree() const {
+    juce::ValueTree vt("LaneMixer");
+    vt.setProperty("formatVersion", 7, nullptr);
+    vt.setProperty("numLanes", activeLaneCount_, nullptr);
+    vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
+    vt.setProperty("tableSize", TABLE_SIZE, nullptr);
+    vt.setProperty("mixerMode", static_cast<int>(mixerMode_), nullptr);
+    vt.setProperty("blendAmount", blendAmount_.load(std::memory_order_acquire), nullptr);
+
+    for (int i = 0; i < activeLaneCount_; ++i) {
+        vt.appendChild(serializeLane(lanes_[static_cast<size_t>(i)], i), nullptr);
     }
 
     return vt;
 }
 
-void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
-    if (!vt.isValid() || vt.getType().toString() != "LaneMixer")
+namespace {
+    SplineAnchor deserializeAnchor(const juce::ValueTree& anchorVT) {
+        SplineAnchor anchor;
+        anchor.x = static_cast<double>(anchorVT.getProperty("x", 0.0));
+        anchor.y = static_cast<double>(anchorVT.getProperty("y", 0.0));
+        if (anchorVT.hasProperty("tangent")) {
+            anchor.hasCustomTangent = true;
+            anchor.tangent = static_cast<double>(anchorVT.getProperty("tangent", 0.0));
+        }
+        const auto gestureVT = anchorVT.getChildWithName("Gesture");
+        if (gestureVT.isValid()) {
+            anchor.morphGesture = AnchorMorphGesture::fromValueTree(gestureVT);
+            anchor.homeX = static_cast<double>(anchorVT.getProperty("homeX", anchor.x));
+            anchor.homeY = static_cast<double>(anchorVT.getProperty("homeY", anchor.y));
+        }
+        return anchor;
+    }
+
+    std::vector<SplineAnchor> deserializeAnchors(const juce::ValueTree& anchorsVT) {
+        std::vector<SplineAnchor> result;
+        if (!anchorsVT.isValid()) {
+            return result;
+        }
+        result.reserve(static_cast<size_t>(anchorsVT.getNumChildren()));
+        for (int a = 0; a < anchorsVT.getNumChildren(); ++a) {
+            result.push_back(deserializeAnchor(anchorsVT.getChild(a)));
+        }
+        return result;
+    }
+
+    bool decompressCurveDataInto(const juce::var& curveDataProp, std::vector<double>& out,
+                                  int loadedTableSize, int tableSize) {
+        const auto* compressedData = curveDataProp.getBinaryData();
+        if (compressedData == nullptr) {
+            return false;
+        }
+        juce::MemoryInputStream compressedStream(*compressedData, false);
+        juce::GZIPDecompressorInputStream decompressor(compressedStream);
+
+        const size_t expectedSize = static_cast<size_t>(loadedTableSize) * sizeof(double);
+        juce::MemoryBlock decompressed;
+        decompressed.setSize(expectedSize);
+
+        const auto bytesRead = decompressor.read(decompressed.getData(),
+                                                  static_cast<int>(expectedSize));
+        if (bytesRead <= 0) {
+            return false;
+        }
+        const auto numDoubles = static_cast<size_t>(bytesRead) / sizeof(double);
+        out.resize(static_cast<size_t>(tableSize), 0.0);
+        const auto* src = static_cast<const double*>(decompressed.getData());
+        const auto copyCount = std::min(numDoubles, static_cast<size_t>(tableSize));
+        std::copy(src, src + copyCount, out.begin());
+        return true;
+    }
+} // namespace
+
+void LaneMixer::applyLaneFromValueTree(Lane& lane, const juce::ValueTree& laneVT, int formatVersion, int laneIndex) {
+    // Read lane ID for v3+ format
+    if (formatVersion >= 3) {
+        lane.laneId = static_cast<uint32_t>(
+            static_cast<int>(laneVT.getProperty("laneId", laneIndex)));
+    }
+
+    lane.amplitude.store(
+        static_cast<double>(laneVT.getProperty("amplitude", 0.0)),
+        std::memory_order_release);
+    // formatVersion 4+ adds per-lane blendDepth; default 0 for older versions.
+    lane.blendDepth.store(
+        static_cast<double>(laneVT.getProperty("blendDepth", 0.0)),
+        std::memory_order_release);
+    // formatVersion 7+ stores per-slot modulationDepth as two separate properties.
+    // formatVersion 6 stored a single legacy `modulationDepth` — load that into
+    // slot 1 only (slot 2 stays at 0) so old presets retain audible behavior.
+    // Pre-v6 presets have neither and stay at 0/0.
+    if (formatVersion >= 7) {
+        lane.modulationDepth[0].store(
+            static_cast<double>(laneVT.getProperty("modulationDepth_slot1", 0.0)),
+            std::memory_order_release);
+        lane.modulationDepth[1].store(
+            static_cast<double>(laneVT.getProperty("modulationDepth_slot2", 0.0)),
+            std::memory_order_release);
+    } else {
+        lane.modulationDepth[0].store(
+            static_cast<double>(laneVT.getProperty("modulationDepth", 0.0)),
+            std::memory_order_release);
+        lane.modulationDepth[1].store(0.0, std::memory_order_release);
+    }
+    lane.contentType = static_cast<LaneContentType>(
+        static_cast<int>(laneVT.getProperty("contentType", 0)));
+    lane.harmonicNumber = laneVT.getProperty("harmonicNumber", 0);
+    // formatVersion 5+ adds per-lane harmonicStrength; default 1.0 for older presets.
+    lane.harmonicStrength = juce::jlimit(
+        -1.0, 1.0,
+        static_cast<double>(laneVT.getProperty("harmonicStrength", 1.0)));
+    lane.equationText = laneVT.getProperty("equationText", juce::String()).toString();
+    lane.presetSourcePath = laneVT.getProperty("presetSourcePath", juce::String()).toString();
+    lane.customName = laneVT.getProperty("customName", juce::String()).toString();
+    lane.oddSymmetryEnabled = static_cast<bool>(laneVT.getProperty("oddSymmetryEnabled", false));
+
+    lane.splineAnchors = deserializeAnchors(laneVT.getChildWithName("SplineAnchors"));
+}
+
+void LaneMixer::loadOrRegenerateLaneCurve(Lane& lane, const juce::ValueTree& laneVT, int laneIndex, int loadedTableSize) {
+    if (laneVT.hasProperty("curveData")) {
+        decompressCurveDataInto(laneVT.getProperty("curveData"), lane.curveData, loadedTableSize, TABLE_SIZE);
         return;
+    }
+    // No curve data in serialized form — regenerate from content type
+    if (lane.contentType == LaneContentType::Harmonic) {
+        if (lane.harmonicNumber == 0) {
+            fillLaneWithTanh2x(laneIndex);
+        } else {
+            fillLaneWithHarmonic(laneIndex, lane.harmonicNumber, lane.harmonicStrength);
+        }
+    } else {
+        lane.initCurveData(TABLE_SIZE);
+    }
+}
+
+void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
+    if (!vt.isValid() || vt.getType().toString() != "LaneMixer") {
+        return;
+    }
 
     const int formatVersion = vt.getProperty("formatVersion", 2);
     const int loadedTableSize = vt.getProperty("tableSize", TABLE_SIZE);
@@ -836,114 +993,18 @@ void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
 
     for (int i = 0; i < vt.getNumChildren(); ++i) {
         const auto laneVT = vt.getChild(i);
-        if (laneVT.getType().toString() != "Lane")
+        if (laneVT.getType().toString() != "Lane") {
             continue;
+        }
 
         const int laneIndex = laneVT.getProperty("index", -1);
-        if (laneIndex < 0 || laneIndex >= activeLaneCount_)
+        if (laneIndex < 0 || laneIndex >= activeLaneCount_) {
             continue;
+        }
 
         auto& lane = lanes_[static_cast<size_t>(laneIndex)];
-
-        // Read lane ID for v3+ format
-        if (formatVersion >= 3) {
-            lane.laneId = static_cast<uint32_t>(
-                static_cast<int>(laneVT.getProperty("laneId", laneIndex)));
-        }
-
-        lane.amplitude.store(
-            static_cast<double>(laneVT.getProperty("amplitude", 0.0)),
-            std::memory_order_release);
-        // formatVersion 4+ adds per-lane blendDepth; default 0 for older versions.
-        lane.blendDepth.store(
-            static_cast<double>(laneVT.getProperty("blendDepth", 0.0)),
-            std::memory_order_release);
-        // formatVersion 7+ stores per-slot modulationDepth as two separate properties.
-        // formatVersion 6 stored a single legacy `modulationDepth` — load that into
-        // slot 1 only (slot 2 stays at 0) so old presets retain audible behavior.
-        // Pre-v6 presets have neither and stay at 0/0.
-        if (formatVersion >= 7) {
-            lane.modulationDepth[0].store(
-                static_cast<double>(laneVT.getProperty("modulationDepth_slot1", 0.0)),
-                std::memory_order_release);
-            lane.modulationDepth[1].store(
-                static_cast<double>(laneVT.getProperty("modulationDepth_slot2", 0.0)),
-                std::memory_order_release);
-        } else {
-            lane.modulationDepth[0].store(
-                static_cast<double>(laneVT.getProperty("modulationDepth", 0.0)),
-                std::memory_order_release);
-            lane.modulationDepth[1].store(0.0, std::memory_order_release);
-        }
-        lane.contentType = static_cast<LaneContentType>(
-            static_cast<int>(laneVT.getProperty("contentType", 0)));
-        lane.harmonicNumber = laneVT.getProperty("harmonicNumber", 0);
-        // formatVersion 5+ adds per-lane harmonicStrength; default 1.0 for older presets.
-        lane.harmonicStrength = juce::jlimit(
-            -1.0, 1.0,
-            static_cast<double>(laneVT.getProperty("harmonicStrength", 1.0)));
-        lane.equationText = laneVT.getProperty("equationText", juce::String()).toString();
-        lane.presetSourcePath = laneVT.getProperty("presetSourcePath", juce::String()).toString();
-        lane.customName = laneVT.getProperty("customName", juce::String()).toString();
-        lane.oddSymmetryEnabled = static_cast<bool>(laneVT.getProperty("oddSymmetryEnabled", false));
-
-        // Deserialize spline anchors
-        lane.splineAnchors.clear();
-        const auto anchorsVT = laneVT.getChildWithName("SplineAnchors");
-        if (anchorsVT.isValid()) {
-            for (int a = 0; a < anchorsVT.getNumChildren(); ++a) {
-                const auto anchorVT = anchorsVT.getChild(a);
-                SplineAnchor anchor;
-                anchor.x = static_cast<double>(anchorVT.getProperty("x", 0.0));
-                anchor.y = static_cast<double>(anchorVT.getProperty("y", 0.0));
-                if (anchorVT.hasProperty("tangent")) {
-                    anchor.hasCustomTangent = true;
-                    anchor.tangent = static_cast<double>(anchorVT.getProperty("tangent", 0.0));
-                }
-                const auto gestureVT = anchorVT.getChildWithName("Gesture");
-                if (gestureVT.isValid()) {
-                    anchor.morphGesture = AnchorMorphGesture::fromValueTree(gestureVT);
-                    anchor.homeX = static_cast<double>(anchorVT.getProperty("homeX", anchor.x));
-                    anchor.homeY = static_cast<double>(anchorVT.getProperty("homeY", anchor.y));
-                }
-                lane.splineAnchors.push_back(anchor);
-            }
-        }
-
-        // Decompress curve data
-        if (laneVT.hasProperty("curveData")) {
-            const auto* compressedData = laneVT.getProperty("curveData").getBinaryData();
-            if (compressedData != nullptr) {
-                juce::MemoryInputStream compressedStream(*compressedData, false);
-                juce::GZIPDecompressorInputStream decompressor(compressedStream);
-
-                const size_t expectedSize = static_cast<size_t>(loadedTableSize) * sizeof(double);
-                juce::MemoryBlock decompressed;
-                decompressed.setSize(expectedSize);
-
-                const auto bytesRead = decompressor.read(decompressed.getData(),
-                                                          static_cast<int>(expectedSize));
-
-                if (bytesRead > 0) {
-                    const auto numDoubles = static_cast<size_t>(bytesRead) / sizeof(double);
-                    lane.curveData.resize(TABLE_SIZE, 0.0);
-                    const auto* src = static_cast<const double*>(decompressed.getData());
-                    const auto copyCount = std::min(numDoubles, static_cast<size_t>(TABLE_SIZE));
-                    std::copy(src, src + copyCount, lane.curveData.begin());
-                }
-            }
-        } else {
-            // No curve data in serialized form — regenerate from content type
-            if (lane.contentType == LaneContentType::Harmonic) {
-                if (lane.harmonicNumber == 0) {
-                    fillLaneWithTanh2x(laneIndex);
-                } else {
-                    fillLaneWithHarmonic(laneIndex, lane.harmonicNumber, lane.harmonicStrength);
-                }
-            } else {
-                lane.initCurveData(TABLE_SIZE);
-            }
-        }
+        applyLaneFromValueTree(lane, laneVT, formatVersion, laneIndex);
+        loadOrRegenerateLaneCurve(lane, laneVT, laneIndex, loadedTableSize);
     }
 
     incrementVersionIfNotBatching();
@@ -958,6 +1019,206 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT) {
     fromLegacyLTFValueTree(ltfVT, true, false);
 }
 
+namespace {
+    std::vector<double> parseLegacyCoefficients(const juce::ValueTree& ltfVT) {
+        std::vector<double> result;
+        if (!ltfVT.hasProperty("coefficients")) {
+            return result;
+        }
+        const juce::Array<juce::var>* coeffArray = ltfVT.getProperty("coefficients").getArray();
+        if (coeffArray == nullptr) {
+            return result;
+        }
+        result.reserve(static_cast<size_t>(coeffArray->size()));
+        for (const auto& coeff : *coeffArray) {
+            result.push_back(static_cast<double>(coeff));
+        }
+        return result;
+    }
+
+    std::vector<double> parseLegacyBaseLayer(const juce::ValueTree& ltfVT, int tableSize) {
+        std::vector<double> result;
+        const auto baseVT = ltfVT.getChildWithName("BaseLayer");
+        if (!baseVT.isValid() || !baseVT.hasProperty("tableData")) {
+            return result;
+        }
+        const juce::MemoryBlock baseBlob = *baseVT.getProperty("tableData").getBinaryData();
+        const auto* data = static_cast<const double*>(baseBlob.getData());
+        const int numValues = static_cast<int>(baseBlob.getSize() / sizeof(double));
+        const int copyCount = std::min(numValues, tableSize);
+        result.assign(data, data + copyCount);
+        result.resize(static_cast<size_t>(tableSize), 0.0);
+        return result;
+    }
+
+    SplineAnchor parseLegacyAnchor(const juce::ValueTree& anchorVT) {
+        SplineAnchor anchor;
+        anchor.x = static_cast<double>(anchorVT.getProperty("x", 0.0));
+        anchor.y = static_cast<double>(anchorVT.getProperty("y", 0.0));
+        anchor.tangent = static_cast<double>(anchorVT.getProperty("tangent", 0.0));
+        anchor.hasCustomTangent = static_cast<bool>(anchorVT.getProperty("hasCustomTangent", false));
+        return anchor;
+    }
+
+    // Returns (anchors, lane0ContentType). lane0ContentType is Spline iff a SplineLayer was present.
+    std::pair<std::vector<SplineAnchor>, LaneContentType>
+    parseLegacySplineAnchors(const juce::ValueTree& ltfVT) {
+        std::vector<SplineAnchor> anchors;
+        LaneContentType contentType = LaneContentType::Harmonic;
+        const auto splineVT = ltfVT.getChildWithName("SplineLayer");
+        if (!splineVT.isValid()) {
+            return {anchors, contentType};
+        }
+        contentType = LaneContentType::Spline;
+        const auto anchorsVT = splineVT.getChildWithName("Anchors");
+        if (anchorsVT.isValid()) {
+            for (int a = 0; a < anchorsVT.getNumChildren(); ++a) {
+                anchors.push_back(parseLegacyAnchor(anchorsVT.getChild(a)));
+            }
+        }
+        return {anchors, contentType};
+    }
+
+    // Pure Chebyshev harmonic curve: H1=identity, even=cos(n*acos(x)), odd=sin(n*asin(x)).
+    void fillChebyshevHarmonic(std::vector<double>& curveData, int tableSize, int harmonicNumber) {
+        curveData.resize(static_cast<size_t>(tableSize));
+        for (int i = 0; i < tableSize; ++i) {
+            const double x = std::clamp(LaneMixer::normalizeIndex(i), -1.0, 1.0);
+            double value;
+            if (harmonicNumber == 1) {
+                value = x;
+            } else if (harmonicNumber % 2 == 0) {
+                value = std::cos(harmonicNumber * std::acos(x));
+            } else {
+                value = std::sin(harmonicNumber * std::asin(x));
+            }
+            curveData[static_cast<size_t>(i)] = value;
+        }
+    }
+
+    // Odd-only variant used by the Case-A symmetric branch (skips the cos branch).
+    void fillOddHarmonic(std::vector<double>& curveData, int tableSize, int harmonicNumber) {
+        curveData.resize(static_cast<size_t>(tableSize));
+        for (int i = 0; i < tableSize; ++i) {
+            const double x = std::clamp(LaneMixer::normalizeIndex(i), -1.0, 1.0);
+            curveData[static_cast<size_t>(i)] =
+                (harmonicNumber == 1) ? x : std::sin(harmonicNumber * std::asin(x));
+        }
+    }
+
+    double coefficientOrZero(const std::vector<double>& coefficients, size_t index) {
+        return index < coefficients.size() ? coefficients[index] : 0.0;
+    }
+} // namespace
+
+void LaneMixer::initializeLegacyLane0(Lane& lane0, LaneContentType contentType,
+                                       const std::vector<SplineAnchor>& anchors,
+                                       double amplitude,
+                                       const std::vector<double>& baseLayerData) {
+    lane0.laneId = 0;
+    lane0.contentType = contentType;
+    lane0.harmonicNumber = 0;
+    lane0.splineAnchors = anchors;
+    lane0.amplitude.store(amplitude, std::memory_order_relaxed);
+    if (!baseLayerData.empty()) {
+        lane0.curveData = baseLayerData;
+        return;
+    }
+    lane0.curveData.resize(TABLE_SIZE);
+    for (int i = 0; i < TABLE_SIZE; ++i) {
+        lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
+    }
+    Services::TransferFunctionOperations::normalize(lane0.curveData);
+}
+
+void LaneMixer::restoreLegacyHarmonicSymmetricMode(const std::vector<double>& legacyCoefficients,
+                                                    const std::vector<double>& baseLayerData,
+                                                    const std::vector<SplineAnchor>& legacySplineAnchors,
+                                                    LaneContentType lane0ContentType) {
+    // Case A — harmonic mode with odd symmetry: Lane 0 + odd harmonics only (21 lanes)
+    initializeLegacyLane0(lanes_[0], lane0ContentType, legacySplineAnchors,
+                          coefficientOrZero(legacyCoefficients, 0), baseLayerData);
+
+    // Odd harmonics: H1, H3, H5, ..., H39 (20 lanes at indices 1-20)
+    int laneIdx = 1;
+    for (int h = 1; h <= 39; h += 2) {
+        auto& lane = lanes_[static_cast<size_t>(laneIdx)];
+        lane.laneId = static_cast<uint32_t>(laneIdx);
+        lane.contentType = LaneContentType::Harmonic;
+        lane.harmonicNumber = h;
+        lane.amplitude.store(coefficientOrZero(legacyCoefficients, static_cast<size_t>(h)),
+                             std::memory_order_relaxed);
+        fillOddHarmonic(lane.curveData, TABLE_SIZE, h);
+        laneIdx++;
+    }
+
+    activeLaneCount_ = 21; // Lane 0 + 20 odd harmonics
+    nextLaneId_ = 21;
+}
+
+void LaneMixer::restoreLegacyHarmonicMode(const std::vector<double>& legacyCoefficients,
+                                           const std::vector<double>& baseLayerData,
+                                           const std::vector<SplineAnchor>& legacySplineAnchors,
+                                           LaneContentType lane0ContentType) {
+    // Case B — harmonic mode without odd symmetry: Lane 0 + H1-H40 (41 lanes)
+    initializeLegacyLane0(lanes_[0], lane0ContentType, legacySplineAnchors,
+                          coefficientOrZero(legacyCoefficients, 0), baseLayerData);
+
+    for (int n = 1; n <= 40; ++n) {
+        auto& lane = lanes_[static_cast<size_t>(n)];
+        lane.laneId = static_cast<uint32_t>(n);
+        lane.contentType = LaneContentType::Harmonic;
+        lane.harmonicNumber = n;
+        lane.amplitude.store(coefficientOrZero(legacyCoefficients, static_cast<size_t>(n)),
+                             std::memory_order_relaxed);
+        fillChebyshevHarmonic(lane.curveData, TABLE_SIZE, n);
+    }
+
+    activeLaneCount_ = 41;
+    nextLaneId_ = 41;
+}
+
+void LaneMixer::restoreLegacyNonHarmonicMode(const std::vector<double>& legacyCoefficients,
+                                              const std::vector<double>& baseLayerData,
+                                              const std::vector<SplineAnchor>& legacySplineAnchors,
+                                              LaneContentType lane0ContentType) {
+    // Case C — non-harmonic mode (Paint, Equation, Spline): Lane 0 + H1 + 9 odd harmonics (11 lanes)
+    initializeLegacyLane0(lanes_[0], lane0ContentType, legacySplineAnchors,
+                          coefficientOrZero(legacyCoefficients, 0), baseLayerData);
+
+    // Lane 1: H1 (identity), amplitude=0.0
+    {
+        auto& lane1 = lanes_[1];
+        lane1.laneId = 1;
+        lane1.contentType = LaneContentType::Harmonic;
+        lane1.harmonicNumber = 1;
+        lane1.oddSymmetryEnabled = true;
+        lane1.amplitude.store(0.0, std::memory_order_relaxed);
+        lane1.curveData.resize(TABLE_SIZE);
+        for (int i = 0; i < TABLE_SIZE; ++i) {
+            lane1.curveData[static_cast<size_t>(i)] = normalizeIndex(i);
+        }
+    }
+
+    // Lanes 2-10: Odd harmonics H3,H5,...,H19, amplitude=0.0
+    constexpr std::array<int, 9> kLegacyOddHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
+    for (size_t laneIdx = 0; laneIdx < kLegacyOddHarmonics.size(); ++laneIdx) {
+        const int n = kLegacyOddHarmonics[laneIdx];
+        auto& lane = lanes_[laneIdx + 2];
+        lane.laneId = static_cast<uint32_t>(laneIdx + 2);
+        lane.contentType = LaneContentType::Harmonic;
+        lane.harmonicNumber = n;
+        lane.oddSymmetryEnabled = true;
+        lane.amplitude.store(0.0, std::memory_order_relaxed);
+        fillOddHarmonic(lane.curveData, TABLE_SIZE, n);
+    }
+
+    // Legacy LTF Case C lays out lane 0 (saved) + H1 + 9 odd harmonics = 11 lanes,
+    // independent of the new factory default count.
+    activeLaneCount_ = 11;
+    nextLaneId_ = 11;
+}
+
 void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
                                          bool wasHarmonicMode,
                                          bool oddSymmetryWasEnabled) {
@@ -965,49 +1226,9 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
         return;
     }
 
-    // Parse coefficients from legacy format
-    std::vector<double> legacyCoefficients;
-    if (ltfVT.hasProperty("coefficients")) {
-        const juce::Array<juce::var>* coeffArray = ltfVT.getProperty("coefficients").getArray();
-        if (coeffArray != nullptr) {
-            legacyCoefficients.reserve(static_cast<size_t>(coeffArray->size()));
-            for (int i = 0; i < coeffArray->size(); ++i) {
-                legacyCoefficients.push_back(static_cast<double>((*coeffArray)[i]));
-            }
-        }
-    }
-
-    // Parse BaseLayer curve data
-    std::vector<double> baseLayerData;
-    const auto baseVT = ltfVT.getChildWithName("BaseLayer");
-    if (baseVT.isValid() && baseVT.hasProperty("tableData")) {
-        const juce::MemoryBlock baseBlob = *baseVT.getProperty("tableData").getBinaryData();
-        const auto* data = static_cast<const double*>(baseBlob.getData());
-        const int numValues = static_cast<int>(baseBlob.getSize() / sizeof(double));
-        const int copyCount = std::min(numValues, TABLE_SIZE);
-        baseLayerData.assign(data, data + copyCount);
-        baseLayerData.resize(TABLE_SIZE, 0.0);
-    }
-
-    // Parse spline anchors from legacy format
-    std::vector<SplineAnchor> legacySplineAnchors;
-    LaneContentType lane0ContentType = LaneContentType::Harmonic;
-    const auto splineVT = ltfVT.getChildWithName("SplineLayer");
-    if (splineVT.isValid()) {
-        lane0ContentType = LaneContentType::Spline;
-        const auto anchorsVT = splineVT.getChildWithName("Anchors");
-        if (anchorsVT.isValid()) {
-            for (int a = 0; a < anchorsVT.getNumChildren(); ++a) {
-                const auto anchorVT = anchorsVT.getChild(a);
-                SplineAnchor anchor;
-                anchor.x = static_cast<double>(anchorVT.getProperty("x", 0.0));
-                anchor.y = static_cast<double>(anchorVT.getProperty("y", 0.0));
-                anchor.tangent = static_cast<double>(anchorVT.getProperty("tangent", 0.0));
-                anchor.hasCustomTangent = static_cast<bool>(anchorVT.getProperty("hasCustomTangent", false));
-                legacySplineAnchors.push_back(anchor);
-            }
-        }
-    }
+    const auto legacyCoefficients = parseLegacyCoefficients(ltfVT);
+    const auto baseLayerData = parseLegacyBaseLayer(ltfVT, TABLE_SIZE);
+    const auto [legacySplineAnchors, lane0ContentType] = parseLegacySplineAnchors(ltfVT);
 
     // Clear all lanes
     for (int i = 0; i < MAX_LANES; ++i) {
@@ -1015,159 +1236,14 @@ void LaneMixer::fromLegacyLTFValueTree(const juce::ValueTree& ltfVT,
     }
 
     if (wasHarmonicMode && oddSymmetryWasEnabled) {
-        // Case B — harmonic mode with odd symmetry: Lane 0 + odd harmonics only
-        // Lane 0: base layer
-        {
-            auto& lane0 = lanes_[0];
-            lane0.laneId = 0;
-            lane0.contentType = lane0ContentType;
-            lane0.harmonicNumber = 0;
-            lane0.splineAnchors = legacySplineAnchors;
-            lane0.amplitude.store(
-                legacyCoefficients.empty() ? 0.0 : legacyCoefficients[0],
-                std::memory_order_relaxed);
-            if (!baseLayerData.empty()) {
-                lane0.curveData = baseLayerData;
-            } else {
-                lane0.curveData.resize(TABLE_SIZE);
-                for (int i = 0; i < TABLE_SIZE; ++i) {
-                    lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
-                }
-                Services::TransferFunctionOperations::normalize(lane0.curveData);
-            }
-        }
-
-        // Odd harmonics: H1, H3, H5, ..., H39 (20 lanes at indices 1-20)
-        int laneIdx = 1;
-        for (int h = 1; h <= 39; h += 2) {
-            auto& lane = lanes_[static_cast<size_t>(laneIdx)];
-            lane.laneId = static_cast<uint32_t>(laneIdx);
-            lane.contentType = LaneContentType::Harmonic;
-            lane.harmonicNumber = h;
-            lane.amplitude.store(
-                (static_cast<size_t>(h) < legacyCoefficients.size()) ? legacyCoefficients[static_cast<size_t>(h)] : 0.0,
-                std::memory_order_relaxed);
-            lane.curveData.resize(TABLE_SIZE);
-            for (int i = 0; i < TABLE_SIZE; ++i) {
-                const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
-                if (h == 1) {
-                    lane.curveData[static_cast<size_t>(i)] = x;
-                } else {
-                    lane.curveData[static_cast<size_t>(i)] = std::sin(h * std::asin(x));
-                }
-            }
-            laneIdx++;
-        }
-
-        activeLaneCount_ = 21; // Lane 0 + 20 odd harmonics
-        nextLaneId_ = 21;
-
+        restoreLegacyHarmonicSymmetricMode(legacyCoefficients, baseLayerData,
+                                            legacySplineAnchors, lane0ContentType);
     } else if (wasHarmonicMode) {
-        // Case B — harmonic mode without odd symmetry: Lane 0 + H1-H39 (41 lanes)
-        // Lane 0: base layer
-        {
-            auto& lane0 = lanes_[0];
-            lane0.laneId = 0;
-            lane0.contentType = lane0ContentType;
-            lane0.harmonicNumber = 0;
-            lane0.splineAnchors = legacySplineAnchors;
-            lane0.amplitude.store(
-                legacyCoefficients.empty() ? 0.0 : legacyCoefficients[0],
-                std::memory_order_relaxed);
-            if (!baseLayerData.empty()) {
-                lane0.curveData = baseLayerData;
-            } else {
-                lane0.curveData.resize(TABLE_SIZE);
-                for (int i = 0; i < TABLE_SIZE; ++i) {
-                    lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
-                }
-                Services::TransferFunctionOperations::normalize(lane0.curveData);
-            }
-        }
-
-        // H1-H39 (40 harmonic lanes at indices 1-40)
-        for (int n = 1; n <= 40; ++n) {
-            auto& lane = lanes_[static_cast<size_t>(n)];
-            lane.laneId = static_cast<uint32_t>(n);
-            lane.contentType = LaneContentType::Harmonic;
-            lane.harmonicNumber = n;
-            lane.amplitude.store(
-                (static_cast<size_t>(n) < legacyCoefficients.size()) ? legacyCoefficients[static_cast<size_t>(n)] : 0.0,
-                std::memory_order_relaxed);
-            lane.curveData.resize(TABLE_SIZE);
-            for (int i = 0; i < TABLE_SIZE; ++i) {
-                const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
-                if (n == 1) {
-                    lane.curveData[static_cast<size_t>(i)] = x;
-                } else if (n % 2 == 0) {
-                    lane.curveData[static_cast<size_t>(i)] = std::cos(n * std::acos(x));
-                } else {
-                    lane.curveData[static_cast<size_t>(i)] = std::sin(n * std::asin(x));
-                }
-            }
-        }
-
-        activeLaneCount_ = 41;
-        nextLaneId_ = 41;
-
+        restoreLegacyHarmonicMode(legacyCoefficients, baseLayerData,
+                                   legacySplineAnchors, lane0ContentType);
     } else {
-        // Case C — non-harmonic mode (Paint, Equation, Spline): Lane 0 + H1-H12
-        // Lane 0: saved state
-        {
-            auto& lane0 = lanes_[0];
-            lane0.laneId = 0;
-            lane0.contentType = lane0ContentType;
-            lane0.harmonicNumber = 0;
-            lane0.splineAnchors = legacySplineAnchors;
-            lane0.amplitude.store(
-                legacyCoefficients.empty() ? 0.0 : legacyCoefficients[0],
-                std::memory_order_relaxed);
-            if (!baseLayerData.empty()) {
-                lane0.curveData = baseLayerData;
-            } else {
-                lane0.curveData.resize(TABLE_SIZE);
-                for (int i = 0; i < TABLE_SIZE; ++i) {
-                    lane0.curveData[static_cast<size_t>(i)] = std::tanh(2.0 * normalizeIndex(i));
-                }
-                Services::TransferFunctionOperations::normalize(lane0.curveData);
-            }
-        }
-
-        // Lane 1: H1 (identity), amplitude=0.0
-        {
-            auto& lane1 = lanes_[1];
-            lane1.laneId = 1;
-            lane1.contentType = LaneContentType::Harmonic;
-            lane1.harmonicNumber = 1;
-            lane1.oddSymmetryEnabled = true;
-            lane1.amplitude.store(0.0, std::memory_order_relaxed);
-            lane1.curveData.resize(TABLE_SIZE);
-            for (int i = 0; i < TABLE_SIZE; ++i) {
-                lane1.curveData[static_cast<size_t>(i)] = normalizeIndex(i);
-            }
-        }
-
-        // Lanes 2-10: Odd harmonics H3,H5,...,H19, amplitude=0.0
-        constexpr std::array<int, 9> kLegacyOddHarmonics = {3, 5, 7, 9, 11, 13, 15, 17, 19};
-        for (size_t laneIdx = 0; laneIdx < kLegacyOddHarmonics.size(); ++laneIdx) {
-            const int n = kLegacyOddHarmonics[laneIdx];
-            auto& lane = lanes_[laneIdx + 2];
-            lane.laneId = static_cast<uint32_t>(laneIdx + 2);
-            lane.contentType = LaneContentType::Harmonic;
-            lane.harmonicNumber = n;
-            lane.oddSymmetryEnabled = true;
-            lane.amplitude.store(0.0, std::memory_order_relaxed);
-            lane.curveData.resize(TABLE_SIZE);
-            for (int i = 0; i < TABLE_SIZE; ++i) {
-                const double x = std::clamp(normalizeIndex(i), -1.0, 1.0);
-                lane.curveData[static_cast<size_t>(i)] = std::sin(n * std::asin(x));
-            }
-        }
-
-        // Legacy LTF Case C lays out lane 0 (saved) + H1 + 9 odd harmonics = 11 lanes,
-        // independent of the new factory default count.
-        activeLaneCount_ = 11;
-        nextLaneId_ = 11;
+        restoreLegacyNonHarmonicMode(legacyCoefficients, baseLayerData,
+                                      legacySplineAnchors, lane0ContentType);
     }
 
     incrementVersionIfNotBatching();
@@ -1213,7 +1289,7 @@ void LaneMixer::shiftLanesLeft(int fromIndex) {
 // Utilities
 // ============================================================================
 
-double LaneMixer::normalizeIndex(int index) const {
+double LaneMixer::normalizeIndex(int index) {
     return juce::jmap(static_cast<double>(index),
                       0.0, static_cast<double>(TABLE_SIZE - 1),
                       MIN_VALUE, MAX_VALUE);

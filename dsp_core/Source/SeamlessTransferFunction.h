@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LaneMixer.h"
+#include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
 #include <functional>
 #include <memory>

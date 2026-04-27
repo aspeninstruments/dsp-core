@@ -32,29 +32,91 @@ void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
     previousEnabled_ = hysteresisEnabled_.load(std::memory_order_acquire);
 }
 
+void HysteresisStage::detectTransition(bool enabled) {
+    // Only detect when no crossfade is active — mid-crossfade toggles are deferred.
+    if (crossfadeState_ != CrossfadeState::Inactive) {
+        return;
+    }
+    if (enabled && !previousEnabled_) {
+        crossfadeState_ = CrossfadeState::WarmingUp;
+        crossfadePosition_ = 0;
+        for (auto& proc : processors_) {
+            proc.reset();
+        }
+    } else if (!enabled && previousEnabled_) {
+        crossfadeState_ = CrossfadeState::CrossfadingOut;
+        crossfadePosition_ = 0;
+    }
+    previousEnabled_ = enabled;
+}
+
+int HysteresisStage::advanceCrossfadePhase(juce::AudioBuffer<double>& buffer, int pos, int remaining, bool enabled) {
+    const int samplesLeft = phaseSamples_ - crossfadePosition_;
+    const int toProcess = std::min(remaining, samplesLeft);
+
+    switch (crossfadeState_) {
+        case CrossfadeState::WarmingUp:
+            processWarmup(buffer, pos, toProcess);
+            crossfadePosition_ += toProcess;
+            if (crossfadePosition_ >= phaseSamples_) {
+                crossfadeState_ = CrossfadeState::CrossfadingIn;
+                crossfadePosition_ = 0;
+            }
+            return toProcess;
+
+        case CrossfadeState::CrossfadingIn:
+            processCrossfadeIn(buffer, pos, toProcess);
+            crossfadePosition_ += toProcess;
+            if (crossfadePosition_ >= phaseSamples_) {
+                previousEnabled_ = true;
+                // Check for deferred disable toggle
+                if (!enabled) {
+                    crossfadeState_ = CrossfadeState::CrossfadingOut;
+                    crossfadePosition_ = 0;
+                } else {
+                    crossfadeState_ = CrossfadeState::Inactive;
+                }
+            }
+            return toProcess;
+
+        case CrossfadeState::CrossfadingOut:
+            processCrossfadeOut(buffer, pos, toProcess);
+            crossfadePosition_ += toProcess;
+            if (crossfadePosition_ >= phaseSamples_) {
+                previousEnabled_ = false;
+                // Check for deferred enable toggle
+                if (enabled) {
+                    crossfadeState_ = CrossfadeState::WarmingUp;
+                    crossfadePosition_ = 0;
+                    for (auto& proc : processors_) {
+                        proc.reset();
+                    }
+                } else {
+                    crossfadeState_ = CrossfadeState::Inactive;
+                }
+            }
+            return toProcess;
+
+        case CrossfadeState::Inactive:
+            // Phase just completed mid-buffer — process remainder in steady state
+            if (enabled) {
+                processSteadyHysteresis(buffer, pos, remaining);
+            } else {
+                processSteadyWaveshaping(buffer, pos, remaining);
+            }
+            return remaining;
+    }
+    return 0;
+}
+
 void HysteresisStage::process(juce::AudioBuffer<double>& buffer) {
     const int numSamples = buffer.getNumSamples();
-
     if (numSamples == 0) {
         return;
     }
 
     const bool enabled = hysteresisEnabled_.load(std::memory_order_acquire);
-
-    // Detect transitions (only when no crossfade is active)
-    if (crossfadeState_ == CrossfadeState::Inactive) {
-        if (enabled && !previousEnabled_) {
-            crossfadeState_ = CrossfadeState::WarmingUp;
-            crossfadePosition_ = 0;
-            for (auto& proc : processors_) {
-                proc.reset();
-            }
-        } else if (!enabled && previousEnabled_) {
-            crossfadeState_ = CrossfadeState::CrossfadingOut;
-            crossfadePosition_ = 0;
-        }
-        previousEnabled_ = enabled;
-    }
+    detectTransition(enabled);
 
     // Fast path: no transition active
     if (crossfadeState_ == CrossfadeState::Inactive) {
@@ -70,73 +132,8 @@ void HysteresisStage::process(juce::AudioBuffer<double>& buffer) {
     // Transition active — process in phases, handling mid-buffer completion
     transferFunction_->beginBlock();
     int pos = 0;
-
     while (pos < numSamples) {
-        const int remaining = numSamples - pos;
-
-        switch (crossfadeState_) {
-            case CrossfadeState::WarmingUp: {
-                const int samplesLeft = phaseSamples_ - crossfadePosition_;
-                const int toProcess = std::min(remaining, samplesLeft);
-                processWarmup(buffer, pos, toProcess);
-                pos += toProcess;
-                crossfadePosition_ += toProcess;
-                if (crossfadePosition_ >= phaseSamples_) {
-                    crossfadeState_ = CrossfadeState::CrossfadingIn;
-                    crossfadePosition_ = 0;
-                }
-                break;
-            }
-            case CrossfadeState::CrossfadingIn: {
-                const int samplesLeft = phaseSamples_ - crossfadePosition_;
-                const int toProcess = std::min(remaining, samplesLeft);
-                processCrossfadeIn(buffer, pos, toProcess);
-                pos += toProcess;
-                crossfadePosition_ += toProcess;
-                if (crossfadePosition_ >= phaseSamples_) {
-                    previousEnabled_ = true;
-                    // Check for deferred disable toggle
-                    if (!enabled) {
-                        crossfadeState_ = CrossfadeState::CrossfadingOut;
-                        crossfadePosition_ = 0;
-                    } else {
-                        crossfadeState_ = CrossfadeState::Inactive;
-                    }
-                }
-                break;
-            }
-            case CrossfadeState::CrossfadingOut: {
-                const int samplesLeft = phaseSamples_ - crossfadePosition_;
-                const int toProcess = std::min(remaining, samplesLeft);
-                processCrossfadeOut(buffer, pos, toProcess);
-                pos += toProcess;
-                crossfadePosition_ += toProcess;
-                if (crossfadePosition_ >= phaseSamples_) {
-                    previousEnabled_ = false;
-                    // Check for deferred enable toggle
-                    if (enabled) {
-                        crossfadeState_ = CrossfadeState::WarmingUp;
-                        crossfadePosition_ = 0;
-                        for (auto& proc : processors_) {
-                            proc.reset();
-                        }
-                    } else {
-                        crossfadeState_ = CrossfadeState::Inactive;
-                    }
-                }
-                break;
-            }
-            case CrossfadeState::Inactive: {
-                // Phase just completed mid-buffer — process remainder in steady state
-                if (enabled) {
-                    processSteadyHysteresis(buffer, pos, remaining);
-                } else {
-                    processSteadyWaveshaping(buffer, pos, remaining);
-                }
-                pos += remaining;
-                break;
-            }
-        }
+        pos += advanceCrossfadePhase(buffer, pos, numSamples - pos, enabled);
     }
 }
 
@@ -294,7 +291,7 @@ double HysteresisStage::computeMakeupForWidth(double width) {
     // full-scale means signals louder than unity undershoot (output bounded by
     // M_s ≈ 1), which is the preferred failure mode. Measurements from
     // DIAGNOSTIC_WidthSweep_Amp1_NewK. Re-run if J-A operating point changes.
-    static constexpr double kTable[] = {
+    static constexpr std::array<double, 11> kTable = {
         1.000,  // w=0.0
         1.039,  // w=0.1
         1.081,  // w=0.2
@@ -307,7 +304,7 @@ double HysteresisStage::computeMakeupForWidth(double width) {
         1.504,  // w=0.9
         1.593,  // w=1.0
     };
-    static constexpr int kN = sizeof(kTable) / sizeof(kTable[0]);
+    static constexpr int kN = static_cast<int>(kTable.size());
     static constexpr double kStep = 1.0 / (kN - 1);
 
     const double w = juce::jlimit(0.0, 1.0, width);

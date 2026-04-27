@@ -66,15 +66,15 @@ double LfoStage::evaluateShape(Shape s, double phase, unsigned int seed) {
 }
 
 void LfoStage::process(juce::AudioBuffer<double>& buffer) {
-    const Shape shape = static_cast<Shape>(shape_.load(std::memory_order_acquire));
+    const auto shape = static_cast<Shape>(shape_.load(std::memory_order_acquire));
     if (!enabled_.load(std::memory_order_acquire) || shape == Shape::Off) {
         lfoStorage_.store(0.0, std::memory_order_release);
         return;
     }
 
-    const Units units = static_cast<Units>(units_.load(std::memory_order_acquire));
-    const Division div = static_cast<Division>(division_.load(std::memory_order_acquire));
-    const Flavor flv = static_cast<Flavor>(flavor_.load(std::memory_order_acquire));
+    const auto units = static_cast<Units>(units_.load(std::memory_order_acquire));
+    const auto div = static_cast<Division>(division_.load(std::memory_order_acquire));
+    const auto flv = static_cast<Flavor>(flavor_.load(std::memory_order_acquire));
     const double rateHz = rateHz_.load(std::memory_order_acquire);
     const double phaseOffset = phaseOffset_.load(std::memory_order_acquire);
     const unsigned int seed = seed_.load(std::memory_order_acquire);

@@ -15,7 +15,7 @@ double SymmetryAnalyzer::computeSymmetryScore(const std::vector<double>& fPositi
     const int n = static_cast<int>(fPositive.size());
 
     // Compute means
-    double meanPos = std::accumulate(fPositive.begin(), fPositive.end(), 0.0) / n;
+    const double meanPos = std::accumulate(fPositive.begin(), fPositive.end(), 0.0) / n;
     double meanNeg = std::accumulate(fNegative.begin(), fNegative.end(), 0.0) / n;
 
     // For odd symmetry: f(-x) = -f(x), so meanNeg should be ≈ -meanPos

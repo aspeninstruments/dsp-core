@@ -143,7 +143,7 @@ void remapWithPivot(std::vector<double>& curveData, double pivotFromX, double pi
     std::vector<double> out(static_cast<size_t>(n));
     const double leftScale = (pivotFromX + 1.0) / (pivotToX + 1.0);    // new→orig on [-1, pivot]
     const double rightScale = (1.0 - pivotFromX) / (1.0 - pivotToX);   // new→orig on [pivot, 1]
-    const double lastIdx = static_cast<double>(n - 1);
+    const auto lastIdx = static_cast<double>(n - 1);
 
     for (int i = 0; i < n; ++i) {
         const double nx = -1.0 + 2.0 * static_cast<double>(i) / lastIdx;
@@ -182,8 +182,8 @@ std::optional<double> crossingInSegment(const std::vector<double>& c, int i, int
         return std::nullopt;
     }
     const double a = c[static_cast<size_t>(i)];
-    const double b = c[static_cast<size_t>(i + 1)];
-    const double lastIdx = static_cast<double>(n - 1);
+    const double b = c[static_cast<size_t>(i) + 1];
+    const auto lastIdx = static_cast<double>(n - 1);
     if (a == 0.0) {
         return -1.0 + 2.0 * static_cast<double>(i) / lastIdx;
     }

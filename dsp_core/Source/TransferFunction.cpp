@@ -74,8 +74,8 @@ double TransferFunction::getSample(int i) const {
     }
     if ((isBelow || isAbove) && extrapolationMode == ExtrapolationMode::Mirror) {
         const int period = 2 * (tableSize - 1);
-        int wrapped = ((i % period) + period) % period;
-        int idx = wrapped <= tableSize - 1 ? wrapped : period - wrapped;
+        const int wrapped = ((i % period) + period) % period;
+        const int idx = wrapped <= tableSize - 1 ? wrapped : period - wrapped;
         return table[idx].load();
     }
     const int clampedIdx = juce::jlimit(0, tableSize - 1, i);

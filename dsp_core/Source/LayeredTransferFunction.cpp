@@ -5,16 +5,6 @@
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
 
-// Branch prediction hints (improve CPU branch predictor performance)
-// GCC/Clang support __builtin_expect for optimization
-#if defined(__GNUC__) || defined(__clang__)
-#define juce_likely(x) __builtin_expect(!!(x), 1)
-#define juce_unlikely(x) __builtin_expect(!!(x), 0)
-#else
-#define juce_likely(x) (x)
-#define juce_unlikely(x) (x)
-#endif
-
 namespace dsp_core {
 
 // Static instance counter for debugging
@@ -355,7 +345,7 @@ double LayeredTransferFunction::interpolateCatmullRom(double x) const {
 
     // PERFORMANCE: Fast path for Clamp mode (most common, default case ~95%)
     // Computes on-demand from base layer + harmonics (no cached composite table)
-    if (juce_likely(extrapMode == ExtrapolationMode::Clamp)) {
+    if (extrapMode == ExtrapolationMode::Clamp) [[likely]] {
         const int idx0 = juce::jlimit(0, tableSize - 1, index - 1);
         const int idx1 = juce::jlimit(0, tableSize - 1, index);
         const int idx2 = juce::jlimit(0, tableSize - 1, index + 1);
@@ -376,7 +366,7 @@ double LayeredTransferFunction::interpolateCatmullRom(double x) const {
     if (extrapMode == ExtrapolationMode::Mirror) {
         auto mirrorIdx = [this](int i) -> int {
             const int period = 2 * (tableSize - 1);
-            int wrapped = ((i % period) + period) % period;
+            const int wrapped = ((i % period) + period) % period;
             return wrapped <= tableSize - 1 ? wrapped : period - wrapped;
         };
 
@@ -442,7 +432,7 @@ double LayeredTransferFunction::getBaseValueAt(double x) const {
             // Linear interpolation at the wrapped position
             int i = static_cast<int>(wrapped);
             i = juce::jlimit(0, tableSize - 2, i);
-            double f = wrapped - i;
+            const double f = wrapped - i;
             const double a = baseTable[i].load(std::memory_order_relaxed);
             const double b = baseTable[i + 1].load(std::memory_order_relaxed);
             return a + f * (b - a);
@@ -462,12 +452,11 @@ double LayeredTransferFunction::getBaseValueAt(double x) const {
             const double y1 = baseTable[1].load(std::memory_order_relaxed);
             const double slope = y1 - y0;
             return y0 + slope * tableIndex;
-        } else {
-            const double y0 = baseTable[tableSize - 2].load(std::memory_order_relaxed);
-            const double y1 = baseTable[tableSize - 1].load(std::memory_order_relaxed);
-            const double slope = y1 - y0;
-            return y0 + slope * (tableIndex - (tableSize - 2));
         }
+        const double y0 = baseTable[tableSize - 2].load(std::memory_order_relaxed);
+        const double y1 = baseTable[tableSize - 1].load(std::memory_order_relaxed);
+        const double slope = y1 - y0;
+        return y0 + slope * (tableIndex - (tableSize - 2));
     }
 
     // Linear interpolation (sufficient for base layer reading)
@@ -718,7 +707,7 @@ void LayeredTransferFunction::fromValueTree(const juce::ValueTree& vt) {
     const auto baseVT = vt.getChildWithName("BaseLayer");
     if (baseVT.isValid() && baseVT.hasProperty("tableData")) {
         const juce::MemoryBlock baseBlob = *baseVT.getProperty("tableData").getBinaryData();
-        const double* data = static_cast<const double*>(baseBlob.getData());
+        const auto* data = static_cast<const double*>(baseBlob.getData());
         const int numValues = static_cast<int>(baseBlob.getSize() / sizeof(double));
 
         for (int i = 0; i < std::min(numValues, tableSize); ++i) {

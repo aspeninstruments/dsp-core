@@ -12,13 +12,15 @@ void AutoSquashStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
 void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
     const int numSamples = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
-    if (numSamples == 0 || numChannels == 0)
+    if (numSamples == 0 || numChannels == 0) {
         return;
+    }
 
     // Resize gainHistory if the host changed its block size on us. This
     // shouldn't happen mid-stream in a well-behaved host, but be defensive.
-    if (state_.gainHistory.getNumSamples() < numSamples)
+    if (state_.gainHistory.getNumSamples() < numSamples) {
         state_.gainHistory.setSize(1, numSamples, false, true, true);
+    }
 
     auto* gainBuf = state_.gainHistory.getWritePointer(0);
 
@@ -33,8 +35,7 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
         for (int ch = 0; ch < numChannels; ++ch) {
             const double s = buffer.getReadPointer(ch)[n];
             const double a = std::abs(s);
-            if (a > sampleAbs)
-                sampleAbs = a;
+            sampleAbs = std::max(sampleAbs, a);
         }
 
         // Peak follower: instantaneous attack, smooth release after a hold
@@ -55,24 +56,25 @@ void AutoSquashStage::process(juce::AudioBuffer<double>& buffer) {
         double rawGain = 1.0;
         if (state_.envelope > k.noiseFloorLinear) {
             rawGain = targetPeak / state_.envelope;
-            if (rawGain > k.maxGainLinear)
-                rawGain = k.maxGainLinear;
-            if (rawGain < 1.0 / k.maxGainLinear) // safety floor
-                rawGain = 1.0 / k.maxGainLinear;
+            rawGain = std::min(rawGain, k.maxGainLinear);
+            // safety floor
+            rawGain = std::max(rawGain, 1.0 / k.maxGainLinear);
         }
 
         // Enable crossfade: linearly mix between unity and the computed gain.
         const double targetMix = targetEnabled ? 1.0 : 0.0;
-        if (state_.enableMix < targetMix)
+        if (state_.enableMix < targetMix) {
             state_.enableMix = std::min(targetMix, state_.enableMix + enableStep);
-        else if (state_.enableMix > targetMix)
+        } else if (state_.enableMix > targetMix) {
             state_.enableMix = std::max(targetMix, state_.enableMix - enableStep);
+        }
 
         const double g = 1.0 + state_.enableMix * (rawGain - 1.0);
 
         gainBuf[n] = g;
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < numChannels; ++ch) {
             buffer.getWritePointer(ch)[n] *= g;
+        }
     }
 }
 

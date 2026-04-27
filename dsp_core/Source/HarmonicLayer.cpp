@@ -27,9 +27,8 @@ double HarmonicLayer::evaluate(double x, const std::vector<double>& coefficients
     // Fallback to on-demand evaluation
     if (algorithm == Algorithm::Trig) {
         return evaluateChebyshevTrig(x, coefficients);
-    } else {
-        return evaluateChebyshevPolynomial(x, coefficients);
     }
+    return evaluateChebyshevPolynomial(x, coefficients);
 }
 
 void HarmonicLayer::precomputeBasisFunctions(int tableSize, double minVal, double maxVal) {
@@ -142,7 +141,7 @@ bool HarmonicLayer::operator==(const HarmonicLayer& other) const {
     return numHarmonics == other.numHarmonics && algorithm == other.algorithm;
 }
 
-int HarmonicLayer::xToTableIndex(double x, int tableSize, double minVal, double maxVal) const {
+int HarmonicLayer::xToTableIndex(double x, int tableSize, double minVal, double maxVal) {
     // Map x from [minVal, maxVal] to table index [0, tableSize-1]
     // Inverse of the jmap operation used in precomputeBasisFunctions
     //

@@ -12,18 +12,18 @@ StereoHistoryBuffer::StereoHistoryBuffer(int historySize)
 
 void StereoHistoryBuffer::pushSample(double xSample, double ySample) {
     // Begin write: increment sequence to odd (signals write in progress)
-    uint64_t seq = sequence_.load(std::memory_order_relaxed);
+    const uint64_t seq = sequence_.load(std::memory_order_relaxed);
     sequence_.store(seq + 1, std::memory_order_release);
 
     // Load current position
-    int pos = writePos_.load(std::memory_order_relaxed);
+    const int pos = writePos_.load(std::memory_order_relaxed);
 
     // Write both samples at the same position
     xBuffer_[static_cast<size_t>(pos)] = xSample;
     yBuffer_[static_cast<size_t>(pos)] = ySample;
 
     // Advance write position
-    int nextPos = (pos + 1) % size_;
+    const int nextPos = (pos + 1) % size_;
     writePos_.store(nextPos, std::memory_order_relaxed);
 
     // Track total samples for readiness checks
@@ -35,7 +35,7 @@ void StereoHistoryBuffer::pushSample(double xSample, double ySample) {
 
 void StereoHistoryBuffer::pushSamples(const double* xSamples, const double* ySamples, int numSamples) {
     // Begin write: increment sequence to odd
-    uint64_t seq = sequence_.load(std::memory_order_relaxed);
+    const uint64_t seq = sequence_.load(std::memory_order_relaxed);
     sequence_.store(seq + 1, std::memory_order_release);
 
     // Load current position
@@ -60,8 +60,8 @@ void StereoHistoryBuffer::pushSamples(const double* xSamples, const double* ySam
 
 void StereoHistoryBuffer::copyFromPosition(double* outX, double* outY, int numSamples, int startPos) const {
     // Copy X buffer
-    int firstPart = std::min(size_ - startPos, numSamples);
-    int secondPart = numSamples - firstPart;
+    const int firstPart = std::min(size_ - startPos, numSamples);
+    const int secondPart = numSamples - firstPart;
 
     std::memcpy(outX, xBuffer_.data() + startPos, static_cast<size_t>(firstPart) * sizeof(double));
     if (secondPart > 0) {
@@ -80,7 +80,7 @@ void StereoHistoryBuffer::getHistory(double* outX, double* outY, int numSamples)
 
     for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
         // Read sequence before reading data
-        uint64_t seqBefore = sequence_.load(std::memory_order_acquire);
+        const uint64_t seqBefore = sequence_.load(std::memory_order_acquire);
 
         // If write is in progress (odd sequence), use cache or retry
         if ((seqBefore & 1) != 0) {
@@ -95,14 +95,14 @@ void StereoHistoryBuffer::getHistory(double* outX, double* outY, int numSamples)
         }
 
         // Read write position and calculate start
-        int currentWritePos = writePos_.load(std::memory_order_acquire);
-        int start = (currentWritePos - numSamples + size_) % size_;
+        const int currentWritePos = writePos_.load(std::memory_order_acquire);
+        const int start = (currentWritePos - numSamples + size_) % size_;
 
         // Copy data
         copyFromPosition(outX, outY, numSamples, start);
 
         // Check sequence after reading - if it changed, data may be inconsistent
-        uint64_t seqAfter = sequence_.load(std::memory_order_acquire);
+        const uint64_t seqAfter = sequence_.load(std::memory_order_acquire);
 
         if (seqBefore == seqAfter) {
             // Success! Update cache for future fallback
@@ -120,9 +120,9 @@ void StereoHistoryBuffer::getHistory(double* outX, double* outY, int numSamples)
     }
 
     // All retries exhausted, use cache if available
-    int cached = cachedSize_.load(std::memory_order_acquire);
+    const int cached = cachedSize_.load(std::memory_order_acquire);
     if (cached > 0) {
-        int toCopy = std::min(cached, numSamples);
+        const int toCopy = std::min(cached, numSamples);
         std::memcpy(outX, cachedX_.data(), static_cast<size_t>(toCopy) * sizeof(double));
         std::memcpy(outY, cachedY_.data(), static_cast<size_t>(toCopy) * sizeof(double));
         // Zero-fill remainder if cache is smaller
@@ -139,7 +139,7 @@ void StereoHistoryBuffer::getHistory(double* outX, double* outY, int numSamples)
 
 void StereoHistoryBuffer::clear() {
     // Mark write in progress
-    uint64_t seq = sequence_.load(std::memory_order_relaxed);
+    const uint64_t seq = sequence_.load(std::memory_order_relaxed);
     sequence_.store(seq + 1, std::memory_order_release);
 
     std::fill(xBuffer_.begin(), xBuffer_.end(), 0.0);

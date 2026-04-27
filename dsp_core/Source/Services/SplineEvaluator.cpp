@@ -7,15 +7,18 @@ namespace dsp_core::Services {
 
 double SplineEvaluator::evaluate(const std::vector<SplineAnchor>& anchors, double x) {
 
-    if (anchors.empty())
+    if (anchors.empty()) {
         return 0.0;
-    if (anchors.size() == 1)
+    }
+    if (anchors.size() == 1) {
         return anchors[0].y;
+    }
 
     // Find segment containing x
     const int segIdx = findSegment(anchors, x);
-    if (segIdx < 0)
+    if (segIdx < 0) {
         return anchors.front().y; // Before first anchor
+    }
     if (segIdx >= static_cast<int>(anchors.size()) - 1) {
         return anchors.back().y; // After last anchor
     }
@@ -27,8 +30,9 @@ double SplineEvaluator::evaluate(const std::vector<SplineAnchor>& anchors, doubl
 void SplineEvaluator::evaluateBatch(const std::vector<SplineAnchor>& anchors, const double* xValues, double* yValues,
                                     int count) {
 
-    if (count <= 0)
+    if (count <= 0) {
         return;
+    }
 
     // Degenerate cases
     if (anchors.empty()) {
@@ -65,9 +69,7 @@ void SplineEvaluator::evaluateBatch(const std::vector<SplineAnchor>& anchors, co
             if (currentSegment >= static_cast<int>(anchors.size()) - 1) {
                 currentSegment = static_cast<int>(anchors.size()) - 2;
             }
-            if (currentSegment < 0) {
-                currentSegment = 0;
-            }
+            currentSegment = std::max(currentSegment, 0);
 
             // Evaluate segment using cubic Hermite interpolation
             yValues[i] = evaluateSegment(anchors[currentSegment], anchors[currentSegment + 1], x);
@@ -77,15 +79,18 @@ void SplineEvaluator::evaluateBatch(const std::vector<SplineAnchor>& anchors, co
 
 double SplineEvaluator::evaluateDerivative(const std::vector<SplineAnchor>& anchors, double x) {
 
-    if (anchors.empty())
+    if (anchors.empty()) {
         return 0.0;
-    if (anchors.size() == 1)
+    }
+    if (anchors.size() == 1) {
         return 0.0;
+    }
 
     // Find segment containing x
     const int segIdx = findSegment(anchors, x);
-    if (segIdx < 0)
+    if (segIdx < 0) {
         return anchors.front().tangent; // Before first anchor
+    }
     if (segIdx >= static_cast<int>(anchors.size()) - 1) {
         return anchors.back().tangent; // After last anchor
     }
@@ -101,10 +106,12 @@ int SplineEvaluator::findSegment(const std::vector<SplineAnchor>& anchors, doubl
     auto it = std::lower_bound(anchors.begin(), anchors.end(), x,
                                [](const SplineAnchor& anchor, double val) { return anchor.x < val; });
 
-    if (it == anchors.begin())
+    if (it == anchors.begin()) {
         return -1; // Before first anchor
-    if (it == anchors.end())
+    }
+    if (it == anchors.end()) {
         return static_cast<int>(anchors.size()) - 1; // After last anchor
+    }
 
     // Return index of segment start (the anchor before 'it')
     return static_cast<int>(std::distance(anchors.begin(), it)) - 1;
@@ -114,8 +121,9 @@ double SplineEvaluator::evaluateSegment(const SplineAnchor& p0, const SplineAnch
 
     // Normalize to [0, 1] within segment
     const double dx = p1.x - p0.x;
-    if (std::abs(dx) < 1e-12)
+    if (std::abs(dx) < 1e-12) {
         return p0.y; // Degenerate segment
+    }
 
     double t = (x - p0.x) / dx;
     t = juce::jlimit(0.0, 1.0, t); // Clamp to segment bounds
@@ -127,7 +135,6 @@ double SplineEvaluator::evaluateSegment(const SplineAnchor& p0, const SplineAnch
     // h11(t) = t³ - t² = t²(t-1)
 
     const double t2 = t * t;
-    const double t3 = t2 * t;
     const double omt = 1.0 - t;    // (1-t)
     const double omt2 = omt * omt; // (1-t)²
 
@@ -149,8 +156,9 @@ double SplineEvaluator::evaluateSegmentDerivative(const SplineAnchor& p0, const 
 
     // Normalize to [0, 1] within segment
     const double dx = p1.x - p0.x;
-    if (std::abs(dx) < 1e-12)
+    if (std::abs(dx) < 1e-12) {
         return 0.0; // Degenerate segment
+    }
 
     double t = (x - p0.x) / dx;
     t = juce::jlimit(0.0, 1.0, t); // Clamp to segment bounds

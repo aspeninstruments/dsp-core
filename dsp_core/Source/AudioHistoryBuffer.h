@@ -1,7 +1,8 @@
 #pragma once
 
-#include <vector>
+#include <juce_core/juce_core.h>
 #include <algorithm>
+#include <vector>
 
 class AudioHistoryBuffer {
   public:

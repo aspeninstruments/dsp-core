@@ -71,8 +71,9 @@ void CurveFeatureDetector::detectLocalExtrema(const double* curveData, int table
             double neighborMin = std::numeric_limits<double>::max();
             double neighborMax = std::numeric_limits<double>::lowest();
             for (int j = windowStart; j <= windowEnd; ++j) {
-                if (j == i)
+                if (j == i) {
                     continue;
+                }
                 const double y_j = curveData[j];
                 neighborMin = std::min(neighborMin, y_j);
                 neighborMax = std::max(neighborMax, y_j);
@@ -127,21 +128,21 @@ void CurveFeatureDetector::prioritizeFeatures(const FeatureDetectionConfig& conf
 double CurveFeatureDetector::estimateDerivative(const double* curveData, int tableSize, double minValue, double maxValue, int idx) {
     // Forward difference for first point
     if (idx == 0) {
-        double x0 = normalizeIndex(0, tableSize, minValue, maxValue);
-        double x1 = normalizeIndex(1, tableSize, minValue, maxValue);
+        const double x0 = normalizeIndex(0, tableSize, minValue, maxValue);
+        const double x1 = normalizeIndex(1, tableSize, minValue, maxValue);
         return (curveData[1] - curveData[0]) / (x1 - x0);
     }
 
     // Backward difference for last point
     if (idx == tableSize - 1) {
-        double x0 = normalizeIndex(tableSize - 2, tableSize, minValue, maxValue);
-        double x1 = normalizeIndex(tableSize - 1, tableSize, minValue, maxValue);
+        const double x0 = normalizeIndex(tableSize - 2, tableSize, minValue, maxValue);
+        const double x1 = normalizeIndex(tableSize - 1, tableSize, minValue, maxValue);
         return (curveData[tableSize - 1] - curveData[tableSize - 2]) / (x1 - x0);
     }
 
     // Central difference for interior points
-    double x0 = normalizeIndex(idx - 1, tableSize, minValue, maxValue);
-    double x1 = normalizeIndex(idx + 1, tableSize, minValue, maxValue);
+    const double x0 = normalizeIndex(idx - 1, tableSize, minValue, maxValue);
+    const double x1 = normalizeIndex(idx + 1, tableSize, minValue, maxValue);
 
     return (curveData[idx + 1] - curveData[idx - 1]) / (x1 - x0);
 }

@@ -67,9 +67,6 @@ class SplineFitter {
 
     static void computeFiniteDifferenceTangents(std::vector<SplineAnchor>& anchors, const SplineFitConfig& config);
 
-    // Tangent computation helpers
-    static double harmonicMean(double a, double b, double wa, double wb);
-
     // Greedy spline fitting (replaces RDP + refinement)
     // Now uses feature-based anchor placement: starts with mandatory feature anchors
     static std::vector<SplineAnchor> greedySplineFit(const std::vector<Sample>& samples, const SplineFitConfig& config,

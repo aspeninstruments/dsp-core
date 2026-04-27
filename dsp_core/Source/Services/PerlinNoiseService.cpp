@@ -65,7 +65,7 @@ void PerlinNoiseService::alignZeroCrossing(std::vector<double>& noise, int table
 
     for (int i = 0; i < numPoints - 1; ++i) {
         const double v0 = noise[static_cast<size_t>(i)];
-        const double v1 = noise[static_cast<size_t>(i + 1)];
+        const double v1 = noise[static_cast<size_t>(i) + 1];
 
         if (v0 == 0.0 || v1 == 0.0 || (v0 * v1 < 0.0)) {
             const int dist = std::abs(i - originIndex);

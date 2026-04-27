@@ -49,8 +49,9 @@ AnchorMorphGesture GestureSmoother::smooth(const std::vector<GestureSample>& raw
     samples.reserve(rawSamples.size());
     samples.push_back(rawSamples.front());
     for (size_t i = 1; i < rawSamples.size(); ++i) {
-        if (distance(rawSamples[i], samples.back()) > 1e-9)
+        if (distance(rawSamples[i], samples.back()) > 1e-9) {
             samples.push_back(rawSamples[i]);
+        }
     }
 
     if (samples.size() < 2) {
@@ -59,17 +60,18 @@ AnchorMorphGesture GestureSmoother::smooth(const std::vector<GestureSample>& raw
         return out;
     }
 
-    if (outputCount < 2)
-        outputCount = 2;
+    outputCount = std::max(outputCount, 2);
 
     // Build cumulative arc-length table.
     std::vector<double> cumLen(samples.size(), 0.0);
-    for (size_t i = 1; i < samples.size(); ++i)
+    for (size_t i = 1; i < samples.size(); ++i) {
         cumLen[i] = cumLen[i - 1] + distance(samples[i - 1], samples[i]);
+    }
 
     const double totalLen = cumLen.back();
-    if (totalLen < 1e-9)
+    if (totalLen < 1e-9) {
         return out;
+    }
 
     out.deltas.reserve(static_cast<size_t>(outputCount));
 
@@ -83,8 +85,9 @@ AnchorMorphGesture GestureSmoother::smooth(const std::vector<GestureSample>& raw
         // Find segment [j, j+1] containing targetLen.
         auto it = std::upper_bound(cumLen.begin(), cumLen.end(), targetLen);
         size_t j = (it == cumLen.begin()) ? 0 : static_cast<size_t>(it - cumLen.begin()) - 1;
-        if (j >= samples.size() - 1)
+        if (j >= samples.size() - 1) {
             j = samples.size() - 2;
+        }
 
         const double segLen = cumLen[j + 1] - cumLen[j];
         const double localT = (segLen > 1e-12) ? (targetLen - cumLen[j]) / segLen : 0.0;

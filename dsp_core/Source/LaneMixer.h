@@ -395,9 +395,31 @@ class LaneMixer {
     // ========================================================================
 
     int getTableSize() const { return TABLE_SIZE; }
-    double normalizeIndex(int index) const;
+    static double normalizeIndex(int index);
 
   private:
+    // fromValueTree helpers
+    static void applyLaneFromValueTree(Lane& lane, const juce::ValueTree& laneVT, int formatVersion, int laneIndex);
+    void loadOrRegenerateLaneCurve(Lane& lane, const juce::ValueTree& laneVT, int laneIndex, int loadedTableSize);
+
+    // fromLegacyLTFValueTree helpers
+    void restoreLegacyHarmonicSymmetricMode(const std::vector<double>& legacyCoefficients,
+                                            const std::vector<double>& baseLayerData,
+                                            const std::vector<SplineAnchor>& legacySplineAnchors,
+                                            LaneContentType lane0ContentType);
+    void restoreLegacyHarmonicMode(const std::vector<double>& legacyCoefficients,
+                                   const std::vector<double>& baseLayerData,
+                                   const std::vector<SplineAnchor>& legacySplineAnchors,
+                                   LaneContentType lane0ContentType);
+    void restoreLegacyNonHarmonicMode(const std::vector<double>& legacyCoefficients,
+                                      const std::vector<double>& baseLayerData,
+                                      const std::vector<SplineAnchor>& legacySplineAnchors,
+                                      LaneContentType lane0ContentType);
+    static void initializeLegacyLane0(Lane& lane0, LaneContentType contentType,
+                                       const std::vector<SplineAnchor>& anchors,
+                                       double amplitude,
+                                       const std::vector<double>& baseLayerData);
+
     std::array<Lane, MAX_LANES> lanes_;
     int activeLaneCount_ = 0;
     uint32_t nextLaneId_ = 0;
@@ -457,7 +479,12 @@ class LaneMixerBatchUpdateGuard {
     }
 
     ~LaneMixerBatchUpdateGuard() {
-        mixer_.endBatchUpdate();
+        try {
+            mixer_.endBatchUpdate();
+        } catch (...) {
+            // Destructors must not throw; the user-supplied onVersionChanged callback
+            // could escape via endBatchUpdate. Swallow to avoid std::terminate.
+        }
     }
 
     LaneMixerBatchUpdateGuard(const LaneMixerBatchUpdateGuard&) = delete;

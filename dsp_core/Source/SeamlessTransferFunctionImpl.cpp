@@ -30,18 +30,18 @@ namespace {
 // AudioEngine Implementation
 
 AudioEngine::AudioEngine() {
-    for (int bufIdx = 0; bufIdx < 3; ++bufIdx) {
+    for (auto& lutBuffer : lutBuffers) {
         for (int i = 0; i < TABLE_SIZE; ++i) {
             const double x = MIN_VALUE + (i / static_cast<double>(TABLE_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-            lutBuffers[bufIdx].data[i] = x;
+            lutBuffer.data[i] = x;
         }
-        lutBuffers[bufIdx].version = 0;
-        lutBuffers[bufIdx].extrapolationMode = LaneMixer::ExtrapolationMode::Clamp;
-        lutBuffers[bufIdx].softClipEnabled = false;
+        lutBuffer.version = 0;
+        lutBuffer.extrapolationMode = LaneMixer::ExtrapolationMode::Clamp;
+        lutBuffer.softClipEnabled = false;
     }
 }
 
-void AudioEngine::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void AudioEngine::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
     this->sampleRate = sampleRate;
     // 50ms crossfade = 1.5× DC blocking time constant (balances smoothness vs latency)
     constexpr double msToSeconds = 1000.0;
@@ -219,11 +219,13 @@ double AudioEngine::evaluateLUT(const LUTBuffer* lut, double x) const {
 
     // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
     // Standard Catmull-Rom interpolation formula
-    double result = 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
-                           (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
+    const double result = 0.5 * ((2.0 * y1) + (-y0 + y2) * t + (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3) * t * t +
+                                 (-y0 + 3.0 * y1 - 3.0 * y2 + y3) * t * t * t);
     // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 
-    if (std::isnan(result) || std::isinf(result)) return 0.0;
+    if (std::isnan(result) || std::isinf(result)) {
+        return 0.0;
+    }
     return std::clamp(result, -OUTPUT_LIMIT, OUTPUT_LIMIT);
 }
 
@@ -381,9 +383,11 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
     const double mixed_y2 = gainOld * old_y2 + gainNew * new_y2;
     const double mixed_y3 = gainOld * old_y3 + gainNew * new_y3;
 
-    double result = interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
+    const double result = interpolateCatmullRom(mixed_y0, mixed_y1, mixed_y2, mixed_y3, t);
 
-    if (std::isnan(result) || std::isinf(result)) return 0.0;
+    if (std::isnan(result) || std::isinf(result)) {
+        return 0.0;
+    }
     return std::clamp(result, -OUTPUT_LIMIT, OUTPUT_LIMIT);
 }
 
@@ -412,8 +416,9 @@ void EventDrivenRenderer::handleAsyncUpdate() {
     const uint64_t currentFullVersion = laneMixer.getVersion();
     const uint64_t currentMixVersion = laneMixer.getMixVersion();
 
-    if (currentFullVersion == lastRenderedFullVersion)
+    if (currentFullVersion == lastRenderedFullVersion) {
         return; // Nothing changed
+    }
 
     // Detect whether only mix-related changes occurred (cheap to re-render)
     const bool curveChanged = (currentFullVersion - currentMixVersion)
@@ -533,11 +538,12 @@ void VisualizerUpdateDispatcher::handleAsyncUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
     const uint64_t currentVersion = laneMixer.getVersion();
-    const int currentSelectedLane = selectedLanePtr_ ? *selectedLanePtr_ : -1;
+    const int currentSelectedLane = (selectedLanePtr_ != nullptr) ? *selectedLanePtr_ : -1;
     const bool curveChanged = currentVersion != lastSeenVersion;
     const bool selectionChanged = currentSelectedLane != lastSeenSelectedLane;
-    if (!curveChanged && !selectionChanged)
+    if (!curveChanged && !selectionChanged) {
         return;
+    }
 
     // No explicit rate limit: JUCE's AsyncUpdater coalesces multiple
     // triggerAsyncUpdate() calls between message-thread ticks into a single
@@ -555,7 +561,7 @@ void VisualizerUpdateDispatcher::handleAsyncUpdate() {
 void VisualizerUpdateDispatcher::timerCallback() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    const int currentSelectedLane = selectedLanePtr_ ? *selectedLanePtr_ : -1;
+    const int currentSelectedLane = (selectedLanePtr_ != nullptr) ? *selectedLanePtr_ : -1;
     if (lastSeenVersion != laneMixer.getVersion() || currentSelectedLane != lastSeenSelectedLane) {
         handleAsyncUpdate();
     }
@@ -566,12 +572,12 @@ void VisualizerUpdateDispatcher::forceUpdate() {
 
     runUpdate();
     lastSeenVersion = laneMixer.getVersion();
-    lastSeenSelectedLane = selectedLanePtr_ ? *selectedLanePtr_ : -1;
+    lastSeenSelectedLane = (selectedLanePtr_ != nullptr) ? *selectedLanePtr_ : -1;
     lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
 }
 
 void VisualizerUpdateDispatcher::runUpdate() {
-    if (visualizerLUTPtr) {
+    if (visualizerLUTPtr != nullptr) {
         // Compute the output curve into a temporary buffer, then downsample to visualizer resolution
         std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
         const auto mode = laneMixer.getMixerMode();
@@ -597,7 +603,7 @@ void VisualizerUpdateDispatcher::runUpdate() {
     }
 
     // Compute selected lane's raw curve for secondary visualizer overlay
-    if (laneLUTPtr_ && selectedLanePtr_) {
+    if (laneLUTPtr_ != nullptr && selectedLanePtr_ != nullptr) {
         const int laneIdx = *selectedLanePtr_;
         if (laneIdx >= 0 && laneIdx < laneMixer.getActiveLaneCount()) {
             const auto& lane = laneMixer.getLane(laneIdx);

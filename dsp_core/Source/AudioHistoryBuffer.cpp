@@ -1,6 +1,8 @@
 #include "AudioHistoryBuffer.h"
 
-AudioHistoryBuffer::AudioHistoryBuffer(int historySize) : buffer(historySize, 0.0), writePos(0), size(historySize) {}
+#include <cstring>
+
+AudioHistoryBuffer::AudioHistoryBuffer(int historySize) : buffer(historySize, 0.0), size(historySize) {}
 
 void AudioHistoryBuffer::pushSamples(const double* samples, int numSamples) {
     for (int i = 0; i < numSamples; ++i) {
