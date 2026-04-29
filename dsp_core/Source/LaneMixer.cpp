@@ -503,6 +503,98 @@ inline double lookupLaneLUT(const std::vector<double>& curve, double x, int tabl
     const double b = curve[static_cast<size_t>(idx1)];
     return a + frac * (b - a);
 }
+
+// Map sample index s in [0, numSamples) to x in [-1, 1] for thumbnail eval.
+inline double thumbnailXAt(int s, int numSamples) {
+    if (numSamples == 1) {
+        return LaneMixer::MIN_VALUE;
+    }
+    const double t = static_cast<double>(s) / static_cast<double>(numSamples - 1);
+    return LaneMixer::MIN_VALUE + t * (LaneMixer::MAX_VALUE - LaneMixer::MIN_VALUE);
+}
+
+// Per-row thumbnail evaluators. Each writes `numSamples` clamped float samples
+// into `row`, given an explicit morph value (no live atomics from the mixer's
+// blendAmount_/scanPosition_/modulationEnvValue_ are read).
+void evalThumbnailRowBlend(const Lane* lanes, int activeLaneCount, double morph, float* row,
+                           int numSamples) {
+    constexpr int kTableSize = LaneMixer::TABLE_SIZE;
+    for (int s = 0; s < numSamples; ++s) {
+        const double x = thumbnailXAt(s, numSamples);
+        double sum = 0.0;
+        for (int laneIdx = 0; laneIdx < activeLaneCount; ++laneIdx) {
+            const auto& lane = lanes[laneIdx];
+            const double base = lane.amplitude.load(std::memory_order_acquire);
+            const double depth = lane.blendDepth.load(std::memory_order_acquire);
+            const double effective = std::max(0.0, base + morph * depth);
+            if (effective <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
+                continue;
+            }
+            sum += effective * lookupLaneLUT(lane.curveData, x, kTableSize);
+        }
+        row[s] = static_cast<float>(
+            std::clamp(sum, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+    }
+}
+
+void evalThumbnailRowScan(const Lane* lanes, int activeLaneCount, double morph, float* row,
+                          int numSamples) {
+    constexpr int kTableSize = LaneMixer::TABLE_SIZE;
+    if (activeLaneCount <= 0) {
+        std::fill(row, row + numSamples, 0.0f);
+        return;
+    }
+    if (activeLaneCount == 1) {
+        const auto& lane = lanes[0];
+        for (int s = 0; s < numSamples; ++s) {
+            const double y = lane.curveData.empty()
+                                 ? 0.0
+                                 : lookupLaneLUT(lane.curveData, thumbnailXAt(s, numSamples), kTableSize);
+            row[s] = static_cast<float>(
+                std::clamp(y, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+        }
+        return;
+    }
+    const double pos = std::clamp(morph, 0.0, 1.0);
+    const double f = pos * (activeLaneCount - 1);
+    const int lo = std::clamp(static_cast<int>(std::floor(f)), 0, activeLaneCount - 1);
+    const int hi = std::min(lo + 1, activeLaneCount - 1);
+    const double t = f - static_cast<double>(lo);
+    const auto& laneA = lanes[lo];
+    const auto& laneB = lanes[hi];
+    for (int s = 0; s < numSamples; ++s) {
+        const double x = thumbnailXAt(s, numSamples);
+        const double a = laneA.curveData.empty() ? 0.0 : lookupLaneLUT(laneA.curveData, x, kTableSize);
+        const double b = laneB.curveData.empty() ? 0.0 : lookupLaneLUT(laneB.curveData, x, kTableSize);
+        const double y = (1.0 - t) * a + t * b;
+        row[s] = static_cast<float>(
+            std::clamp(y, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+    }
+}
+
+void evalThumbnailRowSeries(const Lane* lanes, int activeLaneCount, double morph, float* row,
+                            int numSamples) {
+    constexpr int kTableSize = LaneMixer::TABLE_SIZE;
+    constexpr double kLn4 = 1.3862943611198906;
+    for (int s = 0; s < numSamples; ++s) {
+        double y = thumbnailXAt(s, numSamples);
+        for (int laneIdx = 0; laneIdx < activeLaneCount; ++laneIdx) {
+            const auto& lane = lanes[laneIdx];
+            if (lane.curveData.empty()) {
+                continue;
+            }
+            const double base = lane.amplitude.load(std::memory_order_acquire);
+            const double depth = lane.blendDepth.load(std::memory_order_acquire);
+            const double aEff = std::clamp(base + morph * depth, 0.0, 1.0);
+            const double gain = std::exp(kLn4 * (2.0 * aEff - 1.0));
+            const double driven =
+                std::clamp(y * gain, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE);
+            y = lookupLaneLUT(lane.curveData, driven, kTableSize);
+        }
+        row[s] = static_cast<float>(
+            std::clamp(y, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+    }
+}
 } // namespace
 
 void LaneMixer::computeSeries(double* outputBuffer, int size) const {
@@ -599,6 +691,40 @@ double LaneMixer::evaluateSumAt(double x) const {
     }
 
     return sum0 + frac * (sum1 - sum0);
+}
+
+bool LaneMixer::evaluateStaticThumbnail(float* out, int numSamples, const float* morphPositions,
+                                        int numMorphPositions) const noexcept {
+    if (out == nullptr || morphPositions == nullptr || numSamples <= 0 || numMorphPositions <= 0) {
+        return false;
+    }
+
+    const MixerMode mode = mixerMode_;
+    const Lane* lanes = lanes_.data();
+
+    for (int m = 0; m < numMorphPositions; ++m) {
+        const auto morph = static_cast<double>(morphPositions[m]);
+        float* row = out + (static_cast<std::ptrdiff_t>(m) * numSamples);
+        switch (mode) {
+        case MixerMode::Blend:
+            evalThumbnailRowBlend(lanes, activeLaneCount_, morph, row, numSamples);
+            break;
+        case MixerMode::Scan:
+            evalThumbnailRowScan(lanes, activeLaneCount_, morph, row, numSamples);
+            break;
+        case MixerMode::Series:
+            evalThumbnailRowSeries(lanes, activeLaneCount_, morph, row, numSamples);
+            break;
+        }
+    }
+
+    const auto totalSamples = static_cast<std::ptrdiff_t>(numSamples) * numMorphPositions;
+    for (std::ptrdiff_t i = 0; i < totalSamples; ++i) {
+        if (!std::isfinite(out[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // ============================================================================

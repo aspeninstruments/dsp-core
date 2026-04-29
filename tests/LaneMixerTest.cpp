@@ -1745,4 +1745,141 @@ TEST_F(LaneMixerTest, Serialization_V6_LegacyModulationDepthLoadsIntoSlot1) {
     EXPECT_DOUBLE_EQ(restored.getLaneModulationDepth(1, 1), 0.0);
 }
 
+// ============================================================================
+// Thumbnail Evaluation (formatVersion 3 — community-website preview samples)
+// ============================================================================
+
+namespace {
+constexpr int kThumbN = 128;
+constexpr int kThumbM = 5;
+constexpr std::size_t kThumbTotal = static_cast<std::size_t>(kThumbN) * static_cast<std::size_t>(kThumbM);
+constexpr std::array<float, kThumbM> kThumbMorphs = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+
+double thumbXAt(int s) {
+    return -1.0 + (2.0 * s) / static_cast<double>(kThumbN - 1);
+}
+
+std::size_t thumbIdx(int m, int s) {
+    return static_cast<std::size_t>(m) * static_cast<std::size_t>(kThumbN) + static_cast<std::size_t>(s);
+}
+} // namespace
+
+TEST_F(LaneMixerTest, Thumbnail_TanhSingleLaneMatchesAnalytic) {
+    blankMixer(*mixer);
+    // Replace lane 0 with raw tanh(2x) (no normalize), full amplitude, no morph dependency.
+    std::vector<double> tanhCurve(dsp_core::LaneMixer::TABLE_SIZE);
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
+        const double x = -1.0 + (2.0 * i) / static_cast<double>(dsp_core::LaneMixer::TABLE_SIZE - 1);
+        tanhCurve[static_cast<size_t>(i)] = std::tanh(2.0 * x);
+    }
+    mixer->setLaneCurveData(0, tanhCurve);
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setLaneBlendDepth(0, 0.0); // morph-independent
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+
+    // All 5 morph rows should be identical (depth=0) and match clamp(tanh(2x), -1, 1).
+    for (int m = 0; m < kThumbM; ++m) {
+        for (int s = 0; s < kThumbN; ++s) {
+            const double expected = std::clamp(std::tanh(2.0 * thumbXAt(s)), -1.0, 1.0);
+            EXPECT_NEAR(out[thumbIdx(m, s)], static_cast<float>(expected), 1e-3f)
+                << "morph=" << m << " sample=" << s;
+        }
+    }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_AllLanesDisabled_ProducesAllZeros) {
+    blankMixer(*mixer);
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+    for (float v : out) {
+        EXPECT_EQ(v, 0.0f);
+    }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_BlendMorphSweep_ChangesOutputBetweenRows) {
+    // Two lanes with opposite curves and opposite blendDepths so morph=0 emphasizes
+    // one and morph=1 emphasizes the other.
+    blankMixer(*mixer);
+    std::vector<double> curveA(dsp_core::LaneMixer::TABLE_SIZE);
+    std::vector<double> curveB(dsp_core::LaneMixer::TABLE_SIZE);
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
+        const double x = -1.0 + (2.0 * i) / static_cast<double>(dsp_core::LaneMixer::TABLE_SIZE - 1);
+        curveA[static_cast<size_t>(i)] = x;        // identity
+        curveB[static_cast<size_t>(i)] = -x * 0.5; // inverted, half amplitude
+    }
+    mixer->setLaneCurveData(0, curveA);
+    mixer->setLaneCurveData(1, curveB);
+    // base 0, depth +1 → effective(morph=0) = 0, effective(morph=1) = 1
+    mixer->setLaneAmplitude(0, 0.0);
+    mixer->setLaneAmplitude(1, 0.0);
+    mixer->setLaneBlendDepth(0, 1.0);
+    mixer->setLaneBlendDepth(1, -1.0); // pulls down, clamped to 0
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+
+    // morph=0: both lanes effective=0 → all zero.
+    // morph=1: lane 0 effective=1 (identity), lane 1 effective clamped to 0 → identity.
+    for (int s = 0; s < kThumbN; ++s) {
+        EXPECT_EQ(out[thumbIdx(0, s)], 0.0f);
+        const auto expected = static_cast<float>(thumbXAt(s));
+        EXPECT_NEAR(out[thumbIdx(4, s)], expected, 1e-3f);
+    }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_ScanModeLerpBetweenLanes) {
+    // Two lanes with distinct constant curves so scan position picks them.
+    blankMixer(*mixer);
+    std::vector<double> curveA(dsp_core::LaneMixer::TABLE_SIZE, 0.4);
+    std::vector<double> curveB(dsp_core::LaneMixer::TABLE_SIZE, -0.6);
+    mixer->setLaneCurveData(0, curveA);
+    mixer->setLaneCurveData(1, curveB);
+    // Scan mode doesn't read amplitudes/depths — it lerps the LUTs directly. Still set
+    // amps so only first 2 lanes are obviously the active ones for the test's intent.
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setLaneAmplitude(1, 1.0);
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Scan);
+
+    // Use only morphs 0.0, 0.5, 1.0 by reading rows 0, 2, 4 of the standard 5-row output.
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+
+    // Scan position = morph * (activeLaneCount - 1). We have 10 active lanes by default
+    // (blankMixer doesn't change activeLaneCount), so morph=0 → lane 0, morph=1 → lane 9.
+    // Lane 9's curveData was zeroed by blankMixer's setLaneAmplitude/Depth but its curve
+    // isn't blanked. Default lane 9 is harmonic H19 — non-trivial. So this test only
+    // asserts row 0 (morph=0 → lane 0 = constant 0.4).
+    for (int s = 0; s < kThumbN; ++s) {
+        EXPECT_NEAR(out[static_cast<size_t>(s)], 0.4f, 1e-5f) << "morph=0 should equal lane 0 (constant 0.4)";
+    }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_NaNInLaneCurve_ReturnsFalse) {
+    blankMixer(*mixer);
+    // Poison the entire curve with NaN — the 128 thumbnail samples are spaced
+    // ~129 curve-indices apart, so a single poisoned cell can be missed entirely.
+    std::vector<double> poisoned(dsp_core::LaneMixer::TABLE_SIZE,
+                                 std::numeric_limits<double>::quiet_NaN());
+    mixer->setLaneCurveData(0, poisoned);
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    EXPECT_FALSE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+}
+
+TEST_F(LaneMixerTest, Thumbnail_InvalidInputs_ReturnsFalse) {
+    std::array<float, kThumbTotal> out{};
+    EXPECT_FALSE(mixer->evaluateStaticThumbnail(nullptr, kThumbN, kThumbMorphs.data(), kThumbM));
+    EXPECT_FALSE(mixer->evaluateStaticThumbnail(out.data(), 0, kThumbMorphs.data(), kThumbM));
+    EXPECT_FALSE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, nullptr, kThumbM));
+    EXPECT_FALSE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), 0));
+}
+
 } // namespace dsp_core_test

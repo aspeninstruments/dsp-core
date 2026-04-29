@@ -268,6 +268,22 @@ class LaneMixer {
      */
     double evaluateSumAt(double x) const;
 
+    /**
+     * Evaluate a static snapshot of the transfer function for thumbnail use.
+     * For each morph in `morphPositions`, samples the function at `numSamples`
+     * evenly-spaced x values in [-1, 1] and writes them to `out`, indexed
+     * `m * numSamples + s`. Honors the live mixerMode_; modulation envelopes
+     * are forced to zero, oversampling and hysteresis are bypassed (this is
+     * a pure LUT walk per lane). Output is clamped to [-1, 1] — no
+     * auto-normalize, unlike the live compute*() routines.
+     *
+     * Message-thread only. Returns false if any computed sample is NaN/Inf
+     * or the inputs are invalid; on false the contents of `out` are
+     * undefined and the caller should not persist them.
+     */
+    bool evaluateStaticThumbnail(float* out, int numSamples, const float* morphPositions,
+                                 int numMorphPositions) const noexcept;
+
     // ========================================================================
     // Mixer Mode
     // ========================================================================
