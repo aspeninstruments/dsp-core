@@ -1780,10 +1780,14 @@ TEST_F(LaneMixerTest, Thumbnail_TanhSingleLaneMatchesAnalytic) {
     std::array<float, kThumbTotal> out{};
     ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
 
-    // All 5 morph rows should be identical (depth=0) and match clamp(tanh(2x), -1, 1).
+    // All 5 morph rows should be identical (depth=0) and match tanh(2x) normalized
+    // by max|tanh(2x)| = tanh(2). The thumbnail does per-row normalize to mirror
+    // the live computeSum / computeScan / computeSeries normalize step, so the
+    // reference value is the analytic curve scaled to peak at ±1.
+    const double scale = 1.0 / std::tanh(2.0);
     for (int m = 0; m < kThumbM; ++m) {
         for (int s = 0; s < kThumbN; ++s) {
-            const double expected = std::clamp(std::tanh(2.0 * thumbXAt(s)), -1.0, 1.0);
+            const double expected = std::tanh(2.0 * thumbXAt(s)) * scale;
             EXPECT_NEAR(out[thumbIdx(m, s)], static_cast<float>(expected), 1e-3f)
                 << "morph=" << m << " sample=" << s;
         }
@@ -1854,10 +1858,181 @@ TEST_F(LaneMixerTest, Thumbnail_ScanModeLerpBetweenLanes) {
     // (blankMixer doesn't change activeLaneCount), so morph=0 → lane 0, morph=1 → lane 9.
     // Lane 9's curveData was zeroed by blankMixer's setLaneAmplitude/Depth but its curve
     // isn't blanked. Default lane 9 is harmonic H19 — non-trivial. So this test only
-    // asserts row 0 (morph=0 → lane 0 = constant 0.4).
+    // asserts row 0 (morph=0 → lane 0 = constant 0.4, post-normalize → constant 1.0).
     for (int s = 0; s < kThumbN; ++s) {
-        EXPECT_NEAR(out[static_cast<size_t>(s)], 0.4f, 1e-5f) << "morph=0 should equal lane 0 (constant 0.4)";
+        EXPECT_NEAR(out[static_cast<size_t>(s)], 1.0f, 1e-5f)
+            << "morph=0 should equal normalized lane 0 (constant 0.4 → 1.0 after row normalize)";
     }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_OverUnitySumNormalizesInsteadOfFlatTopping) {
+    // Regression test for the website-preview clip bug: presets whose unscaled
+    // lane sum exceeds ±1 used to produce flat-topped rows (the evaluator
+    // clamped each sample to [-1, 1]). Production normalizes by row-max instead.
+    // After the fix, the thumbnail row should hit ±1 exactly once and otherwise
+    // preserve the curve shape — no plateaus.
+    blankMixer(*mixer);
+
+    // Two lanes with the same identity x curve, both at amplitude 1.0. Without
+    // normalize the sum would be 2x ∈ [-2, 2], which would clamp to ±1 across
+    // a wide region. With normalize, the row should equal x (identity), peak ±1.
+    std::vector<double> identity(dsp_core::LaneMixer::TABLE_SIZE);
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
+        identity[static_cast<size_t>(i)] = -1.0 + (2.0 * i) / static_cast<double>(dsp_core::LaneMixer::TABLE_SIZE - 1);
+    }
+    mixer->setLaneCurveData(0, identity);
+    mixer->setLaneCurveData(1, identity);
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setLaneAmplitude(1, 1.0);
+    mixer->setLaneBlendDepth(0, 0.0);
+    mixer->setLaneBlendDepth(1, 0.0);
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+
+    // Each row should equal x (identity, unscaled-sum 2x normalized by 2).
+    // No plateau at ±1 — every interior sample must differ from its neighbors.
+    for (int m = 0; m < kThumbM; ++m) {
+        for (int s = 0; s < kThumbN; ++s) {
+            const auto expected = static_cast<float>(thumbXAt(s));
+            EXPECT_NEAR(out[thumbIdx(m, s)], expected, 1e-3f) << "morph=" << m << " sample=" << s;
+        }
+        // Anti-flat-top: count interior samples that equal their neighbor. With
+        // a true clamp, the broad plateau at ±1 produces dozens of equal-pairs;
+        // a properly normalized identity has zero.
+        int plateauPairs = 0;
+        for (int s = 1; s < kThumbN - 1; ++s) {
+            if (out[thumbIdx(m, s)] == out[thumbIdx(m, s + 1)]) {
+                ++plateauPairs;
+            }
+        }
+        EXPECT_EQ(plateauPairs, 0) << "morph=" << m << " row should have no flat plateaus";
+    }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_EquationLaneRebakesPerMorphRow) {
+    // Regression test for the website-preview "equations don't morph" bug:
+    // an Equation lane's curveData is a snapshot at the LIVE morph value, so
+    // reading it 5 times produced 5 identical rows. The fix is for
+    // evaluateStaticThumbnail to recompile + re-synthesize via the
+    // dsp_core::Services::synthesizeLaneLUT primitive (same one the live audio
+    // path uses) at each thumbnail morph value.
+    //
+    // We use tanh(4*x - 4*m + 2) — a sigmoid whose horizontal shift is driven
+    // by m. At m=0 the inflection sits at x=-0.5; at m=1 it sits at x=+0.5.
+    // After per-row normalize the curves still differ wildly in shape, so any
+    // two rows must NOT be equal.
+    blankMixer(*mixer);
+    auto& lane = mixer->getMutableLane(0);
+    lane.equationText = "tanh(4*x - 4*m + 2)";
+    mixer->setLaneContentType(0, dsp_core::LaneContentType::Equation);
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setLaneBlendDepth(0, 0.0); // no blend-depth contribution; morph effect comes purely from `m` in the equation
+    // Seed curveData with garbage to prove the thumbnail does NOT just read it.
+    std::vector<double> garbage(dsp_core::LaneMixer::TABLE_SIZE, 0.123);
+    mixer->setLaneCurveData(0, garbage);
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+
+    // Row 0 (morph=0) and row 4 (morph=1) must differ substantially — that's
+    // the whole point. If the thumbnail were reading the (constant 0.123)
+    // snapshot LUT instead of re-synthesizing, both rows would normalize to a
+    // constant 1.0 and this would fail.
+    int diffCount = 0;
+    for (int s = 0; s < kThumbN; ++s) {
+        if (std::abs(out[thumbIdx(0, s)] - out[thumbIdx(4, s)]) > 1e-2f) {
+            ++diffCount;
+        }
+    }
+    EXPECT_GT(diffCount, kThumbN / 4)
+        << "Equation lane should produce visibly different rows at different morph values "
+           "(at least a quarter of samples should differ between morph=0 and morph=1)";
+
+    // Sigmoid: tanh(4*x - 4*m + 2) inflection at x = m - 0.5. With morph 0 and
+    // 1 the inflection points are at -0.5 and +0.5 respectively — so at x=0
+    // (sample index 63 or 64) the rows should be on opposite sides of zero.
+    EXPECT_GT(out[thumbIdx(0, kThumbN / 2)], 0.5f) << "morph=0 should be saturated positive at x=0";
+    EXPECT_LT(out[thumbIdx(4, kThumbN / 2)], -0.5f) << "morph=1 should be saturated negative at x=0";
+
+    // Each row should still be properly normalized (max|y| close to 1) since
+    // tanh saturates near ±1 for the given x range.
+    for (int m = 0; m < kThumbM; ++m) {
+        float maxAbs = 0.0f;
+        for (int s = 0; s < kThumbN; ++s) {
+            maxAbs = std::max(maxAbs, std::abs(out[thumbIdx(m, s)]));
+        }
+        EXPECT_NEAR(maxAbs, 1.0f, 1e-3f) << "morph=" << m << " row should normalize to peak ±1";
+    }
+}
+
+TEST_F(LaneMixerTest, Thumbnail_SplineLaneRebakesPerMorphRowFromMorphGesture) {
+    // Regression test for the spline-morph counterpart of the equation bug:
+    // a Spline lane's curveData is also a snapshot baked at the LIVE morph
+    // value, so reading it 5 times produced 5 identical rows. The fix wires
+    // dsp_core::Services::synthesizeSplineLaneLUT into evaluateStaticThumbnail
+    // — for each anchor with a morphGesture we re-apply the gesture at each
+    // thumbnail morph value and re-fit/re-evaluate into a scratch LUT.
+    //
+    // We construct a 5-anchor spline and give the middle anchor a vertical
+    // gesture: at morph=0 it sits at home (y≈0), at morph=1 it has slid down
+    // by 1.6 (clamped to y=-1). The two halves of the curve flip orientation
+    // as the middle anchor moves — every row should differ from every other.
+    blankMixer(*mixer);
+    auto& lane = mixer->getMutableLane(0);
+    lane.splineAnchors.clear();
+
+    auto makeAnchor = [](double x, double y) {
+        dsp_core::SplineAnchor a;
+        a.x = x;
+        a.y = y;
+        a.homeX = x;
+        a.homeY = y;
+        return a;
+    };
+
+    lane.splineAnchors.push_back(makeAnchor(-1.0, -1.0));
+    lane.splineAnchors.push_back(makeAnchor(-0.5, -0.5));
+    lane.splineAnchors.push_back(makeAnchor(0.0, 0.0)); // gesture-bearing
+    lane.splineAnchors.push_back(makeAnchor(0.5, 0.5));
+    lane.splineAnchors.push_back(makeAnchor(1.0, 1.0));
+
+    // Gesture: dy goes from 0 (home) at t=0 to -1.6 at t=1 — vertical descent.
+    // Linear interpolation between 5 deltas matches the 5 thumbnail morph values.
+    lane.splineAnchors[2].morphGesture.deltas = {
+        {0.0, 0.0}, {0.0, -0.4}, {0.0, -0.8}, {0.0, -1.2}, {0.0, -1.6}};
+
+    mixer->setLaneContentType(0, dsp_core::LaneContentType::Spline);
+    mixer->setLaneAmplitude(0, 1.0);
+    mixer->setLaneBlendDepth(0, 0.0); // morph drives the gesture, not lane gain
+    // Seed curveData with garbage to prove the thumbnail does NOT just read it.
+    std::vector<double> garbage(dsp_core::LaneMixer::TABLE_SIZE, 0.42);
+    mixer->setLaneCurveData(0, garbage);
+    mixer->setMixerMode(dsp_core::LaneMixer::MixerMode::Blend);
+
+    std::array<float, kThumbTotal> out{};
+    ASSERT_TRUE(mixer->evaluateStaticThumbnail(out.data(), kThumbN, kThumbMorphs.data(), kThumbM));
+
+    // Row 0 (morph=0, home positions) and row 4 (morph=1, mid anchor at y=-1)
+    // describe very different curves. If the snapshot were being read instead,
+    // both rows would be the same constant 1.0 (garbage 0.42 normalized).
+    int diffCount = 0;
+    for (int s = 0; s < kThumbN; ++s) {
+        if (std::abs(out[thumbIdx(0, s)] - out[thumbIdx(4, s)]) > 1e-2f) {
+            ++diffCount;
+        }
+    }
+    EXPECT_GT(diffCount, kThumbN / 4)
+        << "Spline lane should produce visibly different rows at different morph values "
+           "(at least a quarter of samples should differ between morph=0 and morph=1)";
+
+    // At x=0 (sample index 63 or 64), morph=0 → mid anchor at y=0 (after
+    // normalize the curve passes through 0 at x=0); morph=1 → mid anchor at
+    // y=-1, so y(x=0) ≈ -1 (saturated). Verify the sign flip.
+    EXPECT_NEAR(out[thumbIdx(0, kThumbN / 2)], 0.0f, 0.1f) << "morph=0 mid anchor at home (y=0)";
+    EXPECT_LT(out[thumbIdx(4, kThumbN / 2)], -0.5f) << "morph=1 mid anchor at y=-1 (saturated negative)";
 }
 
 TEST_F(LaneMixerTest, Thumbnail_NaNInLaneCurve_ReturnsFalse) {

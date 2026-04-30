@@ -1,4 +1,6 @@
 #include "LaneMixer.h"
+#include "Services/EquationLaneSynthesizer.h"
+#include "Services/SplineLaneSynthesizer.h"
 #include "Services/TransferFunctionOperations.h"
 #include <algorithm>
 #include <cmath>
@@ -513,87 +515,114 @@ inline double thumbnailXAt(int s, int numSamples) {
     return LaneMixer::MIN_VALUE + t * (LaneMixer::MAX_VALUE - LaneMixer::MIN_VALUE);
 }
 
-// Per-row thumbnail evaluators. Each writes `numSamples` clamped float samples
-// into `row`, given an explicit morph value (no live atomics from the mixer's
-// blendAmount_/scanPosition_/modulationEnvValue_ are read).
-void evalThumbnailRowBlend(const Lane* lanes, int activeLaneCount, double morph, float* row,
-                           int numSamples) {
+// Post-loop normalize matching computeSum / computeScan / computeSeries: scan
+// row for max|y|, divide every sample by it so the curve fits [-1, 1] without
+// flat-topping when the unscaled sum exceeds unity. Mirrors the live DSP path
+// the thumbnail is meant to preview.
+inline void normalizeThumbnailRow(float* row, int numSamples) {
+    float maxAbs = 0.0f;
+    for (int s = 0; s < numSamples; ++s) {
+        maxAbs = std::max(maxAbs, std::abs(row[s]));
+    }
+    if (maxAbs > static_cast<float>(kLaneMixerNormEpsilon)) {
+        const float scalar = 1.0f / maxAbs;
+        for (int s = 0; s < numSamples; ++s) {
+            row[s] *= scalar;
+        }
+    }
+}
+
+// Per-row thumbnail evaluators. Each writes `numSamples` normalized float
+// samples into `row` (max|row| ≈ 1 unless the curve is silent), given an
+// explicit morph value (no live atomics from the mixer's blendAmount_ /
+// scanPosition_ / modulationEnvValue_ are read).
+//
+// `laneLuts[i]` is the LUT to use for lane i — for non-Equation lanes this
+// points at lane.curveData; for Equation lanes the caller (evaluateStaticThumbnail)
+// substitutes a scratch LUT freshly synthesized for the current morph value via
+// dsp_core::Services::synthesizeLaneLUT, mirroring the live audio path's
+// per-morph re-evaluation. `laneLuts` must have at least activeLaneCount
+// non-null entries.
+void evalThumbnailRowBlend(const Lane* lanes, int activeLaneCount, const std::vector<double>* const* laneLuts,
+                           double morph, float* row, int numSamples) {
     constexpr int kTableSize = LaneMixer::TABLE_SIZE;
     for (int s = 0; s < numSamples; ++s) {
         const double x = thumbnailXAt(s, numSamples);
         double sum = 0.0;
         for (int laneIdx = 0; laneIdx < activeLaneCount; ++laneIdx) {
             const auto& lane = lanes[laneIdx];
+            const auto& lut = *laneLuts[laneIdx];
             const double base = lane.amplitude.load(std::memory_order_acquire);
             const double depth = lane.blendDepth.load(std::memory_order_acquire);
             const double effective = std::max(0.0, base + morph * depth);
-            if (effective <= kLaneMixerNormEpsilon || lane.curveData.empty()) {
+            if (effective <= kLaneMixerNormEpsilon || lut.empty()) {
                 continue;
             }
-            sum += effective * lookupLaneLUT(lane.curveData, x, kTableSize);
+            sum += effective * lookupLaneLUT(lut, x, kTableSize);
         }
-        row[s] = static_cast<float>(
-            std::clamp(sum, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+        row[s] = static_cast<float>(sum);
     }
+    normalizeThumbnailRow(row, numSamples);
 }
 
-void evalThumbnailRowScan(const Lane* lanes, int activeLaneCount, double morph, float* row,
-                          int numSamples) {
+void evalThumbnailRowScan(const Lane* lanes, int activeLaneCount, const std::vector<double>* const* laneLuts,
+                          double morph, float* row, int numSamples) {
     constexpr int kTableSize = LaneMixer::TABLE_SIZE;
     if (activeLaneCount <= 0) {
         std::fill(row, row + numSamples, 0.0f);
         return;
     }
     if (activeLaneCount == 1) {
-        const auto& lane = lanes[0];
+        const auto& lut = *laneLuts[0];
         for (int s = 0; s < numSamples; ++s) {
-            const double y = lane.curveData.empty()
-                                 ? 0.0
-                                 : lookupLaneLUT(lane.curveData, thumbnailXAt(s, numSamples), kTableSize);
-            row[s] = static_cast<float>(
-                std::clamp(y, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+            const double y = lut.empty() ? 0.0 : lookupLaneLUT(lut, thumbnailXAt(s, numSamples), kTableSize);
+            row[s] = static_cast<float>(y);
         }
+        normalizeThumbnailRow(row, numSamples);
         return;
     }
+    (void)lanes; // Scan mode lerps LUTs directly; lane atomics aren't read in this path.
     const double pos = std::clamp(morph, 0.0, 1.0);
     const double f = pos * (activeLaneCount - 1);
     const int lo = std::clamp(static_cast<int>(std::floor(f)), 0, activeLaneCount - 1);
     const int hi = std::min(lo + 1, activeLaneCount - 1);
     const double t = f - static_cast<double>(lo);
-    const auto& laneA = lanes[lo];
-    const auto& laneB = lanes[hi];
+    const auto& lutA = *laneLuts[lo];
+    const auto& lutB = *laneLuts[hi];
     for (int s = 0; s < numSamples; ++s) {
         const double x = thumbnailXAt(s, numSamples);
-        const double a = laneA.curveData.empty() ? 0.0 : lookupLaneLUT(laneA.curveData, x, kTableSize);
-        const double b = laneB.curveData.empty() ? 0.0 : lookupLaneLUT(laneB.curveData, x, kTableSize);
+        const double a = lutA.empty() ? 0.0 : lookupLaneLUT(lutA, x, kTableSize);
+        const double b = lutB.empty() ? 0.0 : lookupLaneLUT(lutB, x, kTableSize);
         const double y = (1.0 - t) * a + t * b;
-        row[s] = static_cast<float>(
-            std::clamp(y, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+        row[s] = static_cast<float>(y);
     }
+    normalizeThumbnailRow(row, numSamples);
 }
 
-void evalThumbnailRowSeries(const Lane* lanes, int activeLaneCount, double morph, float* row,
-                            int numSamples) {
+void evalThumbnailRowSeries(const Lane* lanes, int activeLaneCount, const std::vector<double>* const* laneLuts,
+                            double morph, float* row, int numSamples) {
     constexpr int kTableSize = LaneMixer::TABLE_SIZE;
     constexpr double kLn4 = 1.3862943611198906;
     for (int s = 0; s < numSamples; ++s) {
         double y = thumbnailXAt(s, numSamples);
         for (int laneIdx = 0; laneIdx < activeLaneCount; ++laneIdx) {
             const auto& lane = lanes[laneIdx];
-            if (lane.curveData.empty()) {
+            const auto& lut = *laneLuts[laneIdx];
+            if (lut.empty()) {
                 continue;
             }
             const double base = lane.amplitude.load(std::memory_order_acquire);
             const double depth = lane.blendDepth.load(std::memory_order_acquire);
             const double aEff = std::clamp(base + morph * depth, 0.0, 1.0);
             const double gain = std::exp(kLn4 * (2.0 * aEff - 1.0));
+            // Inner clamp protects the LUT input range — kept; matches computeSeries line ~636.
             const double driven =
                 std::clamp(y * gain, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE);
-            y = lookupLaneLUT(lane.curveData, driven, kTableSize);
+            y = lookupLaneLUT(lut, driven, kTableSize);
         }
-        row[s] = static_cast<float>(
-            std::clamp(y, LaneMixer::MIN_VALUE, LaneMixer::MAX_VALUE));
+        row[s] = static_cast<float>(y);
     }
+    normalizeThumbnailRow(row, numSamples);
 }
 } // namespace
 
@@ -702,20 +731,98 @@ bool LaneMixer::evaluateStaticThumbnail(float* out, int numSamples, const float*
     const MixerMode mode = mixerMode_;
     const Lane* lanes = lanes_.data();
 
-    for (int m = 0; m < numMorphPositions; ++m) {
-        const auto morph = static_cast<double>(morphPositions[m]);
-        float* row = out + (static_cast<std::ptrdiff_t>(m) * numSamples);
-        switch (mode) {
-        case MixerMode::Blend:
-            evalThumbnailRowBlend(lanes, activeLaneCount_, morph, row, numSamples);
-            break;
-        case MixerMode::Scan:
-            evalThumbnailRowScan(lanes, activeLaneCount_, morph, row, numSamples);
-            break;
-        case MixerMode::Series:
-            evalThumbnailRowSeries(lanes, activeLaneCount_, morph, row, numSamples);
-            break;
+    // Equation and Spline lanes: their `lane.curveData` is a snapshot baked at
+    // the LIVE morph value, so reading it for all 5 thumbnail rows would freeze
+    // them identically. The live audio path re-synthesizes the LUT on each
+    // morph change:
+    //   - Equation: ExpressionOperationHandler::applyMorphToEquationLanes
+    //               → dsp_core::Services::synthesizeLaneLUT
+    //   - Spline:   CurveEditorController::morphLaneAnchors
+    //               → dsp_core::Services::synthesizeSplineLaneLUT
+    // We mirror both here by compiling/preparing once per lane and
+    // re-synthesizing into a scratch LUT per morph row. Wrap heap allocations
+    // in try/catch to honor this function's noexcept contract.
+    try {
+        const int activeLaneCount = activeLaneCount_;
+        std::vector<dsp_core::Services::CompiledLaneEquation> compiledEqns(static_cast<std::size_t>(activeLaneCount));
+        std::vector<std::vector<double>> scratchLuts(static_cast<std::size_t>(activeLaneCount));
+        std::vector<const std::vector<double>*> laneLutPointers(static_cast<std::size_t>(activeLaneCount));
+
+        // Per-lane setup: compile equations, mark spline lanes for per-morph re-bake,
+        // pass everything else through to the live curveData.
+        enum class LaneSynth : std::uint8_t { Snapshot, Equation, Spline };
+        std::vector<LaneSynth> synthKind(static_cast<std::size_t>(activeLaneCount), LaneSynth::Snapshot);
+
+        for (int li = 0; li < activeLaneCount; ++li) {
+            const auto& lane = lanes_[static_cast<std::size_t>(li)];
+            const auto idx = static_cast<std::size_t>(li);
+
+            if (lane.contentType == LaneContentType::Equation && !lane.equationText.isEmpty() &&
+                dsp_core::Services::compileLaneEquation(lane.equationText, /*normalize=*/true, compiledEqns[idx])) {
+                synthKind[idx] = LaneSynth::Equation;
+                laneLutPointers[idx] = &scratchLuts[idx]; // filled per morph row
+            } else if (lane.contentType == LaneContentType::Spline && !lane.splineAnchors.empty() &&
+                       std::any_of(lane.splineAnchors.begin(), lane.splineAnchors.end(),
+                                   [](const SplineAnchor& a) { return !a.morphGesture.empty(); })) {
+                // Spline lane with at least one gesture-bearing anchor — re-bake per morph.
+                // Spline lanes without gestures are static; fall through to Snapshot.
+                synthKind[idx] = LaneSynth::Spline;
+                laneLutPointers[idx] = &scratchLuts[idx];
+            } else {
+                // Non-equation, non-gesture-spline, or compile failure → use the live
+                // curveData snapshot. (Compile failures fall through silently: the
+                // editor would have rejected the user's input at entry time, so a
+                // failure here means a corrupt preset; better to render the snapshot
+                // than to abort the whole thumbnail.)
+                laneLutPointers[idx] = &lane.curveData;
+            }
         }
+
+        std::vector<SplineAnchor> splineScratchAnchors; // reusable working buffer for spline morph
+
+        for (int m = 0; m < numMorphPositions; ++m) {
+            const auto morph = static_cast<double>(morphPositions[m]);
+
+            // Re-synthesize equation/spline lanes at this morph value.
+            for (int li = 0; li < activeLaneCount; ++li) {
+                const auto idx = static_cast<std::size_t>(li);
+                bool ok = true;
+                switch (synthKind[idx]) {
+                case LaneSynth::Equation:
+                    ok = dsp_core::Services::synthesizeLaneLUT(compiledEqns[idx], morph, *harmonicLayer_, TABLE_SIZE,
+                                                                scratchLuts[idx]);
+                    break;
+                case LaneSynth::Spline:
+                    ok = dsp_core::Services::synthesizeSplineLaneLUT(lanes_[idx].splineAnchors, morph, TABLE_SIZE,
+                                                                      splineScratchAnchors, scratchLuts[idx]);
+                    break;
+                case LaneSynth::Snapshot:
+                    continue; // pointer already aimed at lane.curveData
+                }
+                if (!ok) {
+                    // Synthesis failed (NaN, degenerate input, etc.) → fall back to live
+                    // curveData for THIS row only. Other rows may still succeed.
+                    laneLutPointers[idx] = &lanes_[idx].curveData;
+                } else {
+                    laneLutPointers[idx] = &scratchLuts[idx];
+                }
+            }
+
+            float* row = out + (static_cast<std::ptrdiff_t>(m) * numSamples);
+            switch (mode) {
+            case MixerMode::Blend:
+                evalThumbnailRowBlend(lanes, activeLaneCount, laneLutPointers.data(), morph, row, numSamples);
+                break;
+            case MixerMode::Scan:
+                evalThumbnailRowScan(lanes, activeLaneCount, laneLutPointers.data(), morph, row, numSamples);
+                break;
+            case MixerMode::Series:
+                evalThumbnailRowSeries(lanes, activeLaneCount, laneLutPointers.data(), morph, row, numSamples);
+                break;
+            }
+        }
+    } catch (...) {
+        return false; // bad_alloc or unexpected throw — caller expects noexcept-equivalent failure mode
     }
 
     const auto totalSamples = static_cast<std::ptrdiff_t>(numSamples) * numMorphPositions;

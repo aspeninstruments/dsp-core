@@ -274,8 +274,9 @@ class LaneMixer {
      * evenly-spaced x values in [-1, 1] and writes them to `out`, indexed
      * `m * numSamples + s`. Honors the live mixerMode_; modulation envelopes
      * are forced to zero, oversampling and hysteresis are bypassed (this is
-     * a pure LUT walk per lane). Output is clamped to [-1, 1] — no
-     * auto-normalize, unlike the live compute*() routines.
+     * a pure LUT walk per lane). Each row is post-loop normalized by max|y|
+     * so values fit [-1, 1] without flat-topping — matches the live compute*()
+     * routines' per-block normalize, so thumbnails track production output.
      *
      * Message-thread only. Returns false if any computed sample is NaN/Inf
      * or the inputs are invalid; on false the contents of `out` are

@@ -63,6 +63,56 @@ endif()
 
 add_test(NAME ExpressionEvaluatorTests COMMAND expression_evaluator_tests)
 
+# ExpressionParser tests (moved from transfer_function_editor — parser now lives in dsp-core)
+add_executable(expression_parser_tests
+    ExpressionParserTest.cpp
+)
+
+target_include_directories(expression_parser_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(expression_parser_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(expression_parser_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(expression_parser_tests)
+endif()
+
+add_test(NAME ExpressionParserTests COMMAND expression_parser_tests)
+
+# AnchorConstraintService tests (moved from transfer_function_editor)
+add_executable(anchor_constraint_service_tests
+    AnchorConstraintServiceTest.cpp
+)
+
+target_include_directories(anchor_constraint_service_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(anchor_constraint_service_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(anchor_constraint_service_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(anchor_constraint_service_tests)
+endif()
+
+add_test(NAME AnchorConstraintServiceTests COMMAND anchor_constraint_service_tests)
+
 # LaneMixer tests
 add_executable(lane_mixer_tests
     LaneMixerTest.cpp
