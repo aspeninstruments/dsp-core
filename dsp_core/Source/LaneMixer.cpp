@@ -1038,10 +1038,15 @@ juce::ValueTree serializeLane(const Lane& lane, int index) {
         laneVT.appendChild(serializeSplineAnchors(lane.splineAnchors), nullptr);
     }
 
-    // Skip curveData for Harmonic lanes — regenerated from harmonicNumber on load.
-    // Exception: harmonicNumber==0 (WT base layer) may hold legacy unnormalized data
-    // that can't be perfectly regenerated, so always serialize it.
-    const bool canRegenerate = (lane.contentType == LaneContentType::Harmonic && lane.harmonicNumber != 0);
+    // Skip curveData when the lane's definition can fully recreate the curve on load:
+    //   - Harmonic lanes (formatVersion >= 3) regenerate from harmonicNumber/harmonicStrength.
+    //     Exception: harmonicNumber==0 (WT base layer) may hold legacy unnormalized data
+    //     that can't be perfectly regenerated, so always serialize it.
+    //   - Equation lanes (formatVersion >= 8) regenerate from equationText.
+    //     Equation lanes with empty equationText fall back to saving curveData.
+    const bool canRegenerateHarmonic = (lane.contentType == LaneContentType::Harmonic && lane.harmonicNumber != 0);
+    const bool canRegenerateEquation = (lane.contentType == LaneContentType::Equation && !lane.equationText.isEmpty());
+    const bool canRegenerate = canRegenerateHarmonic || canRegenerateEquation;
     if (!canRegenerate && !lane.curveData.empty()) {
         laneVT.setProperty("curveData", compressCurveData(lane.curveData), nullptr);
     }
@@ -1051,7 +1056,8 @@ juce::ValueTree serializeLane(const Lane& lane, int index) {
 
 juce::ValueTree LaneMixer::toValueTree() const {
     juce::ValueTree vt("LaneMixer");
-    vt.setProperty("formatVersion", 7, nullptr);
+    // formatVersion 8: equation lanes omit curveData (regenerated from equationText on load).
+    vt.setProperty("formatVersion", 8, nullptr);
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
@@ -1162,16 +1168,31 @@ void LaneMixer::loadOrRegenerateLaneCurve(Lane& lane, const juce::ValueTree& lan
         decompressCurveDataInto(laneVT.getProperty("curveData"), lane.curveData, loadedTableSize, TABLE_SIZE);
         return;
     }
-    // No curve data in serialized form — regenerate from content type
+    // No curve data in serialized form — regenerate from content type.
     if (lane.contentType == LaneContentType::Harmonic) {
         if (lane.harmonicNumber == 0) {
             fillLaneWithTanh2x(laneIndex);
         } else {
             fillLaneWithHarmonic(laneIndex, lane.harmonicNumber, lane.harmonicStrength);
         }
-    } else {
-        lane.initCurveData(TABLE_SIZE);
+        return;
     }
+    if (lane.contentType == LaneContentType::Equation && !lane.equationText.isEmpty()) {
+        // Mirrors evaluateStaticThumbnail's compile+synthesize path. normalize=true
+        // matches the codebase's canonical rehydrate default; load-time morph=0 is
+        // short-lived (the live audio path re-synthesizes on every morph change).
+        dsp_core::Services::CompiledLaneEquation compiled;
+        if (lane.curveData.size() != static_cast<size_t>(TABLE_SIZE)) {
+            lane.initCurveData(TABLE_SIZE);
+        }
+        if (dsp_core::Services::compileLaneEquation(lane.equationText, /*normalize=*/true, compiled) &&
+            dsp_core::Services::synthesizeLaneLUT(compiled, /*morph=*/0.0, *harmonicLayer_, TABLE_SIZE,
+                                                  lane.curveData)) {
+            return;
+        }
+        // compile or synthesis failed (corrupt equationText, NaN/Inf) — fall through to zero-fill.
+    }
+    lane.initCurveData(TABLE_SIZE);
 }
 
 void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
