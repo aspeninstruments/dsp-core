@@ -1059,9 +1059,12 @@ juce::ValueTree serializeLane(const Lane& lane, int index) {
     //     that can't be perfectly regenerated, so always serialize it.
     //   - Equation lanes (formatVersion >= 8) regenerate from equationText.
     //     Equation lanes with empty equationText fall back to saving curveData.
+    //   - Spline lanes (formatVersion >= 9) regenerate from splineAnchors via
+    //     synthesizeSplineLaneLUT(morph=0). Spline lanes with empty anchors fall back.
     const bool canRegenerateHarmonic = (lane.contentType == LaneContentType::Harmonic && lane.harmonicNumber != 0);
     const bool canRegenerateEquation = (lane.contentType == LaneContentType::Equation && !lane.equationText.isEmpty());
-    const bool canRegenerate = canRegenerateHarmonic || canRegenerateEquation;
+    const bool canRegenerateSpline = (lane.contentType == LaneContentType::Spline && !lane.splineAnchors.empty());
+    const bool canRegenerate = canRegenerateHarmonic || canRegenerateEquation || canRegenerateSpline;
     if (!canRegenerate && !lane.curveData.empty()) {
         laneVT.setProperty("curveDataF32", compressCurveDataF32(lane.curveData), nullptr);
     }
@@ -1075,7 +1078,10 @@ juce::ValueTree LaneMixer::toValueTree() const {
     //   - equation lanes omit curveData (regenerated from equationText on load)
     //   - non-regenerated curves are stored as gzip(float32) under the new `curveDataF32` property.
     //     v<=7 wrote gzip(double[]) under `curveData`; the loader still accepts that for legacy files.
-    vt.setProperty("formatVersion", 8, nullptr);
+    // formatVersion 9:
+    //   - spline lanes omit curveData when splineAnchors is non-empty
+    //     (regenerated from anchors via synthesizeSplineLaneLUT(morph=0) on load).
+    vt.setProperty("formatVersion", 9, nullptr);
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
     vt.setProperty("tableSize", TABLE_SIZE, nullptr);
@@ -1243,7 +1249,59 @@ void LaneMixer::loadOrRegenerateLaneCurve(Lane& lane, const juce::ValueTree& lan
         }
         // compile or synthesis failed (corrupt equationText, NaN/Inf) — fall through to zero-fill.
     }
+    if (lane.contentType == LaneContentType::Spline && !lane.splineAnchors.empty()) {
+        // Mirrors evaluateStaticThumbnail's Spline branch (LaneMixer.cpp ~795). Load-time
+        // morph=0 is short-lived; the live audio path re-synthesizes when morph state
+        // arrives via APVTS (CurveEditorController::morphLaneAnchors).
+        if (lane.curveData.size() != static_cast<size_t>(TABLE_SIZE)) {
+            lane.initCurveData(TABLE_SIZE);
+        }
+        std::vector<SplineAnchor> scratchAnchors;
+        if (dsp_core::Services::synthesizeSplineLaneLUT(lane.splineAnchors, /*morph=*/0.0, TABLE_SIZE,
+                                                         scratchAnchors, lane.curveData)) {
+            return;
+        }
+        // synthesis failed (degenerate anchors, NaN) — fall through to zero-fill.
+    }
     lane.initCurveData(TABLE_SIZE);
+}
+
+void LaneMixer::resynthesizeMorphableLanes(double morph) {
+    bool anyChanged = false;
+    for (int i = 0; i < activeLaneCount_; ++i) {
+        auto& lane = lanes_[static_cast<size_t>(i)];
+
+        if (lane.contentType == LaneContentType::Equation && !lane.equationText.isEmpty()) {
+            dsp_core::Services::CompiledLaneEquation compiled;
+            if (lane.curveData.size() != static_cast<size_t>(TABLE_SIZE)) {
+                lane.initCurveData(TABLE_SIZE);
+            }
+            if (dsp_core::Services::compileLaneEquation(lane.equationText, /*normalize=*/true, compiled) &&
+                dsp_core::Services::synthesizeLaneLUT(compiled, morph, *harmonicLayer_, TABLE_SIZE, lane.curveData)) {
+                anyChanged = true;
+            }
+            // compile/synthesis failure → leave existing curveData untouched.
+            continue;
+        }
+
+        if (lane.contentType == LaneContentType::Spline && !lane.splineAnchors.empty()) {
+            // Mirrors CurveEditorController::morphLaneAnchors — write-back morphed
+            // anchor positions so subsequent edits operate on current positions
+            // (homeX/homeY are preserved per anchor for future morph re-evaluation).
+            std::vector<SplineAnchor> morphedAnchors;
+            std::vector<double> outLut;
+            if (dsp_core::Services::synthesizeSplineLaneLUT(lane.splineAnchors, morph, TABLE_SIZE, morphedAnchors,
+                                                             outLut)) {
+                lane.splineAnchors = std::move(morphedAnchors);
+                lane.curveData = std::move(outLut);
+                anyChanged = true;
+            }
+            continue;
+        }
+    }
+    if (anyChanged) {
+        incrementVersionIfNotBatching();
+    }
 }
 
 void LaneMixer::fromValueTree(const juce::ValueTree& vt) {

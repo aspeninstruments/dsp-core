@@ -423,6 +423,25 @@ class LaneMixer {
      */
     void fromLegacyLTFValueTree(const juce::ValueTree& ltfVT, bool wasHarmonicMode, bool oddSymmetryWasEnabled);
 
+    /**
+     * Re-synthesize all morph-sensitive lanes (Equation, Spline) at the given
+     * morph value.
+     *
+     * fromValueTree() regenerates these curves at morph=0 because it has no
+     * knowledge of the live morph parameter. Callers that restore both lane
+     * state and APVTS state (e.g. .bddpreset load, setStateInformation) must
+     * call this after both restores complete and before rendering the audio
+     * LUT, so curves that reference the morph variable render at the user's
+     * saved morph instead of zero.
+     *
+     * Mirrors the live editor flow:
+     *   - Equation: ExpressionOperationHandler::applyMorphToEquationLanes
+     *   - Spline:   CurveEditorController::morphLaneAnchors (with anchor write-back)
+     *
+     * Lanes that fail to compile or synthesize are left untouched.
+     */
+    void resynthesizeMorphableLanes(double morph);
+
     // ========================================================================
     // Utilities
     // ========================================================================
