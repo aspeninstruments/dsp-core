@@ -1004,6 +1004,21 @@ juce::var compressCurveData(const std::vector<double>& curveData) {
     return {compressedStream.getMemoryBlock()};
 }
 
+juce::var compressCurveDataF32(const std::vector<double>& curveData) {
+    std::vector<float> floats;
+    floats.reserve(curveData.size());
+    for (const double v : curveData) {
+        floats.push_back(static_cast<float>(v));
+    }
+    const juce::MemoryBlock rawData(floats.data(), floats.size() * sizeof(float));
+    juce::MemoryOutputStream compressedStream;
+    {
+        juce::GZIPCompressorOutputStream compressor(compressedStream);
+        compressor.write(rawData.getData(), rawData.getSize());
+    }
+    return {compressedStream.getMemoryBlock()};
+}
+
 void writeOptionalLaneStrings(juce::ValueTree& laneVT, const Lane& lane) {
     if (!lane.equationText.isEmpty()) {
         laneVT.setProperty("equationText", lane.equationText, nullptr);
@@ -1048,7 +1063,7 @@ juce::ValueTree serializeLane(const Lane& lane, int index) {
     const bool canRegenerateEquation = (lane.contentType == LaneContentType::Equation && !lane.equationText.isEmpty());
     const bool canRegenerate = canRegenerateHarmonic || canRegenerateEquation;
     if (!canRegenerate && !lane.curveData.empty()) {
-        laneVT.setProperty("curveData", compressCurveData(lane.curveData), nullptr);
+        laneVT.setProperty("curveDataF32", compressCurveDataF32(lane.curveData), nullptr);
     }
     return laneVT;
 }
@@ -1056,7 +1071,10 @@ juce::ValueTree serializeLane(const Lane& lane, int index) {
 
 juce::ValueTree LaneMixer::toValueTree() const {
     juce::ValueTree vt("LaneMixer");
-    // formatVersion 8: equation lanes omit curveData (regenerated from equationText on load).
+    // formatVersion 8:
+    //   - equation lanes omit curveData (regenerated from equationText on load)
+    //   - non-regenerated curves are stored as gzip(float32) under the new `curveDataF32` property.
+    //     v<=7 wrote gzip(double[]) under `curveData`; the loader still accepts that for legacy files.
     vt.setProperty("formatVersion", 8, nullptr);
     vt.setProperty("numLanes", activeLaneCount_, nullptr);
     vt.setProperty("nextLaneId", static_cast<int>(nextLaneId_), nullptr);
@@ -1125,6 +1143,33 @@ bool decompressCurveDataInto(const juce::var& curveDataProp, std::vector<double>
     std::copy(src, src + copyCount, out.begin());
     return true;
 }
+
+bool decompressCurveDataF32Into(const juce::var& curveDataProp, std::vector<double>& out, int loadedTableSize,
+                                int tableSize) {
+    const auto* compressedData = curveDataProp.getBinaryData();
+    if (compressedData == nullptr) {
+        return false;
+    }
+    juce::MemoryInputStream compressedStream(*compressedData, false);
+    juce::GZIPDecompressorInputStream decompressor(compressedStream);
+
+    const size_t expectedSize = static_cast<size_t>(loadedTableSize) * sizeof(float);
+    juce::MemoryBlock decompressed;
+    decompressed.setSize(expectedSize);
+
+    const auto bytesRead = decompressor.read(decompressed.getData(), static_cast<int>(expectedSize));
+    if (bytesRead <= 0) {
+        return false;
+    }
+    const auto numFloats = static_cast<size_t>(bytesRead) / sizeof(float);
+    out.assign(static_cast<size_t>(tableSize), 0.0);
+    const auto* src = static_cast<const float*>(decompressed.getData());
+    const auto copyCount = std::min(numFloats, static_cast<size_t>(tableSize));
+    for (size_t i = 0; i < copyCount; ++i) {
+        out[i] = static_cast<double>(src[i]);
+    }
+    return true;
+}
 } // namespace
 
 void LaneMixer::applyLaneFromValueTree(Lane& lane, const juce::ValueTree& laneVT, int formatVersion, int laneIndex) {
@@ -1164,6 +1209,12 @@ void LaneMixer::applyLaneFromValueTree(Lane& lane, const juce::ValueTree& laneVT
 
 void LaneMixer::loadOrRegenerateLaneCurve(Lane& lane, const juce::ValueTree& laneVT, int laneIndex,
                                           int loadedTableSize) {
+    // formatVersion >= 8 emits curveDataF32 (gzip(float32[])); older versions emitted
+    // curveData (gzip(double[])). Prefer F32, fall back to legacy doubles.
+    if (laneVT.hasProperty("curveDataF32")) {
+        decompressCurveDataF32Into(laneVT.getProperty("curveDataF32"), lane.curveData, loadedTableSize, TABLE_SIZE);
+        return;
+    }
     if (laneVT.hasProperty("curveData")) {
         decompressCurveDataInto(laneVT.getProperty("curveData"), lane.curveData, loadedTableSize, TABLE_SIZE);
         return;

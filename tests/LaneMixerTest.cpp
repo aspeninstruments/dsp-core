@@ -382,10 +382,11 @@ TEST_F(LaneMixerTest, Serialization_ToValueTree_RoundTrips) {
         EXPECT_EQ(original.contentType, restored.contentType) << "Lane " << n << " contentType mismatch";
         EXPECT_EQ(original.harmonicNumber, restored.harmonicNumber) << "Lane " << n << " harmonicNumber mismatch";
 
-        // Verify curve data matches
+        // Verify curve data matches. v8+ stores curveData as float32 on disk, so the
+        // round-trip floor is ~1e-7; 1e-6 leaves headroom over float-rounding noise.
         ASSERT_EQ(original.curveData.size(), restored.curveData.size()) << "Lane " << n << " curveData size mismatch";
         for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; i += 1000) {
-            EXPECT_NEAR(original.curveData[static_cast<size_t>(i)], restored.curveData[static_cast<size_t>(i)], 1e-12)
+            EXPECT_NEAR(original.curveData[static_cast<size_t>(i)], restored.curveData[static_cast<size_t>(i)], 1e-6)
                 << "Lane " << n << " curveData mismatch at index " << i;
         }
     }
@@ -412,6 +413,82 @@ TEST_F(LaneMixerTest, Serialization_SplineAnchors_RoundTrip) {
     EXPECT_NEAR(restored.splineAnchors[1].y, 0.2, 1e-10);
     EXPECT_TRUE(restored.splineAnchors[1].hasCustomTangent);
     EXPECT_NEAR(restored.splineAnchors[1].tangent, 1.5, 1e-10);
+}
+
+TEST_F(LaneMixerTest, Serialization_V8FreshSave_UsesCurveDataF32Property) {
+    // Fresh saves at formatVersion 8 must emit curveData as gzip(float32) under the
+    // `curveDataF32` property and stop emitting the legacy `curveData` (gzip(double)).
+    constexpr int kPaintLane = 5;
+    mixer->setLaneContentType(kPaintLane, dsp_core::LaneContentType::Paint);
+    std::vector<double> curve(dsp_core::LaneMixer::TABLE_SIZE);
+    for (int i = 0; i < dsp_core::LaneMixer::TABLE_SIZE; ++i) {
+        curve[static_cast<size_t>(i)] = std::sin(static_cast<double>(i) * 0.001);
+    }
+    mixer->setLaneCurveData(kPaintLane, curve);
+
+    auto vt = mixer->toValueTree();
+
+    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 8);
+
+    // Find the Paint lane child.
+    juce::ValueTree paintLaneVT;
+    for (int i = 0; i < vt.getNumChildren(); ++i) {
+        const auto child = vt.getChild(i);
+        if (static_cast<int>(child.getProperty("index", -1)) == kPaintLane) {
+            paintLaneVT = child;
+            break;
+        }
+    }
+    ASSERT_TRUE(paintLaneVT.isValid());
+    EXPECT_TRUE(paintLaneVT.hasProperty("curveDataF32")) << "v8 must emit curveDataF32";
+    EXPECT_FALSE(paintLaneVT.hasProperty("curveData")) << "v8 must not emit legacy curveData alongside";
+}
+
+TEST_F(LaneMixerTest, Serialization_V7Fixture_LoadsLegacyCurveDataPath) {
+    // Hand-build a v7 LaneMixer subtree carrying a Paint lane with gzip(double[]) under
+    // `curveData`. The v8 reader must take the legacy fallback and recover full double
+    // precision (no float32 truncation, since the bytes were written as doubles).
+    juce::ValueTree v7Mixer("LaneMixer");
+    v7Mixer.setProperty("formatVersion", 7, nullptr);
+    v7Mixer.setProperty("numLanes", mixer->getNumLanes(), nullptr);
+    v7Mixer.setProperty("nextLaneId", mixer->getNumLanes(), nullptr);
+    v7Mixer.setProperty("tableSize", dsp_core::LaneMixer::TABLE_SIZE, nullptr);
+    v7Mixer.setProperty("mixerMode", 0, nullptr);
+
+    constexpr int kPaintLane = 4;
+    juce::ValueTree laneVT("Lane");
+    laneVT.setProperty("index", kPaintLane, nullptr);
+    laneVT.setProperty("laneId", kPaintLane, nullptr);
+    laneVT.setProperty("amplitude", 1.0, nullptr);
+    laneVT.setProperty("blendDepth", 0.0, nullptr);
+    laneVT.setProperty("modulationDepth_slot1", 0.0, nullptr);
+    laneVT.setProperty("modulationDepth_slot2", 0.0, nullptr);
+    laneVT.setProperty("contentType", static_cast<int>(dsp_core::LaneContentType::Paint), nullptr);
+    laneVT.setProperty("harmonicNumber", 0, nullptr);
+    laneVT.setProperty("harmonicStrength", 1.0, nullptr);
+
+    // Store a high-precision sentinel that float32 would round (1.0/3.0 has no exact
+    // float32 representation; full-double round-trip preserves all bits).
+    constexpr double kSentinel = 1.0 / 3.0;
+    std::vector<double> sentinel(static_cast<size_t>(dsp_core::LaneMixer::TABLE_SIZE), kSentinel);
+    const juce::MemoryBlock rawData(sentinel.data(), sentinel.size() * sizeof(double));
+    juce::MemoryOutputStream compressedStream;
+    {
+        juce::GZIPCompressorOutputStream compressor(compressedStream);
+        compressor.write(rawData.getData(), rawData.getSize());
+    }
+    laneVT.setProperty("curveData", juce::var(compressedStream.getMemoryBlock()), nullptr);
+    v7Mixer.appendChild(laneVT, nullptr);
+
+    dsp_core::LaneMixer mixer2;
+    mixer2.fromValueTree(v7Mixer);
+
+    const auto& restored = mixer2.getLane(kPaintLane).curveData;
+    ASSERT_EQ(restored.size(), static_cast<size_t>(dsp_core::LaneMixer::TABLE_SIZE));
+    for (size_t i = 0; i < restored.size(); i += 256) {
+        EXPECT_NEAR(restored[i], kSentinel, 1e-12)
+            << "Sample " << i << " — legacy path should preserve full double precision";
+    }
 }
 
 // ============================================================================
@@ -1384,9 +1461,9 @@ TEST_F(LaneMixerTest, Serialization_RoundTripsBlendAmount) {
     EXPECT_DOUBLE_EQ(restored.getBlendAmount(), 0.42);
 }
 
-TEST_F(LaneMixerTest, Serialization_FormatVersionIs5) {
+TEST_F(LaneMixerTest, Serialization_FormatVersionIs8) {
     const auto vt = mixer->toValueTree();
-    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 5);
+    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 8);
 }
 
 TEST_F(LaneMixerTest, Deserialization_MissingBlendFields_DefaultsToZero) {
