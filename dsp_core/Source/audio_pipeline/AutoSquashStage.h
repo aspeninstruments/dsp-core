@@ -3,6 +3,8 @@
 #include "AudioProcessingStage.h"
 #include "AutoGainState.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 namespace dsp_core::audio_pipeline {
 
 /**
@@ -32,6 +34,12 @@ class AutoSquashStage : public AudioProcessingStage {
 
   private:
     AutoGainState& state_;
+
+    // Per-sample ramp on the squash target. Matches GainStage's 10 ms ramp so
+    // InputGain's smoothed gain trajectory and the squash target trajectory
+    // line up — without this, InputGain sweeps cause clicks because the
+    // waveshaper between squash and restore sees mismatched ramps.
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedTargetPeak_;
 };
 
 } // namespace dsp_core::audio_pipeline

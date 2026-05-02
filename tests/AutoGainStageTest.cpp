@@ -95,14 +95,6 @@ class AutoGainStageTest : public ::testing::Test {
         return p;
     }
 
-    static double rmsLevel(const std::vector<double>& v, size_t start = 0) {
-        double sumSq = 0.0;
-        const size_t count = v.size() - start;
-        for (size_t i = start; i < v.size(); ++i)
-            sumSq += v[i] * v[i];
-        return count > 0 ? std::sqrt(sumSq / static_cast<double>(count)) : 0.0;
-    }
-
     static constexpr double sampleRate_ = 48000.0;
     static constexpr int blockSize_ = 512;
 
@@ -185,24 +177,16 @@ TEST_F(AutoGainStageTest, Sine_MinusTwelveDB_InsideHitsTarget_OutsideRecoversLev
     state_.resetRuntime();
     state_.enableMix = 1.0;
 
-    const double amp = 0.25118864315; // -12 dBFS (sine peak — RMS = peak/√2)
+    const double amp = 0.25118864315; // -12 dBFS
     auto in = generateSine(1000.0, amp, static_cast<int>(sampleRate_ * 1.0));
 
     // Split the "through squash → through restore" into two runs so we can
-    // measure the internal level separately. Use a fresh state for the end-to-
+    // measure the internal peak separately. Use a fresh state for the end-to-
     // end run to match that test's assumption of pre-warmed steady state.
-    //
-    // Under the asymmetric RMS detector (5 ms attack / 100 ms release), the
-    // converged behavior on a sustained sine is closer to peak normalization
-    // than RMS normalization: meanSquare gets pulled toward each cycle's peak
-    // power on attack, holds during dips on slow release. Net result: the
-    // internal *peak* lands within a small margin of targetPeak, while the
-    // gain trajectory itself stays smooth (no per-cycle re-attacks, which is
-    // the ring-mod artifact this iteration was built to remove).
     const auto trace = runSquashOnly(in);
     const size_t tailStart = in.size() - static_cast<size_t>(sampleRate_ * 0.1);
     const double internalPeak = peakAbs(trace.internalSignal, tailStart);
-    EXPECT_NEAR(internalPeak, state_.k.targetPeak, 0.10) << "Internal peak should land near target";
+    EXPECT_NEAR(internalPeak, state_.k.targetPeak, 0.02);
 
     // End-to-end — re-run with a fresh state.
     state_.resetRuntime();
@@ -279,22 +263,24 @@ TEST_F(AutoGainStageTest, StepUp_InternalOvershootBounded) {
 
     const auto trace = runSquashOnly(in);
 
-    // The RMS detector takes ~5 ms (rmsAttackTau) to catch up on a sudden
-    // -40 dB → 0 dB jump, during which the still-low meanSquare keeps the
-    // gain high and the internal signal overshoots significantly. This is
-    // the explicit trade made in this iteration: the waveshaper saturates
-    // any short-lived overshoot, which sounds dramatically better than
-    // chasing every peak with audio-rate gain modulation. Bound it at +24 dB
-    // (~16×) just to catch true runaway, not to enforce an audibly clean
-    // attack edge.
-    const double overshootCap = state_.k.targetPeak * 16.0;
+    // Smoothed attack (attackTauSeconds, ~0.5 ms) gives the envelope a brief
+    // catch-up window after a sudden level jump. For this worst-case −40 dB →
+    // 0 dB step, that window leaves the gain at its (high) pre-step value for
+    // ~1 sample before the envelope tracks the new level — internal peak hits
+    // ~18× target momentarily, then settles inside ~1 ms. The waveshaper
+    // saturates the spike; this is the explicit trade made to remove the
+    // audio-rate ring-mod artifact instant-attack produced. Cap at 30× target
+    // to catch true runaway (e.g. envelope stuck at noise-floor branch),
+    // not to enforce an audibly clean transient edge.
+    const double overshootCap = state_.k.targetPeak * 30.0;
     const double internalPeak = peakAbs(trace.internalSignal, static_cast<size_t>(preSamples));
-    EXPECT_LE(internalPeak, overshootCap) << "Attack overshoot too high — runaway, not just clipping";
+    EXPECT_LE(internalPeak, overshootCap) << "Attack overshoot too high — runaway, not clipping";
 
-    // After ~50 ms the internal RMS should be near target.
+    // After ~50 ms (10×attackTau + settling) internal peak should be near
+    // target.
     const size_t settleStart = static_cast<size_t>(preSamples) + static_cast<size_t>(sampleRate_ * 0.05);
-    const double settledRms = rmsLevel(trace.internalSignal, settleStart);
-    EXPECT_NEAR(settledRms, state_.k.targetPeak, 0.05);
+    const double settledPeak = peakAbs(trace.internalSignal, settleStart);
+    EXPECT_NEAR(settledPeak, state_.k.targetPeak, 0.05);
 }
 
 // =============================================================================
@@ -470,6 +456,71 @@ TEST_F(AutoGainStageTest, VariableBlockSize_HandledSafely) {
 }
 
 // =============================================================================
+// 13. Steady-state convergence is EXACT — across input levels and explicit
+//     target values, the internal peak settles on targetPeak to within a tight
+//     tolerance, not just "near" it. This is the headroom guarantee the user
+//     cares about: enabling auto-normalize must not push the internal signal
+//     above target in steady state.
+// =============================================================================
+
+TEST_F(AutoGainStageTest, SteadyState_InternalPeakSettlesExactlyOnTarget) {
+    // Test at a range of input levels and an explicit 0 dBFS target.
+    struct Case {
+        double inputAmp;
+        double targetPeak;
+        const char* label;
+    };
+    const std::vector<Case> cases = {
+        {0.25118864315, 0.9, "-12 dBFS sine, target -1 dBFS (0.9)"},
+        {0.5011872336, 0.9, "-6 dBFS sine, target -1 dBFS (0.9)"},
+        {0.8, 0.9, "≈-2 dBFS sine, target -1 dBFS (0.9)"},
+        {0.5, 1.0, "-6 dBFS sine, target 0 dBFS (1.0)"},
+        {0.1, 1.0, "-20 dBFS sine, target 0 dBFS (1.0)"},
+    };
+
+    for (const auto& tc : cases) {
+        state_.resetRuntime();
+        state_.enableMix = 1.0;
+        setEnabled(true);
+        // Override the atomic target for this case.
+        state_.targetPeakLinear.store(tc.targetPeak, std::memory_order_release);
+
+        // 2 seconds of sine — many cycles past the convergence window. The
+        // smoothed-peak follower attacks toward the cycle peak each refresh
+        // and the long hold keeps it from releasing between cycles, so the
+        // envelope geometrically approaches the input amplitude. After 2 s
+        // at 1 kHz that's 2000 cycles of catch-up.
+        auto in = generateSine(1000.0, tc.inputAmp, static_cast<int>(sampleRate_ * 2.0));
+        const auto trace = runSquashOnly(in);
+
+        // Inspect the final 100 ms.
+        const size_t tailStart = trace.internalSignal.size() - static_cast<size_t>(sampleRate_ * 0.1);
+        const double internalPeak = peakAbs(trace.internalSignal, tailStart);
+        const double errorLinear = internalPeak - tc.targetPeak;
+        const double errorDb = 20.0 * std::log10(internalPeak / tc.targetPeak);
+
+        std::cout << "[CHARACTERIZATION] ExactSettle " << tc.label
+                  << " internalPeak=" << internalPeak << " err=" << errorLinear
+                  << " (" << errorDb << " dB)" << std::endl;
+
+        // Settle to numerical-precision tolerance (~1e-14). The smoothed-peak
+        // follower converges geometrically — env asymptotes to sample peak
+        // from below because attacks only grow env and hold prevents release
+        // between cycles. After 2 s of 1 kHz that's ~2000 cycles of attack
+        // iterations, far past the IEEE-754 ULP at this magnitude. The user's
+        // hearable spec of ±0.005 dB ≈ ±5.8e-4 linear is met by ~12 orders of
+        // magnitude.
+        EXPECT_NEAR(internalPeak, tc.targetPeak, 1.0e-9) << tc.label;
+        // Explicit headroom check: in steady state we never sit above target
+        // by more than fp noise. (The smoothed attack does briefly overshoot
+        // during the *transient* catch-up after a level jump — that's the
+        // explicit clipping-vs-zipper trade — but in the converged tail the
+        // peak lands *at* target with no audible margin either way.)
+        EXPECT_LE(internalPeak, tc.targetPeak + 1.0e-9) << tc.label << " — over target in steady state";
+    }
+}
+
+// =============================================================================
 // =============================================================================
 // Speed/Smoothness characterization tests
 // =============================================================================
@@ -481,26 +532,32 @@ TEST_F(AutoGainStageTest, VariableBlockSize_HandledSafely) {
 // values via std::cout under a "[CHARACTERIZATION]" tag — run with `ctest -V`
 // to read them.
 //
-// Reference numbers (sampleRate=48 kHz, default Constants in AutoGainState.h)
-// captured 2026-04-27:
+// Reference numbers (sampleRate=48 kHz, default Constants in AutoGainState.h):
 //
-//                                | peak follower         | peak +              | RMS detector
-//                                |  (releaseTau=120ms,   |  asymmetric gain    |  (5ms attack /
-//                                |   no smoothing)       |  smoothing,         |  100ms release)
-//                                |                       |  releaseTau=200ms   |  + asym gain smth
-//   ----------------------------------------------------------------------------------------------
-//   SteadyStateSine maxAbsDelta  |   0.00544             |   0.000381 (-93%)   |   ~0.0005
-//   SteadyStateSine rmsDelta     |   0.000250            |   0.0000175 (-93%)  |   ~0.0001
-//   StepUp settlingTimeMs        |   0.21                |   5.54              |   ~30–60 (RMS lag)
-//   StepDown t90Ms               | 276.5                 | 460.1               |   ~370
-//   BurstTrain maxAbsDelta       |   0.171               |   0.0925 (-46%)     |   ~0.003 (-97%)
-//   BurstTrain rmsDelta          |   0.00442             |   0.00252 (-43%)    |   ~0.0004 (-91%)
+//                       | peak +       | peak +          | RMS detector       | smoothed peak +
+//                       |  no          |  asym gain      |  (5/100 ms,        |  40 ms hold +
+//                       |  smoothing   |  smoothing,     |  asym gain smth)   |  asym gain
+//                       |  (orig)      |  releaseTau=200 |                    |  smoothing  ★
+//   --------------------------------------------------------------------------------------------
+//   SteadyStateSine     |              |                 |                    |
+//     maxAbsDeltaGain   |   0.00544    |   0.000381      |   ~0.0005          |   ~7e-14
+//     rmsDeltaGain      |   0.000250   |   0.0000175     |   ~0.0001          |   ~2e-15
+//   StepUp              |              |                 |                    |
+//     settlingTimeMs    |   0.21       |   5.54          |   ~30–60           |   ~5.8
+//   StepDown            |              |                 |                    |
+//     t90Ms             | 276.5        | 460.1           |   ~370             | 495.6
+//   BurstTrain          |              |                 |                    |
+//     maxAbsDeltaGain   |   0.171      |   0.0925        |   ~0.003           |   ~1e-7   ★
+//     rmsDeltaGain      |   0.00442    |   0.00252       |   ~0.0004          |   ~4e-9   ★
 //
-// The RMS detector is the column that finally killed the audio-rate ring-mod
-// artifact: per-cycle peak re-attacks no longer drive the gain. The trade is
-// short-lived overshoot on big level steps (saturated by the waveshaper) and
-// a slower normalization onset (~30–60 ms vs ~6 ms peak). Thresholds are set
-// ~3× above the measured RMS-detector values to leave room for tuning.
+// CHOSEN ★: smoothed peak follower (attackTau=0.5ms) + 40 ms hold + asym
+// gain smoothing. Steady-state correctness comes from the long hold: each
+// cycle peak refreshes the hold window so the envelope rides at peak
+// between cycles, no release ripple. Smoothed attack collapses per-sample
+// gain steps when the envelope does need to attack, in exchange for a brief
+// (~1 ms) overshoot above target on big level jumps — the waveshaper
+// saturates that, which sounds far better than the audio-rate ring
+// modulation an instant attack produced. Thresholds below match column ★.
 // =============================================================================
 
 namespace {
@@ -535,12 +592,10 @@ TEST_F(AutoGainStageTest, SteadyStateSine_GainRippleIsSmall) {
               << " rmsDeltaGain=" << rmsDelta << std::endl;
 
     EXPECT_TRUE(std::isfinite(maxAbsDelta));
-    EXPECT_LT(maxAbsDelta, 0.001) << "Steady-tone gain ripple regressed.";
-    // The asymmetric RMS power detector produces a small 2× signal-frequency
-    // ripple in meanSquare (sample² folds), which the gain smoother further
-    // attenuates. ~1e-4 RMS is comfortably below audibility on the gain
-    // signal — modulating a 1 kHz tone by ±1e-4 is ≪ −80 dB sideband.
-    EXPECT_LT(rmsDelta, 0.0002);
+    // With smoothed attack + long hold, steady-state ripple is essentially
+    // numerical noise (~1e-13). 1e-6 is a generous regression cap.
+    EXPECT_LT(maxAbsDelta, 1.0e-6) << "Steady-tone gain ripple regressed.";
+    EXPECT_LT(rmsDelta, 1.0e-7);
 }
 
 // 14. Step-up: silence → -24 dBFS sine. Time from onset until gain converges
@@ -553,10 +608,7 @@ TEST_F(AutoGainStageTest, StepUp_NormalizationSettlingTime_Ms) {
     state_.enableMix = 1.0;
 
     const int silenceSamples = static_cast<int>(sampleRate_ * 0.05); // 50 ms silence
-    const int sineSamples = static_cast<int>(sampleRate_ * 1.0);     // 1 s sine — RMS
-                                                                     // detector needs more
-                                                                     // time than peak to
-                                                                     // reach steady state
+    const int sineSamples = static_cast<int>(sampleRate_ * 0.5);     // 500 ms sine
     const double amp = 0.06309573445;                                // -24 dBFS
 
     std::vector<double> in;
@@ -594,11 +646,10 @@ TEST_F(AutoGainStageTest, StepUp_NormalizationSettlingTime_Ms) {
               << " (samples=" << settlingSamples << ", finalGain=" << finalGain << ")" << std::endl;
 
     EXPECT_GE(settlingMs, 0.0);
-    // RMS attack tau (5 ms) + asymmetric gain-rise smoothing (2 ms) + the
-    // initial transition out of the noise-floor branch: settling is on the
-    // order of tens of ms. 200 ms is a generous regression cap; perceptual
-    // "fade-in" feel of normalization onset is not noticeable below ~50 ms.
-    EXPECT_LT(settlingMs, 200.0) << "Step-up normalization got too slow to be useful.";
+    // 20 ms upper bound: well under any audible "slow attack" perception
+    // threshold while leaving headroom above the tuned ~5.5 ms value for
+    // jitter from the asymmetric smoother.
+    EXPECT_LT(settlingMs, 20.0) << "Step-up normalization got too slow to be useful.";
 }
 
 // 15. Step-down: loud → quiet. Time for gain to traverse 90% of the way from
@@ -700,10 +751,9 @@ TEST_F(AutoGainStageTest, BurstTrain_TransientZipperProxy) {
               << " rmsDeltaGain=" << rmsDelta << std::endl;
 
     EXPECT_TRUE(std::isfinite(maxAbsDelta));
-    // RMS detection collapsed this metric ~30× from the prior peak-follower
-    // implementation — the per-cycle peak re-attacks that drove the audio-
-    // rate ring-mod artifact are simply absent now. The threshold is set ~3×
-    // above the measured value to catch real regressions.
-    EXPECT_LT(maxAbsDelta, 0.01) << "Transient zipper regressed.";
-    EXPECT_LT(rmsDelta, 0.002);
+    // 30 ms loud / 30 ms quiet bursts < 40 ms hold → envelope holds across
+    // the whole quiet section, no per-burst attack-edge step. Residual delta
+    // is numerical noise (~1e-7).
+    EXPECT_LT(maxAbsDelta, 1.0e-4) << "Transient zipper regressed.";
+    EXPECT_LT(rmsDelta, 1.0e-5);
 }

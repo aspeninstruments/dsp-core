@@ -4,6 +4,7 @@
 #include "../LaneMixer.h"
 #include "ExpressionParser.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace dsp_core::Services {
@@ -72,8 +73,14 @@ bool synthesizeLaneLUT(CompiledLaneEquation& compiled, double morph, const Harmo
     outLut.assign(static_cast<std::size_t>(tableSize), 0.0);
 
     if (compiled.isHarmonic) {
-        std::vector<double> coeffs(kNumHarmonicsForFn + 1, 0.0); // [0] unused by HarmonicLayer
-        for (int n = 1; n <= kNumHarmonicsForFn; ++n) {
+        // HarmonicLayer::evaluate rejects coefficient arrays smaller than its own
+        // numHarmonics + 1 (returns 0 silently). Size the array to the layer's
+        // capacity and only evaluate f(n) for n up to kNumHarmonicsForFn — the
+        // remaining slots stay zero, contributing nothing to the Chebyshev sum.
+        const int layerNumHarmonics = harmonicLayer.getNumHarmonics();
+        const int harmonicsToCompute = std::min(kNumHarmonicsForFn, layerNumHarmonics);
+        std::vector<double> coeffs(static_cast<std::size_t>(layerNumHarmonics + 1), 0.0); // [0] unused by HarmonicLayer
+        for (int n = 1; n <= harmonicsToCompute; ++n) {
             const double v = compiled.evaluator->evaluateHarmonic(static_cast<double>(n));
             if (!std::isfinite(v)) {
                 return false;
