@@ -34,7 +34,7 @@ class OversamplingWrapper : public AudioProcessingStage {
                         int oversamplingOrder = 3 // 8x default
     );
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
     juce::String getName() const override;
@@ -79,6 +79,7 @@ class OversamplingWrapper : public AudioProcessingStage {
     int currentOrder_ = 0; // 1x default (no oversampling)
     double sampleRate_ = 44100.0;
     int maxBlockSize_ = 512;
+    int oversamplerChannels_ = 2; // matches the channel count the constructor pre-creates with
 };
 
 } // namespace dsp_core::audio_pipeline

@@ -28,7 +28,7 @@ class EnvelopeFollowerStageTest : public ::testing::Test {
     void SetUp() override {
         envelopeValue_.store(0.0);
         stage_ = std::make_unique<EnvelopeFollowerStage>(envelopeValue_);
-        stage_->prepareToPlay(kSampleRate, 512);
+        stage_->prepareToPlay(kSampleRate, 512, 2);
         // Defaults: enabled=false, sensitivity=1.0, A=5ms, R=150ms
     }
 
@@ -135,8 +135,10 @@ TEST_F(EnvelopeFollowerStageTest, ReleaseTimeConstant_SmallDrop) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
 
-    // Charge to 1.0 (envDb = 0).
-    const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kAttackSec);
+    // Charge to 1.0 (envDb = 0). Use release τ for the charge window — the
+    // 15 ms RMS averaging window is the bottleneck from silence, not the
+    // 5 ms attack smoother, so 10 × kAttackSec leaves ms² short of unity.
+    const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kReleaseSec);
     (void)driveDC(1.0, chargeSamples);
     ASSERT_NEAR(envelopeValue_.load(), 1.0, 1e-3) << "precondition: charge to 1.0";
 
@@ -216,7 +218,7 @@ namespace {
 double measureAttackOneTauFromMinus40(double sampleRate, int blockSize = 512) {
     std::atomic<double> env{0.0};
     auto stage = std::make_unique<EnvelopeFollowerStage>(env);
-    stage->prepareToPlay(sampleRate, blockSize);
+    stage->prepareToPlay(sampleRate, blockSize, 2);
     stage->setEnabled(true);
     stage->setSensitivityLinear(1.0);
     // Long attack so the RMS averaging window is dominated by the dB smoother τ.
@@ -268,7 +270,7 @@ namespace {
 double measureSineEnvelopeRms(double freqHz, bool hpfOn, double hpfHz = 100.0) {
     std::atomic<double> env{0.0};
     auto stage = std::make_unique<EnvelopeFollowerStage>(env);
-    stage->prepareToPlay(kSampleRate, 512);
+    stage->prepareToPlay(kSampleRate, 512, 2);
     stage->setEnabled(true);
     stage->setSensitivityLinear(1.0);
     stage->setSidechainHpfEnabled(hpfOn);

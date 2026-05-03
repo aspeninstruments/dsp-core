@@ -28,8 +28,9 @@ class AudioProcessingStage {
      *
      * @param sampleRate The sample rate (may be oversampled rate)
      * @param samplesPerBlock Maximum expected buffer size (worst case)
+     * @param numChannels Max main-bus channel count expected at process()
      */
-    virtual void prepareToPlay(double sampleRate, int samplesPerBlock) = 0;
+    virtual void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) = 0;
 
     /**
      * Process audio buffer in-place.

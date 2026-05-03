@@ -2,7 +2,7 @@
 
 namespace dsp_core::audio_pipeline {
 
-void SurgeStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+void SurgeStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/, int /*numChannels*/) {
     sampleRate_ = sampleRate;
     recomputeStep();
 }

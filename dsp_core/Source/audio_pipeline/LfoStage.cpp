@@ -11,7 +11,7 @@ constexpr double kPerlinCellsPerCycle = 4.0;
 
 LfoStage::LfoStage(std::atomic<double>& lfoStorage) : lfoStorage_(lfoStorage) {}
 
-void LfoStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+void LfoStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/, int /*numChannels*/) {
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
 }
 

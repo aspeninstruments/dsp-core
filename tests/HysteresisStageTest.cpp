@@ -14,7 +14,7 @@ class HysteresisStageTest : public ::testing::Test {
     void SetUp() override {
         // SeamlessTransferFunction default constructor initializes to identity (y=x)
         stage_ = std::make_unique<HysteresisStage>(tf_);
-        stage_->prepareToPlay(48000.0 * 16.0, 512); // Oversampled rate like HysteresisProcessor expects
+        stage_->prepareToPlay(48000.0 * 16.0, 512, 2); // Oversampled rate like HysteresisProcessor expects
     }
 
     dsp_core::SeamlessTransferFunction tf_;
@@ -385,7 +385,7 @@ TEST_F(HysteresisStageTest, MakeupGain_WidthSweep_PeakWithinFivePercent) {
     for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
         // Fresh stage per width — avoids carrying J-A state or makeup ramp across iterations.
         stage_ = std::make_unique<HysteresisStage>(tf_);
-        stage_->prepareToPlay(sampleRate, 512);
+        stage_->prepareToPlay(sampleRate, 512, 2);
         stage_->setWidth(w);
         stage_->setMakeupGain(HysteresisStage::computeMakeupForWidth(w));
 
@@ -431,7 +431,7 @@ TEST_F(HysteresisStageTest, MakeupGain_FrequencySweep_PeakWithinFivePercent) {
     for (double freq : {50.0, 200.0, 400.0, 800.0, 1600.0}) {
         for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
             stage_ = std::make_unique<HysteresisStage>(tf_);
-            stage_->prepareToPlay(sampleRate, 512);
+            stage_->prepareToPlay(sampleRate, 512, 2);
             stage_->setWidth(w);
             stage_->setMakeupGain(HysteresisStage::computeMakeupForWidth(w));
 
@@ -488,7 +488,7 @@ TEST_F(HysteresisStageTest, MakeupGain_AmplitudeSweep_NeverOvershoots) {
     for (double amp : {0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0}) {
         for (double w : {0.0, 0.25, 0.5, 0.75, 1.0}) {
             stage_ = std::make_unique<HysteresisStage>(tf_);
-            stage_->prepareToPlay(sampleRate, 512);
+            stage_->prepareToPlay(sampleRate, 512, 2);
             stage_->setWidth(w);
             stage_->setMakeupGain(HysteresisStage::computeMakeupForWidth(w));
 

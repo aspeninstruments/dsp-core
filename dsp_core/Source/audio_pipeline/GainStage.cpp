@@ -6,7 +6,9 @@ namespace {
 constexpr double kGainRampTimeSeconds = 0.01; // 10ms ramp time
 } // namespace
 
-void GainStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void GainStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) {
+    numChannels_ = numChannels;
+
     // CRITICAL: Prepare gainProcessor ONCE in prepareToPlay, NOT in process()
     // Calling prepare() in audio thread causes allocations!
     juce::dsp::ProcessSpec spec{};

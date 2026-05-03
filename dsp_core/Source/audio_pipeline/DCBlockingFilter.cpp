@@ -9,7 +9,7 @@ constexpr double kMinFrequencyHz = 1.0;
 constexpr double kMaxFrequencyHz = 20.0;
 } // namespace
 
-void DCBlockingFilter::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+void DCBlockingFilter::prepareToPlay(double sampleRate, int /*samplesPerBlock*/, int /*numChannels*/) {
     sampleRate_ = sampleRate;
 
     // Resize filters for stereo (will be resized in process() if needed)

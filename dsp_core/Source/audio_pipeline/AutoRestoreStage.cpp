@@ -2,7 +2,7 @@
 
 namespace dsp_core::audio_pipeline {
 
-void AutoRestoreStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void AutoRestoreStage::prepareToPlay(double sampleRate, int samplesPerBlock, int /*numChannels*/) {
     // State is shared with AutoSquashStage; recompute coefficients is
     // idempotent but harmless. Do NOT reset envelope/enableMix here — the
     // squash side owns those.

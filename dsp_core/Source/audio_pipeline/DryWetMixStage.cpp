@@ -13,9 +13,9 @@ DryWetMixStage::DryWetMixStage(std::unique_ptr<AudioPipeline> effectsPipeline)
     jassert(effectsPipeline_ != nullptr);
 }
 
-void DryWetMixStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void DryWetMixStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) {
     dryBuffer_.setSize(kMaxChannels, samplesPerBlock, false, true, true);
-    effectsPipeline_->prepareToPlay(sampleRate, samplesPerBlock);
+    effectsPipeline_->prepareToPlay(sampleRate, samplesPerBlock, numChannels);
 
     mixSmoothed_.reset(sampleRate, kMixRampTimeSeconds);
     mixSmoothed_.setCurrentAndTargetValue(1.0); // 100% wet by default

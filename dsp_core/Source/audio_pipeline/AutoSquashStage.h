@@ -25,7 +25,7 @@ class AutoSquashStage : public AudioProcessingStage {
   public:
     explicit AutoSquashStage(AutoGainState& state) : state_(state) {}
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
     juce::String getName() const override {

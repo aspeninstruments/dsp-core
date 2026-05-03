@@ -24,8 +24,8 @@ class InputPeakTracker : public AudioProcessingStage {
      */
     explicit InputPeakTracker(std::atomic<double>& peakStorage) : peakStorage_(peakStorage) {}
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override {
-        juce::ignoreUnused(sampleRate, samplesPerBlock);
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override {
+        juce::ignoreUnused(sampleRate, samplesPerBlock, numChannels);
     }
 
     void process(juce::AudioBuffer<double>& buffer) override {

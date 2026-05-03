@@ -19,8 +19,8 @@ class AutoGainStageTest : public ::testing::Test {
         state_.enabled.store(true, std::memory_order_release);
         squash_ = std::make_unique<AutoSquashStage>(state_);
         restore_ = std::make_unique<AutoRestoreStage>(state_);
-        squash_->prepareToPlay(sampleRate_, blockSize_);
-        restore_->prepareToPlay(sampleRate_, blockSize_);
+        squash_->prepareToPlay(sampleRate_, blockSize_, 2);
+        restore_->prepareToPlay(sampleRate_, blockSize_, 2);
     }
 
     void setEnabled(bool on) {

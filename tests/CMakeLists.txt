@@ -989,3 +989,28 @@ endif()
 
 add_test(NAME AutoGainStageTests COMMAND auto_gain_stage_tests)
 
+# OversamplingWrapper tests
+add_executable(oversampling_wrapper_tests
+    OversamplingWrapperTest.cpp
+)
+
+target_include_directories(oversampling_wrapper_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(oversampling_wrapper_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(oversampling_wrapper_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(oversampling_wrapper_tests)
+endif()
+
+add_test(NAME OversamplingWrapperTests COMMAND oversampling_wrapper_tests)
+

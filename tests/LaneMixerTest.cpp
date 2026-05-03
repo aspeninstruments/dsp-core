@@ -415,8 +415,8 @@ TEST_F(LaneMixerTest, Serialization_SplineAnchors_RoundTrip) {
     EXPECT_NEAR(restored.splineAnchors[1].tangent, 1.5, 1e-10);
 }
 
-TEST_F(LaneMixerTest, Serialization_V8FreshSave_UsesCurveDataF32Property) {
-    // Fresh saves at formatVersion 8 must emit curveData as gzip(float32) under the
+TEST_F(LaneMixerTest, Serialization_V9FreshSave_UsesCurveDataF32Property) {
+    // Fresh saves at formatVersion 9 must emit curveData as gzip(float32) under the
     // `curveDataF32` property and stop emitting the legacy `curveData` (gzip(double)).
     constexpr int kPaintLane = 5;
     mixer->setLaneContentType(kPaintLane, dsp_core::LaneContentType::Paint);
@@ -428,7 +428,7 @@ TEST_F(LaneMixerTest, Serialization_V8FreshSave_UsesCurveDataF32Property) {
 
     auto vt = mixer->toValueTree();
 
-    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 8);
+    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 9);
 
     // Find the Paint lane child.
     juce::ValueTree paintLaneVT;
@@ -1461,9 +1461,9 @@ TEST_F(LaneMixerTest, Serialization_RoundTripsBlendAmount) {
     EXPECT_DOUBLE_EQ(restored.getBlendAmount(), 0.42);
 }
 
-TEST_F(LaneMixerTest, Serialization_FormatVersionIs8) {
+TEST_F(LaneMixerTest, Serialization_FormatVersionIs9) {
     const auto vt = mixer->toValueTree();
-    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 8);
+    EXPECT_EQ(static_cast<int>(vt.getProperty("formatVersion")), 9);
 }
 
 TEST_F(LaneMixerTest, Deserialization_MissingBlendFields_DefaultsToZero) {

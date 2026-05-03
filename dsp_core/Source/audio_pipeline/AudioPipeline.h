@@ -107,7 +107,7 @@ class AudioPipeline : public AudioProcessingStage {
     /**
      * Prepare all stages for playback.
      */
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override;
 
     /**
      * Process buffer through all stages in order.

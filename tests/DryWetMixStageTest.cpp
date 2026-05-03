@@ -17,7 +17,7 @@ class DryWetMixStageTest : public ::testing::Test {
         pipeline->addStage(std::move(gainStage), "gain");
 
         dryWetMix_ = std::make_unique<DryWetMixStage>(std::move(pipeline));
-        dryWetMix_->prepareToPlay(44100.0, 1024); // Larger buffer for edge case tests
+        dryWetMix_->prepareToPlay(44100.0, 1024, 2); // Larger buffer for edge case tests
 
         // JUCE Gain defaults to 0.0 linear (silence), set to unity for passthrough
         gainStage_->setGainDB(0.0);

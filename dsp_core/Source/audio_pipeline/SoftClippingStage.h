@@ -162,7 +162,7 @@ class SoftClippingStage : public AudioProcessingStage {
     explicit SoftClippingStage(double transitionPoint) : solver_(transitionPoint) {}
 
     // AudioProcessingStage interface
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
     juce::String getName() const override {

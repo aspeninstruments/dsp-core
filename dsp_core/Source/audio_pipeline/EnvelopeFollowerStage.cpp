@@ -35,7 +35,7 @@ EnvelopeFollowerStage::EnvelopeFollowerStage(std::atomic<double>& envelopeStorag
     recomputeCoefficients();
 }
 
-void EnvelopeFollowerStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+void EnvelopeFollowerStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/, int /*numChannels*/) {
     sampleRate_ = sampleRate;
     recomputeCoefficients();
 

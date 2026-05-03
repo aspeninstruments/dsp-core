@@ -39,7 +39,7 @@ class DCBlockingFilter : public AudioProcessingStage {
     DCBlockingFilter() = default;
 
     // AudioProcessingStage interface
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
     juce::String getName() const override {

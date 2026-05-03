@@ -17,7 +17,7 @@ class SurgeStageTest : public ::testing::Test {
 
     void SetUp() override {
         stage_ = std::make_unique<SurgeStage>();
-        stage_->prepareToPlay(kSampleRate, 512);
+        stage_->prepareToPlay(kSampleRate, 512, 2);
         stage_->setSurgeDurationSec(kSurgeDurationSec);
         stage_->setEnabled(true);
     }
@@ -181,7 +181,7 @@ TEST_F(SurgeStageTest, StereoChannelsIndependent) {
 TEST_F(SurgeStageTest, DurationTracksWallTimeAcrossSampleRates) {
     for (double sr : {48000.0, 96000.0, 192000.0}) {
         auto stage = std::make_unique<SurgeStage>();
-        stage->prepareToPlay(sr, 512);
+        stage->prepareToPlay(sr, 512, 2);
         stage->setSurgeDurationSec(kSurgeDurationSec);
         stage->setEnabled(true);
 
@@ -203,14 +203,14 @@ TEST_F(SurgeStageTest, PrepareToPlayReconfiguresStep) {
     constexpr int samples = 48;
 
     // 48 samples @ 48kHz = 1ms = full surge window → saturated at clamp.
-    stage_->prepareToPlay(48000.0, 512);
+    stage_->prepareToPlay(48000.0, 512, 2);
     stage_->setSurgeDurationSec(kSurgeDurationSec);
     stage_->reset();
     const double at48k = driveDC(1.5, samples);
     EXPECT_NEAR(at48k, 1.0, 1e-2) << "48 samples @ 48kHz should fill the 1ms window";
 
     // 48 samples @ 96kHz = 0.5ms = half window → well above clamp, below linear.
-    stage_->prepareToPlay(96000.0, 512);
+    stage_->prepareToPlay(96000.0, 512, 2);
     stage_->setSurgeDurationSec(kSurgeDurationSec);
     stage_->reset();
     const double at96k = driveDC(1.5, samples);
@@ -273,12 +273,12 @@ TEST(SurgeHysteresisIntegration, DCOvershootShowsTransientHumpNotFlatTop) {
     tf.renderLUTImmediate();
 
     SurgeStage surge;
-    surge.prepareToPlay(sr, 512);
+    surge.prepareToPlay(sr, 512, 2);
     surge.setSurgeDurationSec(0.001);
     surge.setEnabled(true);
 
     HysteresisStage hyst(tf);
-    hyst.prepareToPlay(sr, 512);
+    hyst.prepareToPlay(sr, 512, 2);
     hyst.setHysteresisEnabled(true);
     hyst.setWidth(0.5);
     hyst.setMakeupGain(HysteresisStage::computeMakeupForWidth(0.5));

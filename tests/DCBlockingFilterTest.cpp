@@ -9,7 +9,7 @@ class DCBlockingFilterTest : public ::testing::Test {
   protected:
     void SetUp() override {
         filter_ = std::make_unique<DCBlockingFilter>();
-        filter_->prepareToPlay(44100.0, 512);
+        filter_->prepareToPlay(44100.0, 512, 2);
     }
 
     std::unique_ptr<DCBlockingFilter> filter_;

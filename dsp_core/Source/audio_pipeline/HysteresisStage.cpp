@@ -4,7 +4,7 @@ namespace dsp_core::audio_pipeline {
 
 HysteresisStage::HysteresisStage(dsp_core::SeamlessTransferFunction& tf) : transferFunction_(&tf) {}
 
-void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock, int /*numChannels*/) {
     // Forward to the shared transfer function at this (possibly oversampled) rate
     // so the LUT crossfade and surge-weight step both track wall time correctly.
     transferFunction_->prepareToPlay(sampleRate, samplesPerBlock);

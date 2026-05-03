@@ -23,8 +23,8 @@ class AudioInputWriter : public AudioProcessingStage {
      */
     explicit AudioInputWriter(AudioInputBuffer& buffer) : buffer_(buffer) {}
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override {
-        juce::ignoreUnused(sampleRate, samplesPerBlock);
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override {
+        juce::ignoreUnused(sampleRate, samplesPerBlock, numChannels);
         // Buffer prepare is called separately by processor
     }
 

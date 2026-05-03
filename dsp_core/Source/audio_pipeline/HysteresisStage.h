@@ -31,7 +31,7 @@ class HysteresisStage : public AudioProcessingStage {
     // wall-time accurate across oversampling-order changes.
     explicit HysteresisStage(dsp_core::SeamlessTransferFunction& tf);
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override;
     void process(juce::AudioBuffer<double>& buffer) override;
     void reset() override;
     juce::String getName() const override {

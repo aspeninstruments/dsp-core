@@ -20,7 +20,7 @@ class LfoStageTest : public ::testing::Test {
   protected:
     void SetUp() override {
         stage_ = std::make_unique<LfoStage>(value_);
-        stage_->prepareToPlay(kSampleRate, kBlockSize);
+        stage_->prepareToPlay(kSampleRate, kBlockSize, 2);
         stage_->setEnabled(true);
     }
 

@@ -6,7 +6,7 @@ WaveshapingStage::WaveshapingStage(dsp_core::SeamlessTransferFunction& tf) : sea
 
 WaveshapingStage::WaveshapingStage(dsp_core::LayeredTransferFunction& ltf) : layeredTransferFunction_(&ltf) {}
 
-void WaveshapingStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void WaveshapingStage::prepareToPlay(double sampleRate, int samplesPerBlock, int /*numChannels*/) {
     // Forward to the shared transfer function at this (possibly oversampled) rate
     // so the LUT crossfade and surge-weight step both track wall time correctly.
     if (seamlessTransferFunction_ != nullptr) {

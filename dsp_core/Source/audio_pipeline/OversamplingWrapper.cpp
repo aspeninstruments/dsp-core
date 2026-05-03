@@ -23,15 +23,24 @@ OversamplingWrapper::OversamplingWrapper(std::unique_ptr<AudioProcessingStage> w
     }
 }
 
-void OversamplingWrapper::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void OversamplingWrapper::prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) {
     sampleRate_ = sampleRate;
     maxBlockSize_ = samplesPerBlock;
 
-    // Prepare all oversamplers
-    juce::dsp::ProcessSpec spec{};
-    spec.sampleRate = sampleRate;
-    spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
-    spec.numChannels = 2;
+    // JUCE's Oversampling fixes its channel count at construction; processSamplesUp
+    // asserts (and reads OOB in Release) when the input block's channel count differs.
+    // Reconstruct all five if the host's channel count moved off what we previously built.
+    if (numChannels != oversamplerChannels_) {
+        for (int i = 0; i < kNumOversamplingModes; ++i) {
+            oversamplers_[i] = std::make_unique<juce::dsp::Oversampling<double>>(
+                numChannels,
+                i,
+                juce::dsp::Oversampling<double>::filterHalfBandPolyphaseIIR,
+                true,
+                false);
+        }
+        oversamplerChannels_ = numChannels;
+    }
 
     for (auto& oversampler : oversamplers_) {
         oversampler->initProcessing(samplesPerBlock);
@@ -41,7 +50,7 @@ void OversamplingWrapper::prepareToPlay(double sampleRate, int samplesPerBlock) 
     // Prepare wrapped stage at oversampled rate
     const int factor = 1 << currentOrder_; // 2^order
     const int oversampledBlockSize = samplesPerBlock * factor;
-    wrappedStage_->prepareToPlay(sampleRate * factor, oversampledBlockSize);
+    wrappedStage_->prepareToPlay(sampleRate * factor, oversampledBlockSize, numChannels);
 }
 
 void OversamplingWrapper::process(juce::AudioBuffer<double>& buffer) {
@@ -103,7 +112,7 @@ void OversamplingWrapper::setOversamplingOrder(int order) {
     // Re-prepare wrapped stage at new sample rate
     const int factor = 1 << currentOrder_;
     const int oversampledBlockSize = maxBlockSize_ * factor;
-    wrappedStage_->prepareToPlay(sampleRate_ * factor, oversampledBlockSize);
+    wrappedStage_->prepareToPlay(sampleRate_ * factor, oversampledBlockSize, oversamplerChannels_);
 }
 
 } // namespace dsp_core::audio_pipeline

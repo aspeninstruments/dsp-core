@@ -573,7 +573,7 @@ TEST_F(SoftClippingComparisonTest, MultiLevelComparison) {
 // Test 11: Stage integration test - verify SoftClippingStage works correctly
 TEST_F(SoftClippingComparisonTest, StageIntegrationTest) {
     SoftClippingStage stage;
-    stage.prepareToPlay(kSampleRate, 512);
+    stage.prepareToPlay(kSampleRate, 512, 2);
 
     // Create test buffer with +3 dB signal
     juce::AudioBuffer<double> buffer(2, 512);

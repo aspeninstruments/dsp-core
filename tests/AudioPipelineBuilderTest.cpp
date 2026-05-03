@@ -150,7 +150,7 @@ TEST_F(AudioPipelineBuilderTest, PipelineProcessesAudio) {
                                   .addStage<GainStage>(StageTag::OutputGain)
                                   .build();
 
-    pipeline->prepareToPlay(44100.0, 512);
+    pipeline->prepareToPlay(44100.0, 512, 2);
 
     // JUCE Gain defaults to 0.0 linear (silence), set to unity for passthrough
     auto* inputGain = stages.get<GainStage>(StageTag::InputGain);
@@ -188,7 +188,7 @@ TEST_F(AudioPipelineBuilderTest, PipelineProcessesAudio) {
 TEST_F(AudioPipelineBuilderTest, StageParametersCanBeModified) {
     auto [pipeline, stages] = AudioPipelineBuilder().addStage<GainStage>(StageTag::InputGain).build();
 
-    pipeline->prepareToPlay(44100.0, 512);
+    pipeline->prepareToPlay(44100.0, 512, 2);
 
     auto* gainStage = stages.get<GainStage>(StageTag::InputGain);
     ASSERT_NE(gainStage, nullptr);
@@ -214,7 +214,7 @@ TEST_F(AudioPipelineBuilderTest, StageParametersCanBeModified) {
 TEST_F(AudioPipelineBuilderTest, DryWetMixCanBeModified) {
     auto [pipeline, stages] = AudioPipelineBuilder().withDryWetMix().addStage<GainStage>(StageTag::InputGain).build();
 
-    pipeline->prepareToPlay(44100.0, 512);
+    pipeline->prepareToPlay(44100.0, 512, 2);
 
     auto* dryWet = stages.getDryWetMix();
     ASSERT_NE(dryWet, nullptr);

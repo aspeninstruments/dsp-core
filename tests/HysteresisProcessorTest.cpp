@@ -303,7 +303,10 @@ TEST_F(HysteresisProcessorTest, ConstantNL_BoundedOutput) {
 }
 
 TEST_F(HysteresisProcessorTest, IdentityNL_BoundedOutput) {
-    // f(x) = x (no distortion, just pass-through)
+    // Identity NL has no built-in saturation, so it relies on Q being
+    // pre-normalized — the same contract user-provided LUTs satisfy.
+    // Audio-range operating point gives a = M_s = scale = 1, so Q ≈ H.
+    proc_.setOperatingPoint(1.0);
     proc_.setNonlinearity([](double x) { return x; });
 
     auto H = generateSine(100.0);

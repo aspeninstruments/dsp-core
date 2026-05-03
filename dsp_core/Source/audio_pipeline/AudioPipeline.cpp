@@ -18,12 +18,12 @@ void AudioPipeline::addStage(std::unique_ptr<AudioProcessingStage> stage, const 
     stages_.push_back(std::move(stage));
 }
 
-void AudioPipeline::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void AudioPipeline::prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) {
     sampleRate_ = sampleRate;
     maxBlockSize_ = samplesPerBlock;
 
     for (auto& stage : stages_) {
-        stage->prepareToPlay(sampleRate, samplesPerBlock);
+        stage->prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     }
 }
 

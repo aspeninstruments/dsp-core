@@ -25,9 +25,9 @@ class ModulatorSlotStage : public AudioProcessingStage {
     explicit ModulatorSlotStage(std::atomic<double>& slotStorage)
         : slotStorage_(slotStorage), envStage_(slotStorage), lfoStage_(slotStorage) {}
 
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override {
-        envStage_.prepareToPlay(sampleRate, samplesPerBlock);
-        lfoStage_.prepareToPlay(sampleRate, samplesPerBlock);
+    void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override {
+        envStage_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+        lfoStage_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     }
 
     void process(juce::AudioBuffer<double>& buffer) override {

@@ -11,7 +11,7 @@ namespace {
 constexpr double kTargetRampSeconds = 0.01;
 } // namespace
 
-void AutoSquashStage::prepareToPlay(double sampleRate, int samplesPerBlock) {
+void AutoSquashStage::prepareToPlay(double sampleRate, int samplesPerBlock, int /*numChannels*/) {
     state_.prepare(sampleRate, samplesPerBlock);
     smoothedTargetPeak_.reset(sampleRate, kTargetRampSeconds);
     smoothedTargetPeak_.setCurrentAndTargetValue(

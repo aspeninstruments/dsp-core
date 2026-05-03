@@ -2,7 +2,7 @@
 
 namespace dsp_core::audio_pipeline {
 
-void SoftClippingStage::prepareToPlay(double /*sampleRate*/, int /*samplesPerBlock*/) {
+void SoftClippingStage::prepareToPlay(double /*sampleRate*/, int /*samplesPerBlock*/, int /*numChannels*/) {
     // No preparation needed - solver constants are computed at construction
 }
 
