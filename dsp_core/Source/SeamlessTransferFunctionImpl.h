@@ -16,10 +16,11 @@ class EventDrivenRenderer;
 class VisualizerUpdateDispatcher;
 
 /**
- * SeamlessConfig - Configuration constants for seamless transfer function updates
+ * SeamlessConfig - Configuration constants for seamless transfer function updates.
+ * DSP_LUT_SIZE is sourced from LaneMixer::TABLE_SIZE so audio/render/storage stay in sync.
  */
 struct SeamlessConfig {
-    static constexpr int DSP_LUT_SIZE = 16384;
+    static constexpr int DSP_LUT_SIZE = LaneMixer::TABLE_SIZE;
     static constexpr int VISUALIZER_LUT_SIZE = 1024;
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
@@ -27,6 +28,11 @@ struct SeamlessConfig {
     static constexpr int DSP_TIMER_HZ = 20;
     static constexpr int VISUALIZER_TIMER_HZ = 120;
 };
+
+// Cross-class invariant: every TABLE_SIZE definition in the codebase must match.
+// If this fails, the audio thread, renderer, and lane storage will silently disagree.
+static_assert(SeamlessConfig::DSP_LUT_SIZE == LaneMixer::TABLE_SIZE,
+              "DSP_LUT_SIZE must match LaneMixer::TABLE_SIZE");
 
 // Legacy aliases for backward compatibility
 static constexpr int TABLE_SIZE = SeamlessConfig::DSP_LUT_SIZE;

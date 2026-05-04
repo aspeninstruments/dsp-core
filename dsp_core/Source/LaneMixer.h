@@ -48,7 +48,7 @@ namespace dsp_core {
 class LaneMixer {
   public:
     static constexpr int MAX_LANES = 100;
-    static constexpr int TABLE_SIZE = 16384;
+    static constexpr int TABLE_SIZE = 8192;
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
     static constexpr int MAX_HARMONIC_NUMBER = 200;

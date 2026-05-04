@@ -1125,6 +1125,30 @@ std::vector<SplineAnchor> deserializeAnchors(const juce::ValueTree& anchorsVT) {
     return result;
 }
 
+// Linear-resample a source array of N samples (covering normalized [0, 1]) into `out`, which
+// will be sized to `targetSize`. Used when a preset's stored tableSize differs from the live
+// TABLE_SIZE (e.g. 16384-era preset loaded against a 8192 build, or vice versa). Linear is
+// adequate for this one-shot load path — the audio thread re-interpolates via Catmull-Rom.
+template <typename SrcT>
+void resampleLinearInto(const SrcT* src, size_t numSrc, std::vector<double>& out, int targetSize) {
+    out.assign(static_cast<size_t>(targetSize), 0.0);
+    if (numSrc == 0 || targetSize <= 0) {
+        return;
+    }
+    if (numSrc == 1) {
+        std::fill(out.begin(), out.end(), static_cast<double>(src[0]));
+        return;
+    }
+    const double scale = static_cast<double>(numSrc - 1) / static_cast<double>(targetSize - 1);
+    for (int i = 0; i < targetSize; ++i) {
+        const double srcPos = i * scale;
+        const auto lo = static_cast<size_t>(srcPos);
+        const auto hi = std::min(lo + 1, numSrc - 1);
+        const double frac = srcPos - static_cast<double>(lo);
+        out[i] = static_cast<double>(src[lo]) * (1.0 - frac) + static_cast<double>(src[hi]) * frac;
+    }
+}
+
 bool decompressCurveDataInto(const juce::var& curveDataProp, std::vector<double>& out, int loadedTableSize,
                              int tableSize) {
     const auto* compressedData = curveDataProp.getBinaryData();
@@ -1143,10 +1167,12 @@ bool decompressCurveDataInto(const juce::var& curveDataProp, std::vector<double>
         return false;
     }
     const auto numDoubles = static_cast<size_t>(bytesRead) / sizeof(double);
-    out.resize(static_cast<size_t>(tableSize), 0.0);
     const auto* src = static_cast<const double*>(decompressed.getData());
-    const auto copyCount = std::min(numDoubles, static_cast<size_t>(tableSize));
-    std::copy(src, src + copyCount, out.begin());
+    if (static_cast<int>(numDoubles) == tableSize) {
+        out.assign(src, src + numDoubles);
+    } else {
+        resampleLinearInto(src, numDoubles, out, tableSize);
+    }
     return true;
 }
 
@@ -1168,11 +1194,14 @@ bool decompressCurveDataF32Into(const juce::var& curveDataProp, std::vector<doub
         return false;
     }
     const auto numFloats = static_cast<size_t>(bytesRead) / sizeof(float);
-    out.assign(static_cast<size_t>(tableSize), 0.0);
     const auto* src = static_cast<const float*>(decompressed.getData());
-    const auto copyCount = std::min(numFloats, static_cast<size_t>(tableSize));
-    for (size_t i = 0; i < copyCount; ++i) {
-        out[i] = static_cast<double>(src[i]);
+    if (static_cast<int>(numFloats) == tableSize) {
+        out.assign(static_cast<size_t>(tableSize), 0.0);
+        for (size_t i = 0; i < numFloats; ++i) {
+            out[i] = static_cast<double>(src[i]);
+        }
+    } else {
+        resampleLinearInto(src, numFloats, out, tableSize);
     }
     return true;
 }
@@ -1384,9 +1413,13 @@ std::vector<double> parseLegacyBaseLayer(const juce::ValueTree& ltfVT, int table
     const juce::MemoryBlock baseBlob = *baseVT.getProperty("tableData").getBinaryData();
     const auto* data = static_cast<const double*>(baseBlob.getData());
     const int numValues = static_cast<int>(baseBlob.getSize() / sizeof(double));
-    const int copyCount = std::min(numValues, tableSize);
-    result.assign(data, data + copyCount);
-    result.resize(static_cast<size_t>(tableSize), 0.0);
+    if (numValues == tableSize) {
+        result.assign(data, data + numValues);
+    } else {
+        // Legacy presets baked the BaseLayer at the era's TABLE_SIZE (typically 16384).
+        // Resample to the live size so the full x∈[-1,1] curve is preserved.
+        resampleLinearInto(data, static_cast<size_t>(numValues), result, tableSize);
+    }
     return result;
 }
 

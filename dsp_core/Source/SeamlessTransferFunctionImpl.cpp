@@ -494,7 +494,10 @@ void EventDrivenRenderer::doRender() {
 
     // Precompute and clamp edge slopes for Linear extrapolation.
     if (outputBuffer->extrapolationMode == LaneMixer::ExtrapolationMode::Linear) {
-        constexpr double MAX_SLOPE = 16.0;
+        // Slopes are stored as delta-per-LUT-step (extrapolation walks integer index space
+        // outside [-1, 1]; see evaluateCrossfade getSample lambda). The historical cap of 16.0
+        // was tuned at TABLE_SIZE=16384; keep the same effective dy/dx by scaling with dx.
+        constexpr double MAX_SLOPE = 16.0 * (16383.0 / static_cast<double>(TABLE_SIZE - 1));
         const double leftSlope = outputBuffer->data[1] - outputBuffer->data[0];
         const double rightSlope = outputBuffer->data[TABLE_SIZE - 1] - outputBuffer->data[TABLE_SIZE - 2];
         outputBuffer->leftSlope = std::clamp(leftSlope, -MAX_SLOPE, MAX_SLOPE);

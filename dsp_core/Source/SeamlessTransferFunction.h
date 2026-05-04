@@ -24,7 +24,7 @@ namespace dsp_core {
  *     curve content changes rate-limited to 60Hz
  *   - Direct triple-buffer writes from message thread (no worker thread needed)
  *   - 5ms crossfade with interruption support for rapid automation
- *   - Hardcoded constants (16384 table size, -1.0 to 1.0 range) for performance
+ *   - Hardcoded constants (TABLE_SIZE from LaneMixer, -1.0 to 1.0 range) for performance
  *   - Visualizer shows latest model directly at 120Hz (independent of DSP rendering)
  *
  * PERFORMANCE:
@@ -39,9 +39,12 @@ namespace dsp_core {
  */
 class SeamlessTransferFunction {
   public:
-    // Constants (hardcoded for performance - not configurable)
-    static constexpr int TABLE_SIZE = 16384;         // DSP LUT size (audio thread)
-    static constexpr int VISUALIZER_LUT_SIZE = 1024; // Visualizer LUT size (UI thread)
+    // Constants (hardcoded for performance - not configurable).
+    // TABLE_SIZE is sourced from LaneMixer to keep the audio thread, the renderer,
+    // and the lane storage trivially in sync. See static_assert in
+    // SeamlessTransferFunctionImpl.h for the cross-class invariant.
+    static constexpr int TABLE_SIZE = LaneMixer::TABLE_SIZE; // DSP LUT size (audio thread)
+    static constexpr int VISUALIZER_LUT_SIZE = 1024;         // Visualizer LUT size (UI thread)
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
 
