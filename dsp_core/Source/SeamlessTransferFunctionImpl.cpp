@@ -436,17 +436,23 @@ void EventDrivenRenderer::handleAsyncUpdate() {
         }
     }
 
-    if (curveChanged) {
-        // Rate limit expensive curve renders to 60Hz max
+    // Rate limit ALL renders to 60Hz, not just curve-content changes. Amplitude/
+    // mix-only changes (amplitude LFOs, scan automation) used to skip this gate
+    // because each render was relatively cheap, but at audio-block rate (12–200 Hz)
+    // they still saturate weak machines. The 5ms crossfade (CROSSFADE_DURATION_MS)
+    // smooths the resulting 60Hz parameter steps. Tradeoff: lose audio-rate LUT
+    // modulation (which the architecture never truly delivered) for consistent
+    // slow-machine behaviour.
+    {
         const double now = juce::Time::getMillisecondCounterHiRes();
-        const double elapsed = now - lastCurveRenderTimeMs;
-        if (elapsed < CURVE_RENDER_MIN_INTERVAL_MS) {
-            // Defer: start a one-shot timer for the remaining interval
-            const int remainingMs = static_cast<int>(CURVE_RENDER_MIN_INTERVAL_MS - elapsed) + 1;
+        const double elapsed = now - lastRenderTimeMs;
+        if (elapsed < RENDER_MIN_INTERVAL_MS) {
+            // Defer: start a one-shot timer for the remaining interval.
+            const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
             startTimer(remainingMs);
             return;
         }
-        lastCurveRenderTimeMs = now;
+        lastRenderTimeMs = now;
     }
 
     doRender();
@@ -464,8 +470,10 @@ void EventDrivenRenderer::timerCallback() {
 }
 
 void EventDrivenRenderer::doRender() {
-    // Compute the mixed sum directly on the message thread
-    std::array<double, TABLE_SIZE> sumData{};
+    // Compute the mixed sum directly on the message thread, into the
+    // persistent member buffer so the visualizer dispatcher can read it
+    // without paying a second 16k computeSum/Scan/Series.
+    auto& sumData = lastRenderedSum_;
     const auto mode = laneMixer.getMixerMode();
     if (mode == LaneMixer::MixerMode::Scan) {
         laneMixer.computeScan(sumData.data(), TABLE_SIZE);
@@ -474,6 +482,7 @@ void EventDrivenRenderer::doRender() {
     } else {
         laneMixer.computeSum(sumData.data(), TABLE_SIZE);
     }
+    hasLastRenderedSum_ = true;
 
     // Write directly to the worker target buffer (no worker thread)
     const int targetIdx = audioEngine.getWorkerTargetIndexReference().load(std::memory_order_relaxed);
@@ -578,18 +587,29 @@ void VisualizerUpdateDispatcher::forceUpdate() {
 
 void VisualizerUpdateDispatcher::runUpdate() {
     if (visualizerLUTPtr != nullptr) {
-        // Compute the output curve into a temporary buffer, then downsample to visualizer resolution
-        std::array<double, LaneMixer::TABLE_SIZE> sumBuffer{};
-        const auto mode = laneMixer.getMixerMode();
-        if (mode == LaneMixer::MixerMode::Scan) {
-            laneMixer.computeScan(sumBuffer.data(), LaneMixer::TABLE_SIZE);
-        } else if (mode == LaneMixer::MixerMode::Series) {
-            laneMixer.computeSeries(sumBuffer.data(), LaneMixer::TABLE_SIZE);
-        } else {
-            laneMixer.computeSum(sumBuffer.data(), LaneMixer::TABLE_SIZE);
+        // Prefer the renderer's cached buffer to avoid a redundant 16k
+        // LaneMixer recompute. The renderer always runs before us in the
+        // forceUpdate path, and on every modulation tick that bumps the
+        // version. The fallback handles the (rare) case where the dispatcher
+        // is triggered without a prior render — e.g., before init completes.
+        const std::array<double, LaneMixer::TABLE_SIZE>* sumPtr =
+            (sourceRenderer_ != nullptr) ? sourceRenderer_->getLastRenderedSum() : nullptr;
+
+        std::array<double, LaneMixer::TABLE_SIZE> fallbackSum{};
+        if (sumPtr == nullptr) {
+            const auto mode = laneMixer.getMixerMode();
+            if (mode == LaneMixer::MixerMode::Scan) {
+                laneMixer.computeScan(fallbackSum.data(), LaneMixer::TABLE_SIZE);
+            } else if (mode == LaneMixer::MixerMode::Series) {
+                laneMixer.computeSeries(fallbackSum.data(), LaneMixer::TABLE_SIZE);
+            } else {
+                laneMixer.computeSum(fallbackSum.data(), LaneMixer::TABLE_SIZE);
+            }
+            sumPtr = &fallbackSum;
         }
 
         // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
+        const auto& sum = *sumPtr;
         for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
             const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
             const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
@@ -597,7 +617,7 @@ void VisualizerUpdateDispatcher::runUpdate() {
             const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
             const double t = srcIdx - idx;
             (*visualizerLUTPtr)[static_cast<size_t>(i)] =
-                sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) + sumBuffer[static_cast<size_t>(nextIdx)] * t;
+                sum[static_cast<size_t>(idx)] * (1.0 - t) + sum[static_cast<size_t>(nextIdx)] * t;
         }
     }
 

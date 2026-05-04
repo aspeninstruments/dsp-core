@@ -168,6 +168,10 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     // automation-driven changes (which bypass onVersionChanged) update the UI.
     pimpl->eventRenderer->setVisualizerDispatcher(pimpl->visualizerDispatcher.get());
 
+    // Reverse link: dispatcher reads the renderer's cached sum instead of
+    // recomputing, halving the message-thread cost per modulation tick.
+    pimpl->visualizerDispatcher->setSourceRenderer(pimpl->eventRenderer.get());
+
     // Wire the version change callback to trigger both the DSP renderer and
     // the visualizer dispatcher. Both use AsyncUpdater and are rate-limited.
     pimpl->laneMixer.setOnVersionChanged([this]() {
@@ -197,6 +201,7 @@ void SeamlessTransferFunction::stopSeamlessUpdates() {
 
     // Stop visualizer dispatcher
     if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->setSourceRenderer(nullptr);
         pimpl->visualizerDispatcher->cancelPendingUpdate();
         pimpl->visualizerDispatcher->stopTimer();
         pimpl->visualizerDispatcher.reset();

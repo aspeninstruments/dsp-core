@@ -281,8 +281,10 @@ class AudioEngine {
  *
  * Replaces LUTRenderTimer + LUTRendererThread with a single class that:
  *   - Triggers renders immediately via AsyncUpdater (no polling delay)
- *   - Rate-limits expensive curve changes (60Hz max)
- *   - Renders mix-only changes (amplitude, scan) without rate limiting
+ *   - Rate-limits ALL renders to 120 Hz (curve content and amplitude/mix
+ *     changes alike). The 5 ms LUT crossfade smooths the resulting parameter
+ *     steps. Audio-rate modulation via the LUT path is intentionally not
+ *     supported in exchange for predictable CPU on slow hardware.
  *   - Writes directly to the triple-buffered LUT (no worker thread needed)
  *   - Falls back to a 5Hz safety timer as a guaranteed delivery net
  *
@@ -292,11 +294,10 @@ class AudioEngine {
  *   - timerCallback() runs on message thread (JUCE Timer contract)
  *   - doRender() writes to triple buffer atomics (safe from message thread)
  *
- * Two-Tier Version Tracking:
+ * Two-Tier Version Tracking (used for scan-mode amplitude-skip; both tiers
+ * share the same 120 Hz rate limit):
  *   - Full version (versionCounter_): incremented on ANY change
  *   - Mix version (mixVersionCounter_): incremented only for amplitude/scan changes
- *   - If only mix version changed: render immediately (cheap computeSum)
- *   - If curve content changed: rate-limited to 60Hz
  */
 class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
   public:
@@ -318,6 +319,13 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
         visualizerDispatcher_ = dispatcher;
     }
 
+    /** Returns the most recently rendered full-resolution sum, or nullptr if
+     *  no render has occurred yet. Message thread only. The visualizer
+     *  dispatcher reads this to skip a redundant 16k LaneMixer recompute. */
+    const std::array<double, TABLE_SIZE>* getLastRenderedSum() const {
+        return hasLastRenderedSum_ ? &lastRenderedSum_ : nullptr;
+    }
+
   private:
     void doRender();
 
@@ -328,10 +336,21 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
     uint64_t lastRenderedFullVersion{0};
     uint64_t lastRenderedMixVersion{0};
     double lastRenderedScanPosition{0.0};
-    double lastCurveRenderTimeMs{0.0};
+    double lastRenderTimeMs{0.0};
 
-    static constexpr double CURVE_RENDER_MIN_INTERVAL_MS = 16.7; // 60Hz max
-    static constexpr int SAFETY_TIMER_HZ = 5;                    // 200ms fallback
+    // Persistent buffer for the most recent doRender() output. Kept as a
+    // member (not a local) so the visualizer dispatcher can read it without
+    // recomputing, and so doRender() doesn't push 131KB onto the stack.
+    std::array<double, TABLE_SIZE> lastRenderedSum_{};
+    bool hasLastRenderedSum_{false};
+
+    // 120 Hz cap on all DSP LUT renders. Yields 6 samples/cycle for the
+    // worst-case 20 Hz LFO target — above the 4-samples/cycle "perceptually
+    // smooth with crossfade" floor. The 5 ms CROSSFADE_DURATION_MS smooths
+    // remaining stair-stepping. Going higher (240 Hz) buys headroom for
+    // higher-frequency modulation at 2x the message-thread cost.
+    static constexpr double RENDER_MIN_INTERVAL_MS = 8.33; // 120Hz max
+    static constexpr int SAFETY_TIMER_HZ = 5;              // 200ms fallback
 };
 
 /**
@@ -359,6 +378,13 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
 
     void setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, int* selectedLanePtr);
 
+    /** Wire the dispatcher to the renderer that produces the same sum.
+     *  When set, runUpdate() reads the renderer's cached buffer instead of
+     *  recomputing — saving a full 16k LaneMixer mix per modulation tick. */
+    void setSourceRenderer(EventDrivenRenderer* renderer) {
+        sourceRenderer_ = renderer;
+    }
+
     /** Force synchronous update (for initialization). */
     void forceUpdate();
 
@@ -372,6 +398,7 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     void runUpdate();
 
     LaneMixer& laneMixer;
+    EventDrivenRenderer* sourceRenderer_{nullptr};
     std::array<double, VISUALIZER_LUT_SIZE>* visualizerLUTPtr{nullptr};
     std::function<void()> onVisualizerUpdate;
     uint64_t lastSeenVersion{0};
