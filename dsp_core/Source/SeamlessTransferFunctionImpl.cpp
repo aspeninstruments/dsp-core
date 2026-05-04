@@ -557,17 +557,28 @@ void VisualizerUpdateDispatcher::handleAsyncUpdate() {
         return;
     }
 
-    // No explicit rate limit: JUCE's AsyncUpdater coalesces multiple
-    // triggerAsyncUpdate() calls between message-thread ticks into a single
-    // handleAsyncUpdate(), which already gives us ~vsync-rate updates without
-    // introducing the up-to-16ms deferral lag the previous gate caused during
-    // knob drags. The 5Hz safety timer below catches any edge missed by the
-    // event path (e.g. lane selection changed without a version bump).
-    lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
+    // Rate-limit dispatcher invocations to 60 Hz. JUCE's AsyncUpdater only
+    // coalesces calls between message-thread ticks; without an explicit gate,
+    // the dispatcher fires at the same rate as the renderer (up to 120 Hz),
+    // queuing twice the UI-side message-thread events per modulation tick and
+    // starving DSP renders on slow hardware. The 16.7 ms cap is one 60 Hz
+    // frame — below human discrimination for continuous knob drags. The 5 Hz
+    // safety timer (restored below) catches any edge missed by the event path.
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    const double elapsed = now - lastUpdateTimeMs;
+    if (elapsed < RENDER_MIN_INTERVAL_MS) {
+        const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
+        startTimer(remainingMs);
+        return;
+    }
+    lastUpdateTimeMs = now;
 
     runUpdate();
     lastSeenVersion = currentVersion;
     lastSeenSelectedLane = currentSelectedLane;
+
+    // Restore safety timer (in case one-shot timer was used for rate limiting).
+    startTimerHz(SAFETY_TIMER_HZ);
 }
 
 void VisualizerUpdateDispatcher::timerCallback() {

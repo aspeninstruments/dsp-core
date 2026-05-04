@@ -176,7 +176,7 @@ TEST_F(LUTFidelityComparisonTest, TotalDistortion_ChebyshevSweep) {
               << "8192 (live)" << std::setw(16) << "4096" << '\n';
     std::cout << "  " << std::string(60, '-') << '\n';
 
-    for (int n : {1, 3, 5, 7, 9, 11, 13, 15, 17, 19}) {
+    for (int n : {1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 32}) {
         Curve c = {"H" + std::to_string(n), [n](double x) {
                        const double xc = std::max(-1.0, std::min(1.0, x));
                        return std::cos(static_cast<double>(n) * std::acos(xc));

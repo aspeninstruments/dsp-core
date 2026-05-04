@@ -415,6 +415,14 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
 
     double lastUpdateTimeMs{0.0};
 
+    // 60 Hz cap on visualizer dispatcher invocations. Each invocation does a
+    // 16k→1k downsample plus the onVisualizerUpdate callback chain (which
+    // triggers a paint). Without this cap, the dispatcher fires at the same
+    // rate as the renderer (up to 120 Hz), doubling UI-side message-thread
+    // queue depth and starving DSP renders on slow hardware. 16.7 ms is one
+    // 60 Hz frame — below human discrimination for a continuous knob drag,
+    // and matches the perceptual smoothness floor for waveform animation.
+    static constexpr double RENDER_MIN_INTERVAL_MS = 16.67;
     static constexpr int SAFETY_TIMER_HZ = 5; // 200ms fallback for missed edges
 };
 
