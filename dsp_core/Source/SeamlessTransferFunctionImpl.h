@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <juce_core/juce_core.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -283,70 +284,110 @@ class AudioEngine {
 };
 
 /**
- * EventDrivenRenderer - Event-driven DSP LUT renderer with rate limiting
+ * EventDrivenRenderer - DSP LUT renderer with priority-isolated worker thread
  *
- * Replaces LUTRenderTimer + LUTRendererThread with a single class that:
- *   - Triggers renders immediately via AsyncUpdater (no polling delay)
- *   - Rate-limits ALL renders to 120 Hz (curve content and amplitude/mix
+ * Architecture:
+ *   - A high-priority worker thread (juce::Thread::Priority::high) owns the
+ *     actual O(TABLE_SIZE) lane-mix compute. The message thread only rate-
+ *     limits incoming triggers and notify()s the worker.
+ *   - Rate-limits worker wake-ups to 120 Hz (curve content and amplitude/mix
  *     changes alike). The 5 ms LUT crossfade smooths the resulting parameter
  *     steps. Audio-rate modulation via the LUT path is intentionally not
  *     supported in exchange for predictable CPU on slow hardware.
- *   - Writes directly to the triple-buffered LUT (no worker thread needed)
- *   - Falls back to a 5Hz safety timer as a guaranteed delivery net
+ *   - Writes directly to the audio engine's triple-buffered LUT.
+ *   - Falls back to a 5 Hz safety timer as a guaranteed delivery net.
  *
  * THREADING:
  *   - triggerAsyncUpdate() called from any thread (message or audio via AutomationSlot)
- *   - handleAsyncUpdate() runs on message thread (JUCE guarantee)
+ *   - handleAsyncUpdate() runs on message thread: rate-gate + notify() worker
  *   - timerCallback() runs on message thread (JUCE Timer contract)
- *   - doRender() writes to triple buffer atomics (safe from message thread)
+ *   - run() is the worker thread loop; renderIfNeeded() / doRender() run on it
+ *   - forceRender() runs synchronously on the calling thread (init + tests only)
+ *   - Triple-buffer atomics in AudioEngine handle worker→audio handoff safely.
+ *   - lastRenderedSum_ is shared between worker (writer) and message thread
+ *     (visualizer dispatcher reader); both sides take lastRenderedSumMutex_.
  *
  * Two-Tier Version Tracking (used for scan-mode amplitude-skip; both tiers
  * share the same 120 Hz rate limit):
  *   - Full version (versionCounter_): incremented on ANY change
  *   - Mix version (mixVersionCounter_): incremented only for amplitude/scan changes
  */
-class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
+class EventDrivenRenderer : public juce::AsyncUpdater,
+                            public juce::Timer,
+                            private juce::Thread {
   public:
     EventDrivenRenderer(LaneMixer& mixer, AudioEngine& engine);
     ~EventDrivenRenderer() override;
 
-    /** Force synchronous render (for initialization and testing) */
+    /** Force synchronous render on the calling thread. Init/test only — must
+     *  not be called concurrently with the worker (typically called before
+     *  audio starts or after stopThread). */
     void forceRender();
 
-    /** AsyncUpdater callback — dispatched on message thread */
+    /** AsyncUpdater callback — runs on the message thread. Rate-gates and
+     *  notify()s the worker; never does the heavy compute itself. */
     void handleAsyncUpdate() override;
 
-    /** Safety timer callback (5Hz fallback) */
+    /** Safety timer callback (5 Hz fallback) — runs on the message thread. */
     void timerCallback() override;
 
     /** Set the visualizer dispatcher to notify after each render.
-     *  Called on the message thread after doRender() completes. */
+     *  triggerAsyncUpdate() is cross-thread-safe by JUCE contract, so this
+     *  is callable from the worker thread. */
     void setVisualizerDispatcher(juce::AsyncUpdater* dispatcher) {
         visualizerDispatcher_ = dispatcher;
     }
 
-    /** Returns the most recently rendered full-resolution sum, or nullptr if
-     *  no render has occurred yet. Message thread only. The visualizer
-     *  dispatcher reads this to skip a redundant 16k LaneMixer recompute. */
-    const std::array<double, TABLE_SIZE>* getLastRenderedSum() const {
-        return hasLastRenderedSum_ ? &lastRenderedSum_ : nullptr;
-    }
+    /** Copy the most recent worker-rendered full-resolution sum into `dest`
+     *  under a mutex (worker may be writing concurrently). Returns false if
+     *  no render has ever completed. Thread-safe. */
+    bool copyLastRenderedSum(std::array<double, TABLE_SIZE>& dest) const;
 
   private:
+    /** Worker-thread loop (juce::Thread::run override). */
+    void run() override;
+
+    /** Worker-thread render gate: re-checks version, scan-mode amplitude-skip,
+     *  and isCrossfading() before calling doRender(). */
+    void renderIfNeeded();
+
+    /** The actual O(TABLE_SIZE) compute. Runs on the worker thread (or the
+     *  calling thread for forceRender). */
     void doRender();
+
+    /** Shared rate-limit + notify path used by handleAsyncUpdate and
+     *  timerCallback. Message thread only. */
+    void notifyWithRateLimit();
 
     LaneMixer& laneMixer;
     AudioEngine& audioEngine;
     juce::AsyncUpdater* visualizerDispatcher_ = nullptr;
 
+    // Serializes forceRender (caller's thread) with the worker's
+    // renderIfNeeded path. Both write to the audio engine's worker-target
+    // buffer and to the worker-local lastRendered* state below; without
+    // this lock, a forceRender call during a preset restore could race
+    // with an in-flight worker render and corrupt the LUT. Held only for
+    // the duration of one render (~5-10 ms on slow hardware), so message-
+    // thread contention is negligible.
+    mutable std::mutex renderMutex_;
+
+    // Worker-thread state — read/written only by the worker (or by
+    // forceRender on the calling thread). Always accessed under
+    // renderMutex_.
     uint64_t lastRenderedFullVersion{0};
     uint64_t lastRenderedMixVersion{0};
     double lastRenderedScanPosition{0.0};
-    double lastRenderTimeMs{0.0};
 
-    // Persistent buffer for the most recent doRender() output. Kept as a
-    // member (not a local) so the visualizer dispatcher can read it without
-    // recomputing, and so doRender() doesn't push 131KB onto the stack.
+    // Message-thread-local state — read/written only by handleAsyncUpdate /
+    // timerCallback / notifyWithRateLimit.
+    double lastNotifyTimeMs{0.0};
+
+    // Cross-thread snapshot of the most recent render output, read by the
+    // visualizer dispatcher on the message thread. Worker writes under mutex
+    // after each successful doRender; reader copies under mutex via
+    // copyLastRenderedSum.
+    mutable std::mutex lastRenderedSumMutex_;
     std::array<double, TABLE_SIZE> lastRenderedSum_{};
     bool hasLastRenderedSum_{false};
 
@@ -354,7 +395,7 @@ class EventDrivenRenderer : public juce::AsyncUpdater, public juce::Timer {
     // worst-case 20 Hz LFO target — above the 4-samples/cycle "perceptually
     // smooth with crossfade" floor. The 5 ms CROSSFADE_DURATION_MS smooths
     // remaining stair-stepping. Going higher (240 Hz) buys headroom for
-    // higher-frequency modulation at 2x the message-thread cost.
+    // higher-frequency modulation at 2x the worker wake-up cost.
     static constexpr double RENDER_MIN_INTERVAL_MS = 8.33; // 120Hz max
     static constexpr int SAFETY_TIMER_HZ = 5;              // 200ms fallback
 };

@@ -396,37 +396,94 @@ double AudioEngine::evaluateCrossfade(const LUTBuffer* oldLUT, const LUTBuffer* 
 // EventDrivenRenderer Implementation
 
 EventDrivenRenderer::EventDrivenRenderer(LaneMixer& mixer, AudioEngine& engine)
-    : laneMixer(mixer), audioEngine(engine) {
+    : juce::Thread("BDD-LUTRenderer"), laneMixer(mixer), audioEngine(engine) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    startThread(juce::Thread::Priority::high);
     startTimerHz(SAFETY_TIMER_HZ);
 }
 
 EventDrivenRenderer::~EventDrivenRenderer() {
+    // Stop the worker FIRST so it can no longer touch laneMixer/audioEngine
+    // when the owning Pimpl tears down those members after this destructor.
+    signalThreadShouldExit();
+    notify();
+    stopThread(2000);
     cancelPendingUpdate();
     stopTimer();
 }
 
 void EventDrivenRenderer::forceRender() {
-    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    // Synchronous render on the calling thread. Serializes against the
+    // worker via renderMutex_ — preset-load paths call this while the
+    // worker may already be mid-render in response to a separate trigger,
+    // so the lock is required for correctness, not just a contract.
+    std::lock_guard<std::mutex> lk(renderMutex_);
     doRender();
 }
 
 void EventDrivenRenderer::handleAsyncUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    notifyWithRateLimit();
+}
+
+void EventDrivenRenderer::timerCallback() {
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    notifyWithRateLimit();
+}
+
+void EventDrivenRenderer::notifyWithRateLimit() {
+    // Coarse 120 Hz gate on worker wake-ups. The worker itself decides
+    // whether the laneMixer version has actually changed; this gate just
+    // prevents the message thread from spamming notify() faster than the
+    // worker can reasonably consume. Deferred wake-ups use a one-shot timer
+    // so we don't drop a render in the rate-limit window.
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    const double elapsed = now - lastNotifyTimeMs;
+    if (elapsed < RENDER_MIN_INTERVAL_MS) {
+        const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
+        startTimer(remainingMs);
+        return;
+    }
+    lastNotifyTimeMs = now;
+
+    notify(); // wake worker; worker decides whether actual render is needed
+
+    // Restore safety timer (replaces any pending one-shot deferral above).
+    startTimerHz(SAFETY_TIMER_HZ);
+}
+
+void EventDrivenRenderer::run() {
+    while (!threadShouldExit()) {
+        // Block until notify() or signalThreadShouldExit. Wakes are coalesced
+        // by JUCE's WaitableEvent — many notifies before the worker runs
+        // produce a single wake.
+        wait(-1);
+        if (threadShouldExit()) {
+            break;
+        }
+        renderIfNeeded();
+    }
+}
+
+void EventDrivenRenderer::renderIfNeeded() {
+    // Serialize against forceRender from the message thread. Cheap when
+    // uncontended; brief block (one render's worth) when forceRender wins.
+    std::lock_guard<std::mutex> lk(renderMutex_);
 
     const uint64_t currentFullVersion = laneMixer.getVersion();
-    const uint64_t currentMixVersion = laneMixer.getMixVersion();
-
     if (currentFullVersion == lastRenderedFullVersion) {
         return; // Nothing changed
     }
 
-    // Detect whether only mix-related changes occurred (cheap to re-render)
+    const uint64_t currentMixVersion = laneMixer.getMixVersion();
+
+    // Detect whether only mix-related changes occurred (cheap to re-render).
     const bool curveChanged =
         (currentFullVersion - currentMixVersion) != (lastRenderedFullVersion - lastRenderedMixVersion);
 
-    // In scan mode, amplitude changes don't affect the output (computeScan ignores amplitudes).
-    // Skip the render to avoid unnecessary crossfade artifacts from stale buffer data.
+    // In scan mode, amplitude changes don't affect the output (computeScan
+    // ignores amplitudes). Skip the render to avoid unnecessary crossfade
+    // artifacts from stale buffer data.
     if (!curveChanged && laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
         const double currentScanPos = laneMixer.getScanPosition();
         if (currentScanPos == lastRenderedScanPosition) {
@@ -436,58 +493,33 @@ void EventDrivenRenderer::handleAsyncUpdate() {
         }
     }
 
-    // Rate limit ALL renders to 60Hz, not just curve-content changes. Amplitude/
-    // mix-only changes (amplitude LFOs, scan automation) used to skip this gate
-    // because each render was relatively cheap, but at audio-block rate (12–200 Hz)
-    // they still saturate weak machines. The 5ms crossfade (CROSSFADE_DURATION_MS)
-    // smooths the resulting 60Hz parameter steps. Tradeoff: lose audio-rate LUT
-    // modulation (which the architecture never truly delivered) for consistent
-    // slow-machine behaviour.
-    {
-        const double now = juce::Time::getMillisecondCounterHiRes();
-        const double elapsed = now - lastRenderTimeMs;
-        if (elapsed < RENDER_MIN_INTERVAL_MS) {
-            // Defer: start a one-shot timer for the remaining interval.
-            const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
-            startTimer(remainingMs);
-            return;
-        }
-        lastRenderTimeMs = now;
+    // Skip if the audio engine is mid-crossfade — the next notify (or the 5 Hz
+    // safety timer) will retry. This mirrors the two-speed worker contract
+    // documented on AudioEngine::isCrossfading().
+    if (audioEngine.isCrossfading()) {
+        return;
     }
 
     doRender();
-
-    // Restore safety timer (in case one-shot timer was used for rate limiting)
-    startTimerHz(SAFETY_TIMER_HZ);
-}
-
-void EventDrivenRenderer::timerCallback() {
-    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-
-    if (lastRenderedFullVersion != laneMixer.getVersion()) {
-        handleAsyncUpdate();
-    }
 }
 
 void EventDrivenRenderer::doRender() {
-    // Compute the mixed sum directly on the message thread, into the
-    // persistent member buffer so the visualizer dispatcher can read it
-    // without paying a second 16k computeSum/Scan/Series.
-    auto& sumData = lastRenderedSum_;
-    const auto mode = laneMixer.getMixerMode();
-    if (mode == LaneMixer::MixerMode::Scan) {
-        laneMixer.computeScan(sumData.data(), TABLE_SIZE);
-    } else if (mode == LaneMixer::MixerMode::Series) {
-        laneMixer.computeSeries(sumData.data(), TABLE_SIZE);
-    } else {
-        laneMixer.computeSum(sumData.data(), TABLE_SIZE);
-    }
-    hasLastRenderedSum_ = true;
-
-    // Write directly to the worker target buffer (no worker thread)
+    // Compute directly into the audio engine's worker-target LUT buffer.
+    // The audio thread only swaps to this buffer when newLUTReady is set
+    // (release/acquire), so the in-progress writes here are not yet visible
+    // to the audio thread.
     const int targetIdx = audioEngine.getWorkerTargetIndexReference().load(std::memory_order_relaxed);
     LUTBuffer* outputBuffer = &audioEngine.getLUTBuffers()[targetIdx];
-    std::copy(sumData.begin(), sumData.end(), outputBuffer->data.begin());
+
+    const auto mode = laneMixer.getMixerMode();
+    if (mode == LaneMixer::MixerMode::Scan) {
+        laneMixer.computeScan(outputBuffer->data.data(), TABLE_SIZE);
+    } else if (mode == LaneMixer::MixerMode::Series) {
+        laneMixer.computeSeries(outputBuffer->data.data(), TABLE_SIZE);
+    } else {
+        laneMixer.computeSum(outputBuffer->data.data(), TABLE_SIZE);
+    }
+
     outputBuffer->version = laneMixer.getVersion();
     outputBuffer->extrapolationMode = laneMixer.getExtrapolationMode();
     outputBuffer->softClipEnabled = laneMixer.getSoftClipEnabled();
@@ -507,7 +539,17 @@ void EventDrivenRenderer::doRender() {
         outputBuffer->rightSlope = 0.0;
     }
 
-    // Signal audio thread
+    // Snapshot the freshly-rendered sum for the visualizer dispatcher under
+    // mutex. Done before signalling the audio thread so the dispatcher's
+    // reader doesn't see a torn buffer if it races with the next render.
+    {
+        std::lock_guard<std::mutex> lk(lastRenderedSumMutex_);
+        std::copy(outputBuffer->data.begin(), outputBuffer->data.end(), lastRenderedSum_.begin());
+        hasLastRenderedSum_ = true;
+    }
+
+    // Release-store newLUTReady — synchronizes all the writes above with the
+    // audio thread's acquire-load on the next block.
     audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);
 
     lastRenderedFullVersion = laneMixer.getVersion();
@@ -516,10 +558,19 @@ void EventDrivenRenderer::doRender() {
 
     // Notify visualizer dispatcher so automation-driven amplitude changes
     // (which bypass onVersionChanged) still update the UI promptly.
-    // Already on the message thread; triggerAsyncUpdate coalesces naturally.
+    // triggerAsyncUpdate is cross-thread-safe by JUCE contract.
     if (visualizerDispatcher_ != nullptr) {
         visualizerDispatcher_->triggerAsyncUpdate();
     }
+}
+
+bool EventDrivenRenderer::copyLastRenderedSum(std::array<double, TABLE_SIZE>& dest) const {
+    std::lock_guard<std::mutex> lk(lastRenderedSumMutex_);
+    if (!hasLastRenderedSum_) {
+        return false;
+    }
+    dest = lastRenderedSum_;
+    return true;
 }
 
 // VisualizerUpdateDispatcher Implementation (event-driven, 60Hz rate-limited)
@@ -602,28 +653,28 @@ void VisualizerUpdateDispatcher::forceUpdate() {
 void VisualizerUpdateDispatcher::runUpdate() {
     if (visualizerLUTPtr != nullptr) {
         // Prefer the renderer's cached buffer to avoid a redundant 16k
-        // LaneMixer recompute. The renderer always runs before us in the
-        // forceUpdate path, and on every modulation tick that bumps the
-        // version. The fallback handles the (rare) case where the dispatcher
+        // LaneMixer recompute. The renderer's worker thread writes to that
+        // buffer under a mutex; copyLastRenderedSum copies it under the
+        // same mutex so we can downsample without holding the lock during
+        // the loop. Fallback handles the (rare) case where the dispatcher
         // is triggered without a prior render — e.g., before init completes.
-        const std::array<double, LaneMixer::TABLE_SIZE>* sumPtr =
-            (sourceRenderer_ != nullptr) ? sourceRenderer_->getLastRenderedSum() : nullptr;
+        std::array<double, LaneMixer::TABLE_SIZE> sumSnapshot{};
+        bool haveSnapshot =
+            (sourceRenderer_ != nullptr) ? sourceRenderer_->copyLastRenderedSum(sumSnapshot) : false;
 
-        std::array<double, LaneMixer::TABLE_SIZE> fallbackSum{};
-        if (sumPtr == nullptr) {
+        if (!haveSnapshot) {
             const auto mode = laneMixer.getMixerMode();
             if (mode == LaneMixer::MixerMode::Scan) {
-                laneMixer.computeScan(fallbackSum.data(), LaneMixer::TABLE_SIZE);
+                laneMixer.computeScan(sumSnapshot.data(), LaneMixer::TABLE_SIZE);
             } else if (mode == LaneMixer::MixerMode::Series) {
-                laneMixer.computeSeries(fallbackSum.data(), LaneMixer::TABLE_SIZE);
+                laneMixer.computeSeries(sumSnapshot.data(), LaneMixer::TABLE_SIZE);
             } else {
-                laneMixer.computeSum(fallbackSum.data(), LaneMixer::TABLE_SIZE);
+                laneMixer.computeSum(sumSnapshot.data(), LaneMixer::TABLE_SIZE);
             }
-            sumPtr = &fallbackSum;
         }
 
         // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
-        const auto& sum = *sumPtr;
+        const auto& sum = sumSnapshot;
         for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
             const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
             const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
