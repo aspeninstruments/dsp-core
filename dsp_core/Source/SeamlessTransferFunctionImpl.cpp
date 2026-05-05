@@ -445,32 +445,45 @@ void EventDrivenRenderer::run() {
             break;
         }
 
-        // 120 Hz gate: if we rendered very recently, sleep out the remainder
-        // of the window. Any notify() during this wait re-sets the
-        // WaitableEvent flag; the next wait(-1) consumes it on the next
-        // iteration so no wake is dropped. wait() returns early on notify.
-        const double elapsed = juce::Time::getMillisecondCounterHiRes() - lastRenderTimeMs_;
-        if (elapsed < RENDER_MIN_INTERVAL_MS) {
-            const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
-            wait(remainingMs);
+        // 120 Hz gate: enforce a minimum interval between consecutive render
+        // starts. Use Thread::sleep (NOT wait) — wait() returns early on
+        // notify, which lets a flurry of audio-thread / slider-drag notifies
+        // defeat the gate and re-enter doRender() before the audio thread
+        // has had time to rotate the triple buffer through the previous
+        // render. That race produces clicks/pops because the audio thread
+        // can read a worker-target buffer while the worker is still writing
+        // to it. The gate is timestamped at render START so the cap matches
+        // the old message-thread rate-limiter (~120 Hz on continuous wakes).
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (now < nextAllowedRenderTimeMs_) {
+            const int remainingMs = static_cast<int>(nextAllowedRenderTimeMs_ - now) + 1;
+            juce::Thread::sleep(remainingMs);
             if (threadShouldExit()) {
                 break;
             }
         }
 
+        const double renderStartMs = juce::Time::getMillisecondCounterHiRes();
         renderIfNeeded();
-        lastRenderTimeMs_ = juce::Time::getMillisecondCounterHiRes();
+        // Advance the gate UNCONDITIONALLY — even when renderIfNeeded() skips
+        // (version unchanged, mid-crossfade, scan-mode amplitude). Without
+        // this, mid-crossfade skips combined with audio-thread notifies on
+        // every audio block (applyMorphWithEnvelope → setModulationEnvValue
+        // → onVersionChanged) cause the worker to busy-spin at 100% CPU
+        // during every 5 ms crossfade window. The Priority::high worker
+        // starves the realtime audio thread → buffer underrun → click.
+        nextAllowedRenderTimeMs_ = renderStartMs + RENDER_MIN_INTERVAL_MS;
     }
 }
 
-void EventDrivenRenderer::renderIfNeeded() {
+bool EventDrivenRenderer::renderIfNeeded() {
     // Serialize against forceRender from the message thread. Cheap when
     // uncontended; brief block (one render's worth) when forceRender wins.
     std::lock_guard<std::mutex> lk(renderMutex_);
 
     const uint64_t currentFullVersion = laneMixer.getVersion();
     if (currentFullVersion == lastRenderedFullVersion) {
-        return; // Nothing changed
+        return false; // Nothing changed
     }
 
     const uint64_t currentMixVersion = laneMixer.getMixVersion();
@@ -487,7 +500,7 @@ void EventDrivenRenderer::renderIfNeeded() {
         if (currentScanPos == lastRenderedScanPosition) {
             lastRenderedFullVersion = currentFullVersion;
             lastRenderedMixVersion = currentMixVersion;
-            return;
+            return false;
         }
     }
 
@@ -495,10 +508,23 @@ void EventDrivenRenderer::renderIfNeeded() {
     // safety timer) will retry. This mirrors the two-speed worker contract
     // documented on AudioEngine::isCrossfading().
     if (audioEngine.isCrossfading()) {
-        return;
+        return false;
+    }
+
+    // Skip if the audio thread hasn't consumed our previous render yet
+    // (newLUTReady still true). Otherwise we'd race its checkForNewLUT
+    // rotation: it would read the stale workerTargetIndex (still pointing
+    // at our last buffer), rotate that buffer to PRIMARY, then read it
+    // while we're still writing — manifesting as bursts of garbage when
+    // audio blocks are delayed by CPU pressure (slow laptop) or jitter.
+    // The flag is the producer-consumer signal: worker writes when false,
+    // audio consumes by setting it false again after rotation.
+    if (audioEngine.getNewLUTReadyFlag().load(std::memory_order_acquire)) {
+        return false;
     }
 
     doRender();
+    return true;
 }
 
 void EventDrivenRenderer::doRender() {
@@ -506,7 +532,13 @@ void EventDrivenRenderer::doRender() {
     // The audio thread only swaps to this buffer when newLUTReady is set
     // (release/acquire), so the in-progress writes here are not yet visible
     // to the audio thread.
-    const int targetIdx = audioEngine.getWorkerTargetIndexReference().load(std::memory_order_relaxed);
+    // Acquire-load to pair with the audio thread's release-store after
+    // rotation in checkForNewLUT — ensures we see the post-rotation buffer
+    // index, not a stale value that points at a buffer audio is now using
+    // as PRIMARY. The newLUTReady gate in renderIfNeeded() is the primary
+    // protection against the rotation race; this is a belt-and-suspenders
+    // measure on weakly-ordered architectures (Apple Silicon).
+    const int targetIdx = audioEngine.getWorkerTargetIndexReference().load(std::memory_order_acquire);
     LUTBuffer* outputBuffer = &audioEngine.getLUTBuffers()[targetIdx];
 
     const auto mode = laneMixer.getMixerMode();

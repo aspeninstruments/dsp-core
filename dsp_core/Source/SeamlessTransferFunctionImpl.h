@@ -363,8 +363,10 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
     void run() override;
 
     /** Worker-thread render gate: re-checks version, scan-mode amplitude-skip,
-     *  and isCrossfading() before calling doRender(). */
-    void renderIfNeeded();
+     *  and isCrossfading() before calling doRender(). Returns true iff a
+     *  render actually executed (so the worker's run() loop only advances
+     *  its rate-gate timestamp on real renders). */
+    bool renderIfNeeded();
 
     /** The actual O(TABLE_SIZE) compute. Runs on the worker thread (or the
      *  calling thread for forceRender). */
@@ -390,10 +392,11 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
     uint64_t lastRenderedMixVersion{0};
     double lastRenderedScanPosition{0.0};
 
-    // Worker-thread-local state — read/written only inside run(). Tracks
-    // when the most recent render completed so the worker can self-throttle
-    // to RENDER_MIN_INTERVAL_MS without involving the message thread.
-    double lastRenderTimeMs_{0.0};
+    // Worker-thread-local state — read/written only inside run(). The next
+    // wall-clock millisecond at which the worker is allowed to start the
+    // next render. Updated only after an actual render completes (skips
+    // for unchanged version or mid-crossfade do not advance it).
+    double nextAllowedRenderTimeMs_{0.0};
 
     // Cross-thread snapshot of the most recent render output, read by the
     // visualizer dispatcher on the message thread. Worker writes under mutex
