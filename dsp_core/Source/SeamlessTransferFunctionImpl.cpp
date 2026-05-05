@@ -476,14 +476,14 @@ void EventDrivenRenderer::run() {
     }
 }
 
-bool EventDrivenRenderer::renderIfNeeded() {
+void EventDrivenRenderer::renderIfNeeded() {
     // Serialize against forceRender from the message thread. Cheap when
     // uncontended; brief block (one render's worth) when forceRender wins.
     std::lock_guard<std::mutex> lk(renderMutex_);
 
     const uint64_t currentFullVersion = laneMixer.getVersion();
     if (currentFullVersion == lastRenderedFullVersion) {
-        return false; // Nothing changed
+        return; // Nothing changed
     }
 
     const uint64_t currentMixVersion = laneMixer.getMixVersion();
@@ -500,7 +500,7 @@ bool EventDrivenRenderer::renderIfNeeded() {
         if (currentScanPos == lastRenderedScanPosition) {
             lastRenderedFullVersion = currentFullVersion;
             lastRenderedMixVersion = currentMixVersion;
-            return false;
+            return;
         }
     }
 
@@ -508,7 +508,7 @@ bool EventDrivenRenderer::renderIfNeeded() {
     // safety timer) will retry. This mirrors the two-speed worker contract
     // documented on AudioEngine::isCrossfading().
     if (audioEngine.isCrossfading()) {
-        return false;
+        return;
     }
 
     // Skip if the audio thread hasn't consumed our previous render yet
@@ -520,11 +520,10 @@ bool EventDrivenRenderer::renderIfNeeded() {
     // The flag is the producer-consumer signal: worker writes when false,
     // audio consumes by setting it false again after rotation.
     if (audioEngine.getNewLUTReadyFlag().load(std::memory_order_acquire)) {
-        return false;
+        return;
     }
 
     doRender();
-    return true;
 }
 
 void EventDrivenRenderer::doRender() {

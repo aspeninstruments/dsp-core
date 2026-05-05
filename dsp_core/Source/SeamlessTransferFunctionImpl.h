@@ -363,10 +363,9 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
     void run() override;
 
     /** Worker-thread render gate: re-checks version, scan-mode amplitude-skip,
-     *  and isCrossfading() before calling doRender(). Returns true iff a
-     *  render actually executed (so the worker's run() loop only advances
-     *  its rate-gate timestamp on real renders). */
-    bool renderIfNeeded();
+     *  isCrossfading(), and the audio thread's newLUTReady flag before
+     *  calling doRender(). */
+    void renderIfNeeded();
 
     /** The actual O(TABLE_SIZE) compute. Runs on the worker thread (or the
      *  calling thread for forceRender). */
