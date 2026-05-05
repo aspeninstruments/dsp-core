@@ -9,6 +9,19 @@
 namespace dsp_core {
 
 /**
+ * IRenderTrigger - Audio-thread-safe wake interface for the LUT renderer worker.
+ *
+ * requestRender() must not lock, allocate, or hop through the message thread —
+ * it directly signals the worker's WaitableEvent. Coalescing and rate-limiting
+ * are handled inside the implementation. Implemented by EventDrivenRenderer.
+ */
+class IRenderTrigger {
+  public:
+    virtual ~IRenderTrigger() = default;
+    virtual void requestRender() noexcept = 0;
+};
+
+/**
  * SeamlessTransferFunction - Reusable click-free transfer function with event-driven LUT rendering
  *
  * GOAL: Eliminate clicks/pops during ALL transfer function edits while maintaining
@@ -259,11 +272,12 @@ class SeamlessTransferFunction {
 
     /**
      * Get the render trigger for AutomationSlot integration.
-     * Returns the EventDrivenRenderer as an AsyncUpdater* so AutomationSlot
-     * can call triggerAsyncUpdate() from the audio thread.
-     * Returns nullptr if seamless updates haven't been started yet.
+     * Returns the EventDrivenRenderer as an IRenderTrigger* so AutomationSlot
+     * can call requestRender() from the audio thread, bypassing the message
+     * thread for the wake-up. Returns nullptr if seamless updates haven't
+     * been started yet.
      */
-    juce::AsyncUpdater* getRenderTrigger() const;
+    IRenderTrigger* getRenderTrigger() const;
 
   private:
     class Impl;

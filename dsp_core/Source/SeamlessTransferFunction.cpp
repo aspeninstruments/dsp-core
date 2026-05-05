@@ -172,11 +172,14 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     // recomputing, halving the message-thread cost per modulation tick.
     pimpl->visualizerDispatcher->setSourceRenderer(pimpl->eventRenderer.get());
 
-    // Wire the version change callback to trigger both the DSP renderer and
-    // the visualizer dispatcher. Both use AsyncUpdater and are rate-limited.
+    // Wire the version change callback. The DSP renderer is woken DIRECTLY
+    // (no message-thread hop) so editor-closed / App Nap can't stall LUT
+    // updates while modulators are driving fast parameter changes. The
+    // visualizer dispatcher stays on AsyncUpdater — UI work belongs on the
+    // message thread, and it's fine if it freezes while the editor is closed.
     pimpl->laneMixer.setOnVersionChanged([this]() {
         if (pimpl->eventRenderer) {
-            pimpl->eventRenderer->triggerAsyncUpdate();
+            pimpl->eventRenderer->requestRender();
         }
         if (pimpl->visualizerDispatcher) {
             pimpl->visualizerDispatcher->triggerAsyncUpdate();
@@ -255,7 +258,7 @@ void SeamlessTransferFunction::setSelectedVisualizerLane(int laneIndex) {
     }
 }
 
-juce::AsyncUpdater* SeamlessTransferFunction::getRenderTrigger() const {
+IRenderTrigger* SeamlessTransferFunction::getRenderTrigger() const {
     return pimpl->eventRenderer.get();
 }
 

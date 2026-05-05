@@ -423,33 +423,16 @@ void EventDrivenRenderer::forceRender() {
 
 void EventDrivenRenderer::handleAsyncUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-    notifyWithRateLimit();
+    // Message-thread fallback wake — direct callers use requestRender()
+    // instead. The worker owns the 120 Hz rate gate, so over-notifying is
+    // harmless.
+    notify();
 }
 
 void EventDrivenRenderer::timerCallback() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-    notifyWithRateLimit();
-}
-
-void EventDrivenRenderer::notifyWithRateLimit() {
-    // Coarse 120 Hz gate on worker wake-ups. The worker itself decides
-    // whether the laneMixer version has actually changed; this gate just
-    // prevents the message thread from spamming notify() faster than the
-    // worker can reasonably consume. Deferred wake-ups use a one-shot timer
-    // so we don't drop a render in the rate-limit window.
-    const double now = juce::Time::getMillisecondCounterHiRes();
-    const double elapsed = now - lastNotifyTimeMs;
-    if (elapsed < RENDER_MIN_INTERVAL_MS) {
-        const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
-        startTimer(remainingMs);
-        return;
-    }
-    lastNotifyTimeMs = now;
-
-    notify(); // wake worker; worker decides whether actual render is needed
-
-    // Restore safety timer (replaces any pending one-shot deferral above).
-    startTimerHz(SAFETY_TIMER_HZ);
+    // 5 Hz safety net for any wake that didn't take the direct path.
+    notify();
 }
 
 void EventDrivenRenderer::run() {
@@ -461,7 +444,22 @@ void EventDrivenRenderer::run() {
         if (threadShouldExit()) {
             break;
         }
+
+        // 120 Hz gate: if we rendered very recently, sleep out the remainder
+        // of the window. Any notify() during this wait re-sets the
+        // WaitableEvent flag; the next wait(-1) consumes it on the next
+        // iteration so no wake is dropped. wait() returns early on notify.
+        const double elapsed = juce::Time::getMillisecondCounterHiRes() - lastRenderTimeMs_;
+        if (elapsed < RENDER_MIN_INTERVAL_MS) {
+            const int remainingMs = static_cast<int>(RENDER_MIN_INTERVAL_MS - elapsed) + 1;
+            wait(remainingMs);
+            if (threadShouldExit()) {
+                break;
+            }
+        }
+
         renderIfNeeded();
+        lastRenderTimeMs_ = juce::Time::getMillisecondCounterHiRes();
     }
 }
 

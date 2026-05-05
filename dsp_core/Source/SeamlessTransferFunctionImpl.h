@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LaneMixer.h"
+#include "SeamlessTransferFunction.h"
 #include "audio_pipeline/SoftClippingStage.h"
 #include <array>
 #include <atomic>
@@ -288,21 +289,27 @@ class AudioEngine {
  *
  * Architecture:
  *   - A high-priority worker thread (juce::Thread::Priority::high) owns the
- *     actual O(TABLE_SIZE) lane-mix compute. The message thread only rate-
- *     limits incoming triggers and notify()s the worker.
- *   - Rate-limits worker wake-ups to 120 Hz (curve content and amplitude/mix
- *     changes alike). The 5 ms LUT crossfade smooths the resulting parameter
- *     steps. Audio-rate modulation via the LUT path is intentionally not
- *     supported in exchange for predictable CPU on slow hardware.
+ *     actual O(TABLE_SIZE) lane-mix compute and the 120 Hz rate gate.
+ *   - Audio-thread / version-changed callers wake the worker DIRECTLY via
+ *     requestRender() → juce::Thread::notify() (a WaitableEvent::signal).
+ *     The message thread is not involved in the wake-up path, so editor
+ *     close / App Nap / host main-loop throttling cannot stall renders
+ *     while modulators are driving fast parameter changes.
+ *   - The 5 ms LUT crossfade smooths the resulting parameter steps. Audio-
+ *     rate modulation via the LUT path is intentionally not supported in
+ *     exchange for predictable CPU on slow hardware.
  *   - Writes directly to the audio engine's triple-buffered LUT.
- *   - Falls back to a 5 Hz safety timer as a guaranteed delivery net.
+ *   - AsyncUpdater + 5 Hz Timer are retained as message-thread fallbacks
+ *     (e.g. UI-side mutations); both forward to notify() and no longer hold
+ *     rate-limit state.
  *
  * THREADING:
- *   - triggerAsyncUpdate() called from any thread (message or audio via AutomationSlot)
- *   - handleAsyncUpdate() runs on message thread: rate-gate + notify() worker
- *   - timerCallback() runs on message thread (JUCE Timer contract)
- *   - run() is the worker thread loop; renderIfNeeded() / doRender() run on it
- *   - forceRender() runs synchronously on the calling thread (init + tests only)
+ *   - requestRender() callable from any thread; just signals the worker.
+ *   - handleAsyncUpdate() runs on message thread; calls notify().
+ *   - timerCallback() runs on message thread (5 Hz safety net); calls notify().
+ *   - run() is the worker thread loop. It applies the 120 Hz gate via
+ *     wait(remainingMs) before calling renderIfNeeded() / doRender().
+ *   - forceRender() runs synchronously on the calling thread (init + tests only).
  *   - Triple-buffer atomics in AudioEngine handle worker→audio handoff safely.
  *   - lastRenderedSum_ is shared between worker (writer) and message thread
  *     (visualizer dispatcher reader); both sides take lastRenderedSumMutex_.
@@ -314,18 +321,26 @@ class AudioEngine {
  */
 class EventDrivenRenderer : public juce::AsyncUpdater,
                             public juce::Timer,
+                            public IRenderTrigger,
                             private juce::Thread {
   public:
     EventDrivenRenderer(LaneMixer& mixer, AudioEngine& engine);
     ~EventDrivenRenderer() override;
+
+    /** Audio-thread-safe direct wake. Signals the worker's WaitableEvent —
+     *  no message-thread hop, no locks, no allocations. The worker owns the
+     *  120 Hz rate gate, so over-notifying is harmless. */
+    void requestRender() noexcept override {
+        notify();
+    }
 
     /** Force synchronous render on the calling thread. Init/test only — must
      *  not be called concurrently with the worker (typically called before
      *  audio starts or after stopThread). */
     void forceRender();
 
-    /** AsyncUpdater callback — runs on the message thread. Rate-gates and
-     *  notify()s the worker; never does the heavy compute itself. */
+    /** AsyncUpdater callback — runs on the message thread. Forwards to
+     *  notify() as a fallback wake path; the worker owns the rate gate. */
     void handleAsyncUpdate() override;
 
     /** Safety timer callback (5 Hz fallback) — runs on the message thread. */
@@ -355,10 +370,6 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
      *  calling thread for forceRender). */
     void doRender();
 
-    /** Shared rate-limit + notify path used by handleAsyncUpdate and
-     *  timerCallback. Message thread only. */
-    void notifyWithRateLimit();
-
     LaneMixer& laneMixer;
     AudioEngine& audioEngine;
     juce::AsyncUpdater* visualizerDispatcher_ = nullptr;
@@ -379,9 +390,10 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
     uint64_t lastRenderedMixVersion{0};
     double lastRenderedScanPosition{0.0};
 
-    // Message-thread-local state — read/written only by handleAsyncUpdate /
-    // timerCallback / notifyWithRateLimit.
-    double lastNotifyTimeMs{0.0};
+    // Worker-thread-local state — read/written only inside run(). Tracks
+    // when the most recent render completed so the worker can self-throttle
+    // to RENDER_MIN_INTERVAL_MS without involving the message thread.
+    double lastRenderTimeMs_{0.0};
 
     // Cross-thread snapshot of the most recent render output, read by the
     // visualizer dispatcher on the message thread. Worker writes under mutex
