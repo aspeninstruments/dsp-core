@@ -682,7 +682,50 @@ void VisualizerUpdateDispatcher::forceUpdate() {
     lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
 }
 
+#ifndef BDD_PROFILE_DISPATCHER
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) - used via #if for profiling toggle.
+#define BDD_PROFILE_DISPATCHER 1
+#endif
+
+#if BDD_PROFILE_DISPATCHER
+namespace {
+// Aggregated dispatcher tick stats. Function-local static singleton — every
+// VisualizerUpdateDispatcher::runUpdate() across all plugin instances on the
+// same message thread feeds into this. Reports avg/max per-tick cost plus
+// the message-thread RTF (sum of tick time / wallclock window) every 60
+// ticks (~1s at 60Hz dispatcher firing).
+struct DispatcherTickStats {
+    double sumMs = 0.0;
+    double maxMs = 0.0;
+    int count = 0;
+    double windowStartMs = 0.0;
+    void add(double ms) {
+        if (count == 0) {
+            windowStartMs = juce::Time::getMillisecondCounterHiRes();
+        }
+        sumMs += ms;
+        maxMs = std::max(maxMs, ms);
+        if (++count >= 60) {
+            const double windowMs = juce::Time::getMillisecondCounterHiRes() - windowStartMs;
+            const double rtf = (windowMs > 0.0) ? sumMs / windowMs : 0.0;
+            DBG("VisualizerUpdateDispatcher::runUpdate  avg=" + juce::String(sumMs / count, 3)
+                + "ms  max=" + juce::String(maxMs, 3) + "ms  n=" + juce::String(count)
+                + "  window=" + juce::String(windowMs, 0) + "ms"
+                + "  rtf=" + juce::String(rtf, 4));
+            sumMs = 0.0;
+            maxMs = 0.0;
+            count = 0;
+        }
+    }
+};
+} // namespace
+#endif
+
 void VisualizerUpdateDispatcher::runUpdate() {
+#if BDD_PROFILE_DISPATCHER
+    static DispatcherTickStats s_tickStats;
+    const double tickT0 = juce::Time::getMillisecondCounterHiRes();
+#endif
     // Pull-source publication: snapshot the renderer's 16k LUT directly into
     // the dispatcher's own buffer, then release-store the bumped version
     // atomic. Visualizers in LUT-source mode acquire-load the version and
@@ -727,6 +770,10 @@ void VisualizerUpdateDispatcher::runUpdate() {
     if (onVisualizerUpdate) {
         onVisualizerUpdate();
     }
+
+#if BDD_PROFILE_DISPATCHER
+    s_tickStats.add(juce::Time::getMillisecondCounterHiRes() - tickT0);
+#endif
 }
 
 } // namespace dsp_core
