@@ -28,7 +28,6 @@ struct SeamlessConfig {
     static constexpr double MAX_VALUE = 1.0;
     static constexpr double CROSSFADE_DURATION_MS = 5.0;
     static constexpr int DSP_TIMER_HZ = 20;
-    static constexpr int VISUALIZER_TIMER_HZ = 120;
 };
 
 // Cross-class invariant: every TABLE_SIZE definition in the codebase must match.
@@ -435,7 +434,10 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     explicit VisualizerUpdateDispatcher(LaneMixer& mixer);
     ~VisualizerUpdateDispatcher() override;
 
-    void setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, std::function<void()> callback);
+    /** Set the message-thread callback fired after each runUpdate(). The
+     *  visualizer reads its 16k pull-source directly via the accessors above
+     *  — no separate downsample target is needed. */
+    void setVisualizerCallback(std::function<void()> callback);
 
     void setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr, int* selectedLanePtr);
 
@@ -449,24 +451,49 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     /** Force synchronous update (for initialization). */
     void forceUpdate();
 
+    /** Publish a 16k buffer directly into the pull-source slot and bump the
+     *  version atomic. Used by the synchronous fallback path
+     *  (SeamlessTransferFunction::renderLUTImmediate) which has the data in
+     *  hand and shouldn't have to round-trip through the renderer's worker. */
+    void publishSource(const std::array<double, LaneMixer::TABLE_SIZE>& buffer);
+
     /** AsyncUpdater callback — dispatched on message thread. */
     void handleAsyncUpdate() override;
 
     /** Safety-timer fallback callback (catches edges missed by the event path). */
     void timerCallback() override;
 
+    /** Pull-source accessors. The dispatcher snapshots the renderer's 16k LUT
+     *  into sourceBuffer_ each tick, then bumps sourceVersion_ with release-
+     *  ordering. Visualizers in LUT-source mode hold these pointers and read
+     *  at paint time, gated by the version. The dispatcher and visualizer
+     *  both run on the message thread, so the atomic is over-strict in
+     *  practice but documents the publication contract.
+     *
+     *  Lifetime: the dispatcher is a member of SeamlessTransferFunction (a
+     *  value member of PluginAudioProcessor); the visualizer is editor-owned
+     *  and always destroyed before the processor by JUCE invariant. */
+    const double* getSourcePointer() const noexcept { return sourceBuffer_.data(); }
+    const std::atomic<uint64_t>* getSourceVersionPtr() const noexcept { return &sourceVersion_; }
+    static int getSourceSize() noexcept { return LaneMixer::TABLE_SIZE; }
+
   private:
     void runUpdate();
 
     LaneMixer& laneMixer;
     EventDrivenRenderer* sourceRenderer_{nullptr};
-    std::array<double, VISUALIZER_LUT_SIZE>* visualizerLUTPtr{nullptr};
     std::function<void()> onVisualizerUpdate;
     uint64_t lastSeenVersion{0};
 
     std::array<double, VISUALIZER_LUT_SIZE>* laneLUTPtr_{nullptr};
     int* selectedLanePtr_{nullptr};
     int lastSeenSelectedLane{-1};
+
+    // Pull-source state — 16k snapshot the visualizer reads at paint time.
+    // sourceVersion_ is release-stored after sourceBuffer_ is fully written;
+    // the visualizer acquire-loads it and rebuilds its path only on change.
+    std::array<double, LaneMixer::TABLE_SIZE> sourceBuffer_{};
+    std::atomic<uint64_t> sourceVersion_{0};
 
     double lastUpdateTimeMs{0.0};
 

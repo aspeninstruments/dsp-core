@@ -3,6 +3,8 @@
 #include "LaneMixer.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -221,19 +223,6 @@ class SeamlessTransferFunction {
     void renderLUTImmediate();
 
     /**
-     * Get visualizer LUT (message thread only)
-     *
-     * Returns the latest rendered LUT (target curve that audio is crossfading toward
-     * or has reached). This may be ahead of what's currently playing if a crossfade
-     * is still in progress.
-     *
-     * SIZE: VISUALIZER_LUT_SIZE (2048 samples) - optimized for UI rendering
-     *
-     * @return Const reference to visualizer LUT buffer (2048 samples)
-     */
-    const std::array<double, VISUALIZER_LUT_SIZE>& getVisualizerLUT() const;
-
-    /**
      * Set visualizer callback (message thread only)
      *
      * Called after LUT render completes (via MessageManager::callAsync).
@@ -242,6 +231,28 @@ class SeamlessTransferFunction {
      * @param callback Callback function for visualizer repaint
      */
     void setVisualizerCallback(std::function<void()> callback);
+
+    /**
+     * Pull-source accessors for the editor's WaveformVisualizer.
+     *
+     * The dispatcher snapshots the renderer's 16k LUT into its own buffer on
+     * each tick and bumps the version atomic. The visualizer holds these
+     * pointers (via WaveformVisualizer::setLUTSource) and rebuilds its trace
+     * path at paint time only when the version changes — eliminating the
+     * dispatcher's 16k → 1k downsample, the per-tick vector copy, and the
+     * unconditional path rebuild on every paint.
+     *
+     * Lifetime: this object is a value member of PluginAudioProcessor; the
+     * editor (and its visualizer) is destroyed before the processor by JUCE
+     * invariant, so the visualizer's cached pointers remain valid for its
+     * entire lifetime.
+     *
+     * Returns nullptr if the dispatcher hasn't been started yet
+     * (startSeamlessUpdates() not called).
+     */
+    [[nodiscard]] const double* getVisualizerSourcePointer() const;
+    [[nodiscard]] const std::atomic<uint64_t>* getVisualizerSourceVersionPtr() const;
+    [[nodiscard]] int getVisualizerSourceSize() const;
 
     /**
      * Synchronously recompute the visualizer LUT from current mixer state and

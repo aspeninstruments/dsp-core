@@ -614,10 +614,13 @@ VisualizerUpdateDispatcher::~VisualizerUpdateDispatcher() {
     stopTimer();
 }
 
-void VisualizerUpdateDispatcher::setVisualizerTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
-                                                     std::function<void()> callback) {
-    visualizerLUTPtr = lutPtr;
+void VisualizerUpdateDispatcher::setVisualizerCallback(std::function<void()> callback) {
     onVisualizerUpdate = std::move(callback);
+}
+
+void VisualizerUpdateDispatcher::publishSource(const std::array<double, LaneMixer::TABLE_SIZE>& buffer) {
+    sourceBuffer_ = buffer;
+    sourceVersion_.fetch_add(1, std::memory_order_release);
 }
 
 void VisualizerUpdateDispatcher::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
@@ -680,40 +683,29 @@ void VisualizerUpdateDispatcher::forceUpdate() {
 }
 
 void VisualizerUpdateDispatcher::runUpdate() {
-    if (visualizerLUTPtr != nullptr) {
-        // Prefer the renderer's cached buffer to avoid a redundant 16k
-        // LaneMixer recompute. The renderer's worker thread writes to that
-        // buffer under a mutex; copyLastRenderedSum copies it under the
-        // same mutex so we can downsample without holding the lock during
-        // the loop. Fallback handles the (rare) case where the dispatcher
-        // is triggered without a prior render — e.g., before init completes.
-        std::array<double, LaneMixer::TABLE_SIZE> sumSnapshot{};
-        bool haveSnapshot =
-            (sourceRenderer_ != nullptr) ? sourceRenderer_->copyLastRenderedSum(sumSnapshot) : false;
-
-        if (!haveSnapshot) {
-            const auto mode = laneMixer.getMixerMode();
-            if (mode == LaneMixer::MixerMode::Scan) {
-                laneMixer.computeScan(sumSnapshot.data(), LaneMixer::TABLE_SIZE);
-            } else if (mode == LaneMixer::MixerMode::Series) {
-                laneMixer.computeSeries(sumSnapshot.data(), LaneMixer::TABLE_SIZE);
-            } else {
-                laneMixer.computeSum(sumSnapshot.data(), LaneMixer::TABLE_SIZE);
-            }
-        }
-
-        // Downsample from TABLE_SIZE (16384) to VISUALIZER_LUT_SIZE (1024)
-        const auto& sum = sumSnapshot;
-        for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-            const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
-            const double srcIdx = frac * (LaneMixer::TABLE_SIZE - 1);
-            const int idx = static_cast<int>(srcIdx);
-            const int nextIdx = std::min(idx + 1, LaneMixer::TABLE_SIZE - 1);
-            const double t = srcIdx - idx;
-            (*visualizerLUTPtr)[static_cast<size_t>(i)] =
-                sum[static_cast<size_t>(idx)] * (1.0 - t) + sum[static_cast<size_t>(nextIdx)] * t;
+    // Pull-source publication: snapshot the renderer's 16k LUT directly into
+    // the dispatcher's own buffer, then release-store the bumped version
+    // atomic. Visualizers in LUT-source mode acquire-load the version and
+    // rebuild their path only when it differs from their cached value. Both
+    // ends run on the message thread so the atomic is over-strict in
+    // practice, but it documents the publication contract.
+    //
+    // Falls back to a direct LaneMixer recompute on the rare path where the
+    // dispatcher fires before the renderer has produced anything (e.g. early
+    // in init).
+    bool haveSnapshot =
+        (sourceRenderer_ != nullptr) ? sourceRenderer_->copyLastRenderedSum(sourceBuffer_) : false;
+    if (!haveSnapshot) {
+        const auto mode = laneMixer.getMixerMode();
+        if (mode == LaneMixer::MixerMode::Scan) {
+            laneMixer.computeScan(sourceBuffer_.data(), LaneMixer::TABLE_SIZE);
+        } else if (mode == LaneMixer::MixerMode::Series) {
+            laneMixer.computeSeries(sourceBuffer_.data(), LaneMixer::TABLE_SIZE);
+        } else {
+            laneMixer.computeSum(sourceBuffer_.data(), LaneMixer::TABLE_SIZE);
         }
     }
+    sourceVersion_.fetch_add(1, std::memory_order_release);
 
     // Compute selected lane's raw curve for secondary visualizer overlay
     if (laneLUTPtr_ != nullptr && selectedLanePtr_ != nullptr) {

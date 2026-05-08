@@ -35,12 +35,6 @@ class SeamlessTransferFunction::Impl {
         // laneMixer initialized to defaults (H1=1.0 → y=x)
         // audioEngine initialized to identity LUTs (in AudioEngine constructor)
         // eventRenderer and timers are null (created in startSeamlessUpdates)
-
-        // Initialize visualizer LUT to identity (1024 samples)
-        for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-            const double x = MIN_VALUE + (i / static_cast<double>(VISUALIZER_LUT_SIZE - 1)) * (MAX_VALUE - MIN_VALUE);
-            visualizerLUT[i] = x;
-        }
     }
 
     // Lane mixer (message thread only — render pipeline reads from here)
@@ -55,8 +49,10 @@ class SeamlessTransferFunction::Impl {
     // Visualizer dispatcher (event-driven, 60Hz rate-limited — independent of DSP rendering)
     std::unique_ptr<VisualizerUpdateDispatcher> visualizerDispatcher;
 
-    // Visualizer state (message thread only)
-    std::array<double, VISUALIZER_LUT_SIZE> visualizerLUT{};
+    // Visualizer state (message thread only). The 16k pull-source buffer the
+    // editor's WaveformVisualizer reads from lives in visualizerDispatcher;
+    // this object only holds the callback fired after each dispatcher tick
+    // and the secondary lane LUT for the lane-overlay trace.
     std::function<void()> visualizerCallback;
 
     // Lane LUT for secondary visualizer overlay (selected lane's raw curve)
@@ -161,7 +157,7 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
 
     // Create visualizer dispatcher so the version-changed callback can wake it
     pimpl->visualizerDispatcher = std::make_unique<VisualizerUpdateDispatcher>(pimpl->laneMixer);
-    pimpl->visualizerDispatcher->setVisualizerTarget(&pimpl->visualizerLUT, pimpl->visualizerCallback);
+    pimpl->visualizerDispatcher->setVisualizerCallback(pimpl->visualizerCallback);
     pimpl->visualizerDispatcher->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
 
     // Let the renderer notify the visualizer after each doRender(), so
@@ -218,17 +214,13 @@ void SeamlessTransferFunction::stopSeamlessUpdates() {
     }
 }
 
-const std::array<double, VISUALIZER_LUT_SIZE>& SeamlessTransferFunction::getVisualizerLUT() const {
-    return pimpl->visualizerLUT;
-}
-
 void SeamlessTransferFunction::setVisualizerCallback(std::function<void()> callback) {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     pimpl->visualizerCallback = callback;
 
     // Route callback to visualizer dispatcher if it exists
     if (pimpl->visualizerDispatcher) {
-        pimpl->visualizerDispatcher->setVisualizerTarget(&pimpl->visualizerLUT, std::move(callback));
+        pimpl->visualizerDispatcher->setVisualizerCallback(std::move(callback));
         pimpl->visualizerDispatcher->setLaneLUTTarget(&pimpl->laneLUT, &pimpl->selectedVisualizerLane);
     }
 }
@@ -238,6 +230,18 @@ void SeamlessTransferFunction::forceVisualizerUpdate() {
     if (pimpl->visualizerDispatcher) {
         pimpl->visualizerDispatcher->forceUpdate();
     }
+}
+
+const double* SeamlessTransferFunction::getVisualizerSourcePointer() const {
+    return pimpl->visualizerDispatcher ? pimpl->visualizerDispatcher->getSourcePointer() : nullptr;
+}
+
+const std::atomic<uint64_t>* SeamlessTransferFunction::getVisualizerSourceVersionPtr() const {
+    return pimpl->visualizerDispatcher ? pimpl->visualizerDispatcher->getSourceVersionPtr() : nullptr;
+}
+
+int SeamlessTransferFunction::getVisualizerSourceSize() const {
+    return pimpl->visualizerDispatcher ? VisualizerUpdateDispatcher::getSourceSize() : 0;
 }
 
 const std::array<double, VISUALIZER_LUT_SIZE>& SeamlessTransferFunction::getLaneLUT() const {
@@ -307,16 +311,13 @@ void SeamlessTransferFunction::renderLUTImmediate() {
     // Signal audio thread that new LUT is ready (using release to ensure LUT writes are visible)
     pimpl->audioEngine.getNewLUTReadyFlag().store(true, std::memory_order_release);
 
-    // Also update the visualizer LUT to match (so UI is consistent)
-    // Downsample from TABLE_SIZE to VISUALIZER_LUT_SIZE
-    for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {
-        const double frac = i / static_cast<double>(VISUALIZER_LUT_SIZE - 1);
-        const double srcIdx = frac * (TABLE_SIZE - 1);
-        const int idx = static_cast<int>(srcIdx);
-        const int nextIdx = std::min(idx + 1, TABLE_SIZE - 1);
-        const double t = srcIdx - idx;
-        pimpl->visualizerLUT[static_cast<size_t>(i)] =
-            sumBuffer[static_cast<size_t>(idx)] * (1.0 - t) + sumBuffer[static_cast<size_t>(nextIdx)] * t;
+    // Also publish to the dispatcher's pull-source so the editor's
+    // WaveformVisualizer sees the synchronously-rendered curve on its next
+    // paint. The async dispatcher path normally pulls from
+    // EventDrivenRenderer::lastRenderedSum_, which this code path bypasses,
+    // so we have to publish directly.
+    if (pimpl->visualizerDispatcher) {
+        pimpl->visualizerDispatcher->publishSource(sumBuffer);
     }
 
     // Also update the lane LUT if a lane is selected
