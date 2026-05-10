@@ -1,7 +1,8 @@
 #include <dsp_core/dsp_core.h>
 #include <gtest/gtest.h>
-#include <thread>
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace dsp_core_test {
 
