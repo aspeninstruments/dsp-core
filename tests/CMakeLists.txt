@@ -9,6 +9,13 @@ enable_testing()
 # runs. Apply at directory scope so every test executable below picks it up.
 add_compile_definitions(_USE_MATH_DEFINES)
 
+# JUCE's juce_gui_extra.cpp includes <gtk/gtk.h> on Linux only when
+# JUCE_WEB_BROWSER is enabled (default). dsp-core tests don't need WebKit,
+# but they transitively compile juce_gui_extra via juce_audio_processors.
+# Mirror what ui-core/tfe tests already set per-target so the GTK include
+# is compiled out and Linux CI doesn't need libgtk-3-dev.
+add_compile_definitions(JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+
 # Create test executable
 add_executable(layered_transfer_function_tests
     LayeredTransferFunctionTest.cpp
