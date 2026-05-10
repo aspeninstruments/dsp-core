@@ -3,6 +3,12 @@
 # Enable testing
 enable_testing()
 
+# MSVC's <cmath> only exposes M_PI / M_E / etc. when _USE_MATH_DEFINES is
+# defined before <cmath>/<math.h> is included. libc++ (macOS) and libstdc++
+# (Linux) expose them unconditionally, which masks the gap until Windows CI
+# runs. Apply at directory scope so every test executable below picks it up.
+add_compile_definitions(_USE_MATH_DEFINES)
+
 # Create test executable
 add_executable(layered_transfer_function_tests
     LayeredTransferFunctionTest.cpp

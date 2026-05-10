@@ -1,5 +1,6 @@
 #include <dsp_core/dsp_core.h>
 #include <gtest/gtest.h>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <iomanip>

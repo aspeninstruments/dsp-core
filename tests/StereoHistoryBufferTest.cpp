@@ -2,6 +2,7 @@
 #include "../dsp_core/Source/StereoHistoryBuffer.h"
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <thread>
 #include <vector>
