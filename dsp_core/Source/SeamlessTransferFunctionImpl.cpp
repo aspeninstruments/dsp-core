@@ -621,6 +621,20 @@ void VisualizerUpdateDispatcher::setVisualizerCallback(std::function<void()> cal
 void VisualizerUpdateDispatcher::publishSource(const std::array<double, LaneMixer::TABLE_SIZE>& buffer) {
     sourceBuffer_ = buffer;
     sourceVersion_.fetch_add(1, std::memory_order_release);
+
+    // Suppress any pending async/timer tick that was queued by an earlier mixer
+    // mutation. Without this, runUpdate() would fire after this publish and pull
+    // from sourceRenderer_->copyLastRenderedSum — but the EventDrivenRenderer's
+    // lastRenderedSum is updated asynchronously too, so it may still hold the
+    // PREVIOUS curve. The dispatcher would then overwrite our freshly published
+    // buffer with stale data and bump the version again, causing the visualizer
+    // to render the previous preset's curve until something (a knob move) kicks
+    // another render cycle. Set lastSeenVersion/lastUpdateTimeMs so the safety
+    // timer's no-change check trips too.
+    lastSeenVersion = laneMixer.getVersion();
+    lastSeenSelectedLane = (selectedLanePtr_ != nullptr) ? *selectedLanePtr_ : -1;
+    lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
+    cancelPendingUpdate();
 }
 
 void VisualizerUpdateDispatcher::setLaneLUTTarget(std::array<double, VISUALIZER_LUT_SIZE>* lutPtr,
