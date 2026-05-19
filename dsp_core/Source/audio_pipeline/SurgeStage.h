@@ -23,7 +23,8 @@ namespace dsp_core::audio_pipeline {
  * varying H for a downstream Jiles-Atherton hysteresis stage, which is the
  * whole reason for making surge a standalone upstream stage.
  *
- * Pipeline position: immediately before the LUT/Hysteresis consumer.
+ * Pipeline position: immediately before the bias stage and downstream
+ * LUT/Hysteresis consumer.
  *
  * Thread Safety:
  *   - enabled_: atomic (UI writes, audio reads)

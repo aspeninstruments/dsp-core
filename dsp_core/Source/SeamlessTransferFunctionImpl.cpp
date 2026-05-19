@@ -494,20 +494,25 @@ void EventDrivenRenderer::renderIfNeeded() {
 
     // In scan mode, amplitude changes don't affect the output (computeScan
     // ignores amplitudes). Skip the render to avoid unnecessary crossfade
-    // artifacts from stale buffer data.
+    // artifacts from stale buffer data. Still refresh the visualizer
+    // snapshot so the UI reflects amplitude edits even though audio doesn't.
     if (!curveChanged && laneMixer.getMixerMode() == LaneMixer::MixerMode::Scan) {
         const double currentScanPos = laneMixer.getScanPosition();
         if (currentScanPos == lastRenderedScanPosition) {
             lastRenderedFullVersion = currentFullVersion;
             lastRenderedMixVersion = currentMixVersion;
+            refreshVisualizerSnapshot();
             return;
         }
     }
 
     // Skip if the audio engine is mid-crossfade — the next notify (or the 5 Hz
     // safety timer) will retry. This mirrors the two-speed worker contract
-    // documented on AudioEngine::isCrossfading().
+    // documented on AudioEngine::isCrossfading(). Visualizer snapshot is
+    // refreshed so the curve display follows the user's edits even during
+    // a crossfade window.
     if (audioEngine.isCrossfading()) {
+        refreshVisualizerSnapshot();
         return;
     }
 
@@ -519,7 +524,13 @@ void EventDrivenRenderer::renderIfNeeded() {
     // audio blocks are delayed by CPU pressure (slow laptop) or jitter.
     // The flag is the producer-consumer signal: worker writes when false,
     // audio consumes by setting it false again after rotation.
+    //
+    // The audio LUT buffer is off-limits here, but lastRenderedSum_ lives
+    // in its own buffer with its own mutex — refresh it so the visualizer
+    // keeps tracking edits when audio is paused/stopped or the host isn't
+    // pumping blocks.
     if (audioEngine.getNewLUTReadyFlag().load(std::memory_order_acquire)) {
+        refreshVisualizerSnapshot();
         return;
     }
 
@@ -584,6 +595,7 @@ void EventDrivenRenderer::doRender() {
     lastRenderedFullVersion = laneMixer.getVersion();
     lastRenderedMixVersion = laneMixer.getMixVersion();
     lastRenderedScanPosition = laneMixer.getScanPosition();
+    lastVisualizerSnapshotVersion_ = lastRenderedFullVersion;
 
     // Notify visualizer dispatcher so automation-driven amplitude changes
     // (which bypass onVersionChanged) still update the UI promptly.
@@ -600,6 +612,40 @@ bool EventDrivenRenderer::copyLastRenderedSum(std::array<double, TABLE_SIZE>& de
     }
     dest = lastRenderedSum_;
     return true;
+}
+
+void EventDrivenRenderer::refreshVisualizerSnapshot() {
+    // Caller (renderIfNeeded) already holds renderMutex_; do not re-lock.
+    const uint64_t currentVersion = laneMixer.getVersion();
+    if (currentVersion == lastVisualizerSnapshotVersion_) {
+        return; // snapshot already current
+    }
+
+    // Compute into a local first so the dispatcher mutex is held only for the
+    // copy, not the full O(TABLE_SIZE) compute.
+    std::array<double, TABLE_SIZE> tmp{};
+    const auto mode = laneMixer.getMixerMode();
+    if (mode == LaneMixer::MixerMode::Scan) {
+        laneMixer.computeScan(tmp.data(), TABLE_SIZE);
+    } else if (mode == LaneMixer::MixerMode::Series) {
+        laneMixer.computeSeries(tmp.data(), TABLE_SIZE);
+    } else {
+        laneMixer.computeSum(tmp.data(), TABLE_SIZE);
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(lastRenderedSumMutex_);
+        std::copy(tmp.begin(), tmp.end(), lastRenderedSum_.begin());
+        hasLastRenderedSum_ = true;
+    }
+    lastVisualizerSnapshotVersion_ = currentVersion;
+
+    // Wake the dispatcher so the visualizer repaints with fresh data.
+    // triggerAsyncUpdate is cross-thread-safe by JUCE contract (same as the
+    // notify at the end of doRender).
+    if (visualizerDispatcher_ != nullptr) {
+        visualizerDispatcher_->triggerAsyncUpdate();
+    }
 }
 
 // VisualizerUpdateDispatcher Implementation (event-driven, 60Hz rate-limited)

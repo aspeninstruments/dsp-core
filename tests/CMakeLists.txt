@@ -974,6 +974,31 @@ endif()
 
 add_test(NAME SurgeStageTests COMMAND surge_stage_tests)
 
+# BiasStage tests
+add_executable(bias_stage_tests
+    BiasStageTest.cpp
+)
+
+target_include_directories(bias_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(bias_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(bias_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(bias_stage_tests)
+endif()
+
+add_test(NAME BiasStageTests COMMAND bias_stage_tests)
+
 # EnvelopeFollowerStage tests
 add_executable(envelope_follower_stage_tests
     EnvelopeFollowerStageTest.cpp

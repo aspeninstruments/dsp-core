@@ -370,6 +370,12 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
      *  calling thread for forceRender). */
     void doRender();
 
+    /** Refresh lastRenderedSum_ without touching the audio LUT buffers.
+     *  Used when renderIfNeeded() is gated by newLUTReady (audio paused or
+     *  host not pumping blocks) so the visualizer still tracks edits.
+     *  Notifies the dispatcher when it actually updates the snapshot. */
+    void refreshVisualizerSnapshot();
+
     LaneMixer& laneMixer;
     AudioEngine& audioEngine;
     juce::AsyncUpdater* visualizerDispatcher_ = nullptr;
@@ -389,6 +395,12 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
     uint64_t lastRenderedFullVersion{0};
     uint64_t lastRenderedMixVersion{0};
     double lastRenderedScanPosition{0.0};
+
+    // LaneMixer version reflected in lastRenderedSum_. Bumped by doRender()
+    // and refreshVisualizerSnapshot(); used to skip redundant visualizer-only
+    // recomputes when the worker wakes repeatedly without a real change
+    // (e.g. 5 Hz safety timer ticks).
+    uint64_t lastVisualizerSnapshotVersion_{0};
 
     // Worker-thread-local state — read/written only inside run(). The next
     // wall-clock millisecond at which the worker is allowed to start the
