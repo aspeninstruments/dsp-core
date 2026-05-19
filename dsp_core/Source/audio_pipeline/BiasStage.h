@@ -2,6 +2,7 @@
 
 #include "AudioProcessingStage.h"
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <atomic>
 
 namespace dsp_core::audio_pipeline {
@@ -9,8 +10,8 @@ namespace dsp_core::audio_pipeline {
 /**
  * Constant DC-offset stage that pushes the signal into one rail of the
  * downstream transfer function (asymmetric drive). Bias ∈ [-1, 1] is added
- * to every sample. State-free: no per-channel memory, no sample-rate
- * dependence.
+ * to every sample, ramped over ~10 ms to eliminate audible clicks on
+ * parameter changes or fast automation.
  *
  * Pipeline position: between Surge and the LUT/Hysteresis consumer. The
  * downstream DC blocking filter cancels the resulting DC at the output, so
@@ -20,8 +21,9 @@ namespace dsp_core::audio_pipeline {
  *
  * Thread Safety:
  *   - enabled_, bias_: atomic (UI writes, audio reads)
+ *   - smoothedBias_: audio thread only (target pulled from bias_ each block)
  *   - process: audio thread only
- *   - prepareToPlay / reset: UI thread only (no-ops here)
+ *   - prepareToPlay / reset: UI thread only
  */
 class BiasStage : public AudioProcessingStage {
   public:
@@ -53,6 +55,7 @@ class BiasStage : public AudioProcessingStage {
   private:
     std::atomic<bool> enabled_{false};
     std::atomic<double> bias_{0.0};
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothedBias_{0.0};
 };
 
 } // namespace dsp_core::audio_pipeline
