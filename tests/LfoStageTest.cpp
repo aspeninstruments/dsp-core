@@ -2,6 +2,7 @@
 #include <dsp_core/dsp_core.h>
 #include <atomic>
 #include <cmath>
+#include <vector>
 
 using namespace dsp_core::audio_pipeline;
 
@@ -143,6 +144,54 @@ TEST_F(LfoStageTest, OffShapePublishesZero) {
         stage_->process(buf);
         EXPECT_DOUBLE_EQ(value_.load(), 0.0);
     }
+}
+
+TEST_F(LfoStageTest, RandomShapeIsUnipolarInRange) {
+    stage_->setShape(LfoStage::Shape::Random);
+    stage_->setUnits(LfoStage::Units::Hz);
+    stage_->setRateHz(3.0);
+
+    for (int i = 0; i < 400; ++i) {
+        auto buf = makeBuffer(1, kBlockSize);
+        stage_->process(buf);
+        const double v = value_.load();
+        EXPECT_GE(v, 0.0);
+        EXPECT_LE(v, 1.0);
+    }
+}
+
+TEST_F(LfoStageTest, RandomShapeDoesNotRepeatEachCycle) {
+    stage_->setShape(LfoStage::Shape::Random);
+    stage_->setUnits(LfoStage::Units::Hz);
+    // 9.375 Hz @ 48 kHz / 512-sample blocks = exactly 10 blocks per cycle, so a
+    // recorded block sits at the same intra-cycle phase one cycle apart.
+    stage_->setRateHz(9.375);
+
+    constexpr int kBlocksPerCycle = 10;
+    auto recordCycle = [&]() {
+        std::vector<double> values;
+        for (int i = 0; i < kBlocksPerCycle; ++i) {
+            auto buf = makeBuffer(1, kBlockSize);
+            stage_->process(buf);
+            values.push_back(value_.load());
+        }
+        return values;
+    };
+
+    const auto cycle1 = recordCycle();
+    const auto cycle2 = recordCycle();
+
+    // Same intra-cycle phase, different cycle: a genuinely random LFO must
+    // produce a different waveform. The old phase-indexed Perlin sampling
+    // retraced an identical pattern every cycle.
+    bool differs = false;
+    for (size_t i = 0; i < cycle1.size(); ++i) {
+        if (std::fabs(cycle1[i] - cycle2[i]) > 1.0e-6) {
+            differs = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(differs) << "Random LFO repeated the exact same pattern across cycles";
 }
 
 TEST_F(LfoStageTest, ResetClearsStorage) {

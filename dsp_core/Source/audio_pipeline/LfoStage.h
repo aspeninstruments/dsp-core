@@ -80,7 +80,10 @@ class LfoStage : public AudioProcessingStage {
     static double periodInBeats(Division d, Flavor f);
 
   private:
-    static double evaluateShape(Shape s, double phase, unsigned int seed);
+    /// phase is the wrapped position in [0, 1) used by the periodic shapes;
+    /// cyclePosition is the unwrapped running cycle count used by Random so
+    /// each cycle traverses a fresh region of noise space.
+    static double evaluateShape(Shape s, double phase, double cyclePosition, unsigned int seed);
 
     std::atomic<double>& lfoStorage_;
 
@@ -97,6 +100,9 @@ class LfoStage : public AudioProcessingStage {
 
     // Audio-thread-only state.
     double phase_{0.0};
+    // Unwrapped cumulative cycle count. Drives the non-repeating Random shape:
+    // unlike phase_, it keeps growing across cycle boundaries.
+    double cyclePosition_{0.0};
     double hostBpm_{120.0};
     double hostPpq_{0.0};
     bool hostIsPlaying_{false};

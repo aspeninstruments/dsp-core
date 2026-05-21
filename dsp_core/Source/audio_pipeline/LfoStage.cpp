@@ -7,6 +7,10 @@ namespace dsp_core::audio_pipeline {
 namespace {
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kPerlinCellsPerCycle = 4.0;
+// Keep the Random shape's noise coordinate bounded so the int cast inside
+// perlinNoise1D() can never overflow. 2^24 cycles is months of continuous
+// free-running playback before the noise window recurs — effectively never.
+constexpr double kRandomWrapCycles = 16777216.0;
 } // namespace
 
 LfoStage::LfoStage(std::atomic<double>& lfoStorage) : lfoStorage_(lfoStorage) {}
@@ -17,6 +21,7 @@ void LfoStage::prepareToPlay(double sampleRate, int /*samplesPerBlock*/, int /*n
 
 void LfoStage::reset() {
     phase_ = 0.0;
+    cyclePosition_ = 0.0;
     lfoStorage_.store(0.0, std::memory_order_release);
 }
 
@@ -56,8 +61,8 @@ double LfoStage::periodInBeats(Division d, Flavor f) {
     return base;
 }
 
-double LfoStage::evaluateShape(Shape s, double phase, unsigned int seed) {
-    // phase is in [0, 1)
+double LfoStage::evaluateShape(Shape s, double phase, double cyclePosition, unsigned int seed) {
+    // phase is in [0, 1); cyclePosition is the unwrapped running cycle count.
     switch (s) {
     case Shape::Off:
         return 0.0;
@@ -74,8 +79,13 @@ double LfoStage::evaluateShape(Shape s, double phase, unsigned int seed) {
         return phase < 0.5 ? 1.0 : 0.0;
     }
     case Shape::Random: {
+        // Sample Perlin noise along the continuously advancing cycle position,
+        // so every cycle traverses a fresh region of noise space and the shape
+        // never repeats. Sampling phase * cells instead would retrace the same
+        // [0, cells) window each cycle, turning Random into a fixed wavetable.
         // perlinNoise1D returns ~[-1, 1]; map to [0, 1].
-        const double n = Services::PerlinNoiseService::perlinNoise1D(phase * kPerlinCellsPerCycle, seed);
+        const double n =
+            Services::PerlinNoiseService::perlinNoise1D(cyclePosition * kPerlinCellsPerCycle, seed);
         return 0.5 + 0.5 * n;
     }
     }
@@ -100,12 +110,15 @@ void LfoStage::process(juce::AudioBuffer<double>& buffer) {
 
     if (units == Units::BPM && hostIsPlaying_ && hostBpm_ > 0.0) {
         // Host-locked: derive phase directly from ppq each sample so we stay
-        // tight to the beat regardless of DAW jitter.
+        // tight to the beat regardless of DAW jitter. cyclePosition tracks the
+        // unwrapped cycle count so Random follows the song timeline.
         const double periodBeats = periodInBeats(div, flv);
         const double beatsPerSample = hostBpm_ / (60.0 * sampleRate_);
         for (int i = 0; i < numSamples; ++i) {
             const double ppq = hostPpq_ + beatsPerSample * static_cast<double>(i);
-            double cyclePhase = std::fmod(ppq / periodBeats, 1.0);
+            const double cyclesTotal = ppq / periodBeats;
+            cyclePosition_ = cyclesTotal;
+            double cyclePhase = std::fmod(cyclesTotal, 1.0);
             if (cyclePhase < 0.0)
                 cyclePhase += 1.0;
             phase_ = cyclePhase;
@@ -118,6 +131,7 @@ void LfoStage::process(juce::AudioBuffer<double>& buffer) {
         const double inc = cyclesPerSecond / sampleRate_;
         for (int i = 0; i < numSamples; ++i) {
             phase_ += inc;
+            cyclePosition_ += inc;
             if (phase_ >= 1.0)
                 phase_ -= std::floor(phase_);
         }
@@ -125,15 +139,20 @@ void LfoStage::process(juce::AudioBuffer<double>& buffer) {
         const double inc = (rateHz > 0.0 ? rateHz : 0.0) / sampleRate_;
         for (int i = 0; i < numSamples; ++i) {
             phase_ += inc;
+            cyclePosition_ += inc;
             if (phase_ >= 1.0)
                 phase_ -= std::floor(phase_);
         }
     }
 
+    // Wrap the unbounded cycle counter into a safe range for the Random shape.
+    // Wrapping by a whole number of cycles leaves phase alignment untouched.
+    cyclePosition_ = std::fmod(cyclePosition_, kRandomWrapCycles);
+
     double effectivePhase = std::fmod(phase_ + phaseOffset, 1.0);
     if (effectivePhase < 0.0)
         effectivePhase += 1.0;
-    const double value = evaluateShape(shape, effectivePhase, seed);
+    const double value = evaluateShape(shape, effectivePhase, cyclePosition_ + phaseOffset, seed);
     lfoStorage_.store(value, std::memory_order_release);
 }
 
