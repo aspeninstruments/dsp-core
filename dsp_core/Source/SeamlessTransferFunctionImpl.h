@@ -460,7 +460,10 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
         sourceRenderer_ = renderer;
     }
 
-    /** Force synchronous update (for initialization). */
+    /** Force synchronous update — used at init and on editor reconstruction
+     *  (window reopen). Always recomputes the published buffer directly from
+     *  the LaneMixer rather than reading the renderer's async cache, so the
+     *  visualizer never paints a stale curve if the worker thread is behind. */
     void forceUpdate();
 
     /** Publish a 16k buffer directly into the pull-source slot and bump the
@@ -490,7 +493,11 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     static int getSourceSize() noexcept { return LaneMixer::TABLE_SIZE; }
 
   private:
-    void runUpdate();
+    // forceMixerRecompute: skip the renderer's async `lastRenderedSum_` cache
+    // and recompute the published buffer straight from the LaneMixer. Set by
+    // forceUpdate() so init / editor-reopen always publishes the current curve;
+    // the default (false) keeps the cache fast-path for the 60 Hz event tick.
+    void runUpdate(bool forceMixerRecompute = false);
 
     LaneMixer& laneMixer;
     EventDrivenRenderer* sourceRenderer_{nullptr};

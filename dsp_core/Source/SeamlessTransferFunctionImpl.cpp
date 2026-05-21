@@ -736,7 +736,12 @@ void VisualizerUpdateDispatcher::timerCallback() {
 void VisualizerUpdateDispatcher::forceUpdate() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    runUpdate();
+    // Recompute straight from the LaneMixer. forceUpdate() runs at init and on
+    // editor reconstruction (window reopen) — both must publish the authoritative
+    // current curve. The renderer's `lastRenderedSum_` cache is filled async by a
+    // worker thread, so trusting it here can publish a stale curve (the
+    // window-reopen straight-line bug) if the worker has not caught up yet.
+    runUpdate(/*forceMixerRecompute=*/true);
     lastSeenVersion = laneMixer.getVersion();
     lastSeenSelectedLane = (selectedLanePtr_ != nullptr) ? *selectedLanePtr_ : -1;
     lastUpdateTimeMs = juce::Time::getMillisecondCounterHiRes();
@@ -781,7 +786,7 @@ struct DispatcherTickStats {
 } // namespace
 #endif
 
-void VisualizerUpdateDispatcher::runUpdate() {
+void VisualizerUpdateDispatcher::runUpdate(bool forceMixerRecompute) {
 #if BDD_PROFILE_DISPATCHER
     static DispatcherTickStats s_tickStats;
     const double tickT0 = juce::Time::getMillisecondCounterHiRes();
@@ -796,8 +801,14 @@ void VisualizerUpdateDispatcher::runUpdate() {
     // Falls back to a direct LaneMixer recompute on the rare path where the
     // dispatcher fires before the renderer has produced anything (e.g. early
     // in init).
-    bool haveSnapshot =
-        (sourceRenderer_ != nullptr) ? sourceRenderer_->copyLastRenderedSum(sourceBuffer_) : false;
+    //
+    // When forceMixerRecompute is set (forceUpdate: init / editor reopen) the
+    // renderer cache is skipped entirely. `lastRenderedSum_` is filled async by
+    // the worker thread, so on those low-frequency, correctness-critical paths
+    // we recompute from the LaneMixer to guarantee the current curve is shown.
+    bool haveSnapshot = (!forceMixerRecompute && sourceRenderer_ != nullptr)
+                            ? sourceRenderer_->copyLastRenderedSum(sourceBuffer_)
+                            : false;
     if (!haveSnapshot) {
         const auto mode = laneMixer.getMixerMode();
         if (mode == LaneMixer::MixerMode::Scan) {
