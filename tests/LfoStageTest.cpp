@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <dsp_core/dsp_core.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <vector>
@@ -192,6 +193,33 @@ TEST_F(LfoStageTest, RandomShapeDoesNotRepeatEachCycle) {
         }
     }
     EXPECT_TRUE(differs) << "Random LFO repeated the exact same pattern across cycles";
+}
+
+TEST_F(LfoStageTest, RandomShapeReachesFullDepth) {
+    stage_->setShape(LfoStage::Shape::Random);
+    stage_->setUnits(LfoStage::Units::Hz);
+    // ~0.7 cycles per 512-sample block: consecutive published values land in
+    // decorrelated regions of noise space, so a few thousand blocks sample the
+    // whole distribution including its strong excursions.
+    stage_->setRateHz(65.0);
+
+    double minValue = 1.0;
+    double maxValue = 0.0;
+    for (int i = 0; i < 4000; ++i) {
+        auto buf = makeBuffer(1, kBlockSize);
+        stage_->process(buf);
+        const double v = value_.load();
+        EXPECT_GE(v, 0.0);
+        EXPECT_LE(v, 1.0);
+        minValue = std::min(minValue, v);
+        maxValue = std::max(maxValue, v);
+    }
+
+    // The raw 0.5 + 0.5*n mapping topped out around [0.25, 0.75] because
+    // perlinNoise1D only spans ~±0.5. tanh soft-saturation must drive the LFO
+    // to within striking distance of both rails.
+    EXPECT_GT(maxValue, 0.95) << "Random LFO never approached the upper rail";
+    EXPECT_LT(minValue, 0.05) << "Random LFO never approached the lower rail";
 }
 
 TEST_F(LfoStageTest, ResetClearsStorage) {

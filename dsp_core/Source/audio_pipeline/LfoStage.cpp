@@ -7,6 +7,11 @@ namespace dsp_core::audio_pipeline {
 namespace {
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kPerlinCellsPerCycle = 4.0;
+// Soft-saturation gain for the Random shape. perlinNoise1D clusters near 0
+// (std ≈ 0.14); this drives strong excursions toward the [0, 1] rails while
+// tanh keeps the approach smooth. Tuned so ~99th-percentile peaks (±0.35)
+// reach ~0.97 of full depth.
+constexpr double kRandomDepthGain = 5.0;
 // Keep the Random shape's noise coordinate bounded so the int cast inside
 // perlinNoise1D() can never overflow. 2^24 cycles is months of continuous
 // free-running playback before the noise window recurs — effectively never.
@@ -83,10 +88,13 @@ double LfoStage::evaluateShape(Shape s, double phase, double cyclePosition, unsi
         // so every cycle traverses a fresh region of noise space and the shape
         // never repeats. Sampling phase * cells instead would retrace the same
         // [0, cells) window each cycle, turning Random into a fixed wavetable.
-        // perlinNoise1D returns ~[-1, 1]; map to [0, 1].
         const double n =
             Services::PerlinNoiseService::perlinNoise1D(cyclePosition * kPerlinCellsPerCycle, seed);
-        return 0.5 + 0.5 * n;
+        // perlinNoise1D spans only ~±0.5 and clusters near 0 (std ≈ 0.14), so a
+        // raw 0.5 + 0.5*n mapping leaves the LFO wobbling in the middle third.
+        // tanh soft-clips strong excursions toward the rails without hard
+        // flat-topping. tanh ∈ (-1, 1), so the result is strictly inside [0, 1].
+        return 0.5 + 0.5 * std::tanh(kRandomDepthGain * n);
     }
     }
     return 0.0;
