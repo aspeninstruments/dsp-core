@@ -39,6 +39,7 @@
 #include "Source/audio_pipeline/WaveshapingStage.cpp"
 #include "Source/audio_pipeline/OversamplingWrapper.cpp"
 #include "Source/audio_pipeline/DCBlockingFilter.cpp"
+#include "Source/audio_pipeline/LowpassStage.cpp"
 #include "Source/audio_pipeline/SoftClippingStage.cpp"
 #include "Source/audio_pipeline/SurgeStage.cpp"
 #include "Source/audio_pipeline/BiasStage.cpp"

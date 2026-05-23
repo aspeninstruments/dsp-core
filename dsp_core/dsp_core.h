@@ -62,6 +62,7 @@
 #include "Source/audio_pipeline/WaveshapingStage.h"
 #include "Source/audio_pipeline/OversamplingWrapper.h"
 #include "Source/audio_pipeline/DCBlockingFilter.h"
+#include "Source/audio_pipeline/LowpassStage.h"
 #include "Source/audio_pipeline/SoftClippingStage.h"
 #include "Source/audio_pipeline/SurgeStage.h"
 #include "Source/audio_pipeline/BiasStage.h"

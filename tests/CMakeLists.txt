@@ -251,6 +251,31 @@ endif()
 
 add_test(NAME DCBlockingFilterTests COMMAND dc_blocking_filter_tests)
 
+# LowpassStage tests
+add_executable(lowpass_stage_tests
+    LowpassStageTest.cpp
+)
+
+target_include_directories(lowpass_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(lowpass_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(lowpass_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(lowpass_stage_tests)
+endif()
+
+add_test(NAME LowpassStageTests COMMAND lowpass_stage_tests)
+
 # CurveFeatureDetector tests
 add_executable(curve_feature_detector_tests
     CurveFeatureDetectorTest.cpp
