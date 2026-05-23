@@ -276,6 +276,56 @@ endif()
 
 add_test(NAME LowpassStageTests COMMAND lowpass_stage_tests)
 
+# LowShelfStage tests
+add_executable(low_shelf_stage_tests
+    LowShelfStageTest.cpp
+)
+
+target_include_directories(low_shelf_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(low_shelf_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(low_shelf_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(low_shelf_stage_tests)
+endif()
+
+add_test(NAME LowShelfStageTests COMMAND low_shelf_stage_tests)
+
+# HighShelfStage tests
+add_executable(high_shelf_stage_tests
+    HighShelfStageTest.cpp
+)
+
+target_include_directories(high_shelf_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(high_shelf_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(high_shelf_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(high_shelf_stage_tests)
+endif()
+
+add_test(NAME HighShelfStageTests COMMAND high_shelf_stage_tests)
+
 # CurveFeatureDetector tests
 add_executable(curve_feature_detector_tests
     CurveFeatureDetectorTest.cpp
