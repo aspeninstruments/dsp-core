@@ -1124,6 +1124,31 @@ endif()
 
 add_test(NAME AutoGainStageTests COMMAND auto_gain_stage_tests)
 
+# FilterTopologyBenchmark tests (SVF vs Ladder vs OTA — templated vs modular)
+add_executable(filter_topology_benchmark_tests
+    FilterTopologyBenchmarkTest.cpp
+)
+
+target_include_directories(filter_topology_benchmark_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(filter_topology_benchmark_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(filter_topology_benchmark_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(filter_topology_benchmark_tests)
+endif()
+
+add_test(NAME FilterTopologyBenchmarkTests COMMAND filter_topology_benchmark_tests)
+
 # OversamplingWrapper tests
 add_executable(oversampling_wrapper_tests
     OversamplingWrapperTest.cpp
