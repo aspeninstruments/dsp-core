@@ -31,6 +31,8 @@ enum class StageTag {
     EnvelopeFollower,
     Modulator1,
     Modulator2,
+    TonePre,
+    TonePost,
 };
 
 /**
@@ -70,6 +72,10 @@ inline std::string stageTagToString(StageTag tag) {
         return "modulator1";
     case StageTag::Modulator2:
         return "modulator2";
+    case StageTag::TonePre:
+        return "tonePre";
+    case StageTag::TonePost:
+        return "tonePost";
     }
     return "unknown";
 }

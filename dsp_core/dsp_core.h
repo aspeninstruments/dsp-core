@@ -73,6 +73,7 @@
 #include "Source/audio_pipeline/SurgeStage.h"
 #include "Source/audio_pipeline/BiasStage.h"
 #include "Source/audio_pipeline/HysteresisStage.h"
+#include "Source/audio_pipeline/ToneStage.h"
 #include "Source/audio_pipeline/AudioInputBuffer.h"
 #include "Source/audio_pipeline/AudioInputWriter.h"
 #include "Source/audio_pipeline/AutoGainState.h"

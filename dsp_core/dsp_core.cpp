@@ -47,6 +47,7 @@
 #include "Source/audio_pipeline/SurgeStage.cpp"
 #include "Source/audio_pipeline/BiasStage.cpp"
 #include "Source/audio_pipeline/HysteresisStage.cpp"
+#include "Source/audio_pipeline/ToneStage.cpp"
 #include "Source/audio_pipeline/AutoSquashStage.cpp"
 #include "Source/audio_pipeline/AutoRestoreStage.cpp"
 #include "Source/audio_pipeline/EnvelopeFollowerStage.cpp"

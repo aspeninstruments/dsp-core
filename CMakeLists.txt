@@ -94,6 +94,8 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/BiasStage.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/HysteresisStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/HysteresisStage.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/ToneStage.h"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/ToneStage.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AudioInputBuffer.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AudioInputWriter.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AutoGainState.h"
