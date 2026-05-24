@@ -26,15 +26,19 @@ void processSilence(Stage& s, int numBlocks, juce::AudioBuffer<double>& buf) {
 } // namespace
 
 // --------------------------------------------------------------------------
-// Test 1 — Smoothing must take ≥ ~1 ms to reach a new cutoff target.
+// Test 1 — Smoothing must take meaningfully many samples to reach a new
+// cutoff target (i.e., we're not zipper-noise levels of fast).
 //
-// Pre-Phase-1, kSmoothingTimeSec = 0.0002 s (≈10 samples @ 48 kHz). This test
-// will FAIL because the ramp completes within the first 10-sample buffer.
+// Original kSmoothingTimeSec = 0.0002 s (≈10 samples @ 48 kHz) — test FAILS
+// because the ramp completes within the first 10-sample buffer.
 //
-// Post-Phase-1, kSmoothingTimeSec = 0.001 s (≈48 samples @ 48 kHz). At sample
-// 10 we should be ~20% through the ramp; at sample 70 we should be at target.
+// Phase 1 bumped to 0.001 s (≈48 samples); Phase 1.5 to 0.002 s (≈96 samples).
+// The test uses thresholds that are robust to either: assert "not at target
+// after 10 samples" (true for any smoothing time ≥ ~0.5 ms) and "at target
+// after generously many samples" (500 samples = ~10 ms, safely past any
+// reasonable smoothing window).
 // --------------------------------------------------------------------------
-TEST(LadderTPTStage, SmoothingTakesAtLeast1msToReachTarget_24dB) {
+TEST(LadderTPTStage, SmoothingTakesMillisecondsToReachTarget_24dB) {
     LadderTPT24dBStage s;
     s.setCutoffFrequency(1000.0);
     s.prepareToPlay(kSampleRate, 64, 1);
@@ -52,18 +56,19 @@ TEST(LadderTPTStage, SmoothingTakesAtLeast1msToReachTarget_24dB) {
         << "Smoothing should have advanced from initial 1000 Hz after 10 samples";
     EXPECT_LT(afterTen, 4000.0)
         << "Smoothing reached too close to target (5000 Hz) in 10 samples — "
-           "expected ramp time ≥ 1 ms (48 samples). Got " << afterTen << " Hz";
+           "smoothing time is too short. Got " << afterTen << " Hz";
 
-    // Process another 60 samples (total 70, well past the 48-sample ramp).
-    juce::AudioBuffer<double> sixtyMore(1, 60);
-    sixtyMore.clear();
-    s.process(sixtyMore);
+    // Process 500 more samples (≈10 ms @ 48 kHz), well past any reasonable
+    // smoothing window. Robust to future bumps of kSmoothingTimeSec.
+    juce::AudioBuffer<double> fiveHundredMore(1, 500);
+    fiveHundredMore.clear();
+    s.process(fiveHundredMore);
 
     EXPECT_NEAR(5000.0, s.getCurrentSmoothedCutoff(), 1.0)
-        << "Smoothing should have settled at target after >1 ms";
+        << "Smoothing should have settled at target after ~10 ms";
 }
 
-TEST(LadderTPTStage, SmoothingTakesAtLeast1msToReachTarget_12dB) {
+TEST(LadderTPTStage, SmoothingTakesMillisecondsToReachTarget_12dB) {
     LadderTPT12dBStage s;
     s.setCutoffFrequency(1000.0);
     s.prepareToPlay(kSampleRate, 64, 1);
@@ -79,9 +84,9 @@ TEST(LadderTPTStage, SmoothingTakesAtLeast1msToReachTarget_12dB) {
     EXPECT_LT(afterTen, 4000.0)
         << "12dB variant: ramp too fast. Got " << afterTen << " Hz at sample 10";
 
-    juce::AudioBuffer<double> sixtyMore(1, 60);
-    sixtyMore.clear();
-    s.process(sixtyMore);
+    juce::AudioBuffer<double> fiveHundredMore(1, 500);
+    fiveHundredMore.clear();
+    s.process(fiveHundredMore);
 
     EXPECT_NEAR(5000.0, s.getCurrentSmoothedCutoff(), 1.0);
 }

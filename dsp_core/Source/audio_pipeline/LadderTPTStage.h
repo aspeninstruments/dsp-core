@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AudioProcessingStage.h"
-#include "TanhLUT.h"
+#include "Tanh2xLUT.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -132,15 +132,17 @@ class LadderTPTStage : public AudioProcessingStage {
 
                 // Newton iteration on F(y) = y - G^N*(x - tanh(2Ry)) - S.
                 // 3 iterations is conservative; F' >= 1 so Newton is monotonic.
+                // g_tanh2xLUT.lookup(R*y) = tanh(2*R*y); the chain-rule 2R in
+                // F' is d(2Ry)/dy, not a duplicate of the LUT's internal *2.
                 for (int iter = 0; iter < 3; ++iter) {
-                    const double fb = g_tanhLUT.lookup(R * yN); // = tanh(2*R*yN)
+                    const double fb = g_tanh2xLUT.lookup(R * yN);
                     const double Fy = yN - GN * (x - fb) - S;
                     const double Fp = 1.0 + GN * twoR * (1.0 - fb * fb);
                     yN -= Fy / Fp;
                 }
 
                 // Forward pass: states resolved, walk the cascade and commit.
-                double u = x - g_tanhLUT.lookup(R * yN);
+                double u = x - g_tanh2xLUT.lookup(R * yN);
                 for (int n = 0; n < N; ++n) {
                     const auto k = static_cast<std::size_t>(n);
                     const double v = G * (u - st.s[k]);
@@ -204,7 +206,7 @@ class LadderTPTStage : public AudioProcessingStage {
     static constexpr double kNyquistMargin = 0.45;
     static constexpr double kMinResonance = 0.0;
     static constexpr double kMaxResonance = 4.0;
-    static constexpr double kSmoothingTimeSec = 0.001;
+    static constexpr double kSmoothingTimeSec = 0.002;
 
     struct ChannelState {
         std::array<double, N> s{};

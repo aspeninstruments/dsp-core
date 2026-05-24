@@ -69,7 +69,8 @@ VirtualAnalogFilterStage::cascade(double V, const std::array<double, kMaxStages>
     // Feedback always taps the last stored state slot (numStages_-1's value
     // is mirrored into the unused upper slots via the integration step below,
     // so s[kMaxStages-1] is correct regardless of numStages_).
-    const double fb = g_tanhLUT.lookup(R * s[static_cast<std::size_t>(numStages_ - 1)]);
+    // g_tanh2xLUT.lookup(z) = tanh(2*z), so this is tanh(2*R*s[N-1]).
+    const double fb = g_tanh2xLUT.lookup(R * s[static_cast<std::size_t>(numStages_ - 1)]);
 
     std::array<double, kMaxStages> d{};
     d[0] = T_ * stages_[0]->computeDelta(V - fb, s[0], gVal);
