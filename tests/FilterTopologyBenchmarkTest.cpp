@@ -3,7 +3,7 @@
 #include "../dsp_core/Source/audio_pipeline/FilterStage.h"
 #include "../dsp_core/Source/audio_pipeline/LadderTPTStage.h"
 #include "../dsp_core/Source/audio_pipeline/LowpassStage.h"
-#include "../dsp_core/Source/audio_pipeline/TanhLUT.h"
+#include "../dsp_core/Source/audio_pipeline/Tanh2xLUT.h"
 #include "../dsp_core/Source/audio_pipeline/VirtualAnalogFilterStage.h"
 
 #include <algorithm>
@@ -334,6 +334,12 @@ TEST_F(FilterTopologyBenchmark, StabilityAcrossResonance) {
         LadderTPTStage<N> s;
         s.setCutoffFrequency(kBenchCutoffHz);
         s.setResonance(r);
+        // Disable bass compensation: this test exercises *filter* stability
+        // (high R near self-osc threshold). Bass comp's (1 + 2R) input gain
+        // is correct for small signals but pushes DC=0.3 into a saturated
+        // regime that's a separate question. Bass-comp behavior is covered
+        // in LadderTPTStageTest.cpp.
+        s.setBassCompensation(0.0);
         s.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
         juce::AudioBuffer<double> buf(kNumChannels, kBlockSize);
         driveDC(buf, 0.3);
@@ -374,17 +380,17 @@ TEST_F(FilterTopologyBenchmark, StabilityAcrossResonance) {
 }
 
 // Tiny LUT correctness check — guards against off-by-one indexing / wrong range.
-TEST(TanhLUT, MatchesStdTanhWithinTolerance) {
+TEST(Tanh2xLUT, MatchesStdTanhOfTwoXWithinTolerance) {
     constexpr int kNumSamples = 200;
     double maxErr = 0.0;
     for (int i = 0; i < kNumSamples; ++i) {
         const double x = -4.0 + (8.0 * i) / (kNumSamples - 1);
         const double ref = std::tanh(2.0 * x);
-        const double got = g_tanhLUT.lookup(x);
+        const double got = g_tanh2xLUT.lookup(x);
         maxErr = std::max(maxErr, std::abs(ref - got));
     }
     // 8192-entry lerp table over [-4,4] should be well under 1e-5.
-    EXPECT_LT(maxErr, 1e-5) << "TanhLUT max error vs std::tanh(2x): " << maxErr;
+    EXPECT_LT(maxErr, 1e-5) << "Tanh2xLUT max error vs std::tanh(2x): " << maxErr;
 }
 
 } // namespace dsp_core_test

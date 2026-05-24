@@ -2,7 +2,7 @@
 
 #include "AudioProcessingStage.h"
 #include "FilterStage.h"
-#include "TanhLUT.h"
+#include "Tanh2xLUT.h"
 #include <array>
 #include <atomic>
 #include <juce_audio_basics/juce_audio_basics.h>

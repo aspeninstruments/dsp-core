@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TanhLUT.h"
+#include "Tanh2xLUT.h"
 
 namespace dsp_core::audio_pipeline {
 
@@ -32,7 +32,7 @@ class FilterStage {
 class LadderFilterStage final : public FilterStage {
   public:
     double computeDelta(double in, double state, double gVal) const noexcept override {
-        return gVal * g_tanhLUT.lookup(in - state);
+        return gVal * g_tanh2xLUT.lookup(in - state);
     }
 };
 
@@ -40,7 +40,7 @@ class LadderFilterStage final : public FilterStage {
 class OTAFilterStage final : public FilterStage {
   public:
     double computeDelta(double in, double state, double gVal) const noexcept override {
-        return gVal * (g_tanhLUT.lookup(in) - g_tanhLUT.lookup(state));
+        return gVal * (g_tanh2xLUT.lookup(in) - g_tanh2xLUT.lookup(state));
     }
 };
 

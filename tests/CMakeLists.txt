@@ -1124,6 +1124,31 @@ endif()
 
 add_test(NAME AutoGainStageTests COMMAND auto_gain_stage_tests)
 
+# LadderTPTStage behavioral tests (smoothing, Newton, denormals, bass comp)
+add_executable(ladder_tpt_stage_tests
+    LadderTPTStageTest.cpp
+)
+
+target_include_directories(ladder_tpt_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(ladder_tpt_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(ladder_tpt_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(ladder_tpt_stage_tests)
+endif()
+
+add_test(NAME LadderTPTStageTests COMMAND ladder_tpt_stage_tests)
+
 # FilterTopologyBenchmark tests (SVF vs Ladder vs OTA — templated vs modular)
 add_executable(filter_topology_benchmark_tests
     FilterTopologyBenchmarkTest.cpp
