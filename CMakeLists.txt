@@ -77,7 +77,7 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/DCBlockingFilter.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/LowpassStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/LowpassStage.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/Tanh2xLUT.h"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/TanhLUT.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/LadderTPTStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/FilterStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/VirtualAnalogFilterStage.h"

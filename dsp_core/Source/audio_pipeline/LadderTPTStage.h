@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AudioProcessingStage.h"
-#include "Tanh2xLUT.h"
+#include "TanhLUT.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -73,12 +73,6 @@ class LadderTPTStage : public AudioProcessingStage {
     }
 
     void process(juce::AudioBuffer<double>& buffer) override {
-        // Flush denormals to zero in the FPU control word. The TPT integrator
-        // state decays exponentially; without FTZ the tail can linger in
-        // subnormal range and trigger 10-100x slowdowns on x86. Belt-and-
-        // suspenders alongside any upstream ScopedNoDenormals.
-        const juce::ScopedNoDenormals noDenormals;
-
         if (!enabled_.load(std::memory_order_acquire)) {
             return;
         }
@@ -94,13 +88,9 @@ class LadderTPTStage : public AudioProcessingStage {
             lastResonanceTarget_ = resTarget;
         }
 
-        const double alpha_bass = bassCompensation_.load(std::memory_order_acquire);
-
         const int numChannels =
             std::min(buffer.getNumChannels(), static_cast<int>(channels_.size()));
         const int numSamples = buffer.getNumSamples();
-
-        int iterCount = 0; // tracks last sample's iteration count
 
         for (int i = 0; i < numSamples; ++i) {
             const double cutoff = smoothCutoff_.getNextValue();
@@ -111,12 +101,6 @@ class LadderTPTStage : public AudioProcessingStage {
             const double G = g * alpha;
             const double twoR = 2.0 * R;
 
-            // Bass-compensation gain restores DC unity gain that the resonant
-            // ladder loses (1 + 2R fold). alpha_bass in [0, 1]: 0 = faithful
-            // Moog (full bass loss), 1 = full restoration. Uses smoothed R so
-            // gain tracks resonance changes without a separate smoother.
-            const double bassGain = 1.0 + alpha_bass * twoR;
-
             double GN = G * G;
             if constexpr (N == 4) {
                 GN = GN * GN; // G^4
@@ -125,7 +109,7 @@ class LadderTPTStage : public AudioProcessingStage {
 
             for (int ch = 0; ch < numChannels; ++ch) {
                 auto& st = channels_[static_cast<std::size_t>(ch)];
-                const double xEff = buffer.getWritePointer(ch)[i] * bassGain;
+                const double x = buffer.getWritePointer(ch)[i];
 
                 double S;
                 if constexpr (N == 2) {
@@ -137,28 +121,19 @@ class LadderTPTStage : public AudioProcessingStage {
                 }
 
                 // Linear-feedback ZDF as initial guess; exact when tanh ≈ identity.
-                double yN = (GN * xEff + S) / (1.0 + twoR * GN);
+                double yN = (GN * x + S) / (1.0 + twoR * GN);
 
-                // Newton iteration on F(y) = y - G^N*(xEff - tanh(2Ry)) - S.
-                // F' >= 1 guarantees monotone convergence, so |dy| upper-bounds
-                // |F(y)|: a small step => a small residual. Cap at 4; typical
-                // case converges in 1-2 at low R, 2-3 at high R.
-                int iter = 0;
-                for (; iter < 4; ++iter) {
-                    const double fb = g_tanh2xLUT.lookup(R * yN); // = tanh(2*R*yN)
-                    const double Fy = yN - GN * (xEff - fb) - S;
+                // Newton iteration on F(y) = y - G^N*(x - tanh(2Ry)) - S.
+                // 3 iterations is conservative; F' >= 1 so Newton is monotonic.
+                for (int iter = 0; iter < 3; ++iter) {
+                    const double fb = g_tanhLUT.lookup(R * yN); // = tanh(2*R*yN)
+                    const double Fy = yN - GN * (x - fb) - S;
                     const double Fp = 1.0 + GN * twoR * (1.0 - fb * fb);
-                    const double dy = Fy / Fp;
-                    yN -= dy;
-                    if (std::abs(dy) < 1e-9) {
-                        ++iter; // count the converged step
-                        break;
-                    }
+                    yN -= Fy / Fp;
                 }
-                iterCount = iter;
 
                 // Forward pass: states resolved, walk the cascade and commit.
-                double u = xEff - g_tanh2xLUT.lookup(R * yN);
+                double u = x - g_tanhLUT.lookup(R * yN);
                 for (int n = 0; n < N; ++n) {
                     const auto k = static_cast<std::size_t>(n);
                     const double v = G * (u - st.s[k]);
@@ -170,8 +145,6 @@ class LadderTPTStage : public AudioProcessingStage {
                 buffer.getWritePointer(ch)[i] = u;
             }
         }
-
-        lastNewtonIterations_ = iterCount;
     }
 
     void reset() override {
@@ -200,16 +173,6 @@ class LadderTPTStage : public AudioProcessingStage {
         return cutoffHz_.load(std::memory_order_acquire);
     }
 
-    /**
-     * Currently smoothed cutoff (vs setCutoffFrequency which sets the target).
-     * Audio-thread state — only safe to read between process() calls or after
-     * prepareToPlay. Useful for UI "now playing" displays and tests observing
-     * the smoothing ramp.
-     */
-    double getSmoothedCutoffFrequency() const noexcept {
-        return smoothCutoff_.getCurrentValue();
-    }
-
     /** Resonance, clamped to [0, 4]. Self-oscillation onset ≈ 3.95. */
     void setResonance(double r) {
         r = juce::jlimit(kMinResonance, kMaxResonance, r);
@@ -219,37 +182,12 @@ class LadderTPTStage : public AudioProcessingStage {
         return resonance_.load(std::memory_order_acquire);
     }
 
-    /**
-     * Bass-compensation amount in [0, 1].
-     *   0 = faithful Moog (full bass loss at high R)
-     *   1 = full DC-gain restoration (modern voicing)
-     * Default 1.0.
-     */
-    void setBassCompensation(double amount) {
-        amount = juce::jlimit(0.0, 1.0, amount);
-        bassCompensation_.store(amount, std::memory_order_release);
-    }
-    double getBassCompensation() const {
-        return bassCompensation_.load(std::memory_order_acquire);
-    }
-
-    /**
-     * Number of Newton iterations performed on the last processed sample.
-     * Useful for verifying early-out behavior and as a UI "filter is working
-     * hard" indicator.
-     */
-    int getLastNewtonIterations() const noexcept {
-        return lastNewtonIterations_;
-    }
-
   private:
     static constexpr double kMinCutoffHz = 20.0;
     static constexpr double kNyquistMargin = 0.45;
     static constexpr double kMinResonance = 0.0;
     static constexpr double kMaxResonance = 4.0;
-    // 5 ms ramp — slow enough to suppress zipper noise on UI sweeps, fast
-    // enough that LFO modulation up to ~20 Hz tracks without audible lag.
-    static constexpr double kSmoothingTimeSec = 0.005;
+    static constexpr double kSmoothingTimeSec = 0.0002;
 
     struct ChannelState {
         std::array<double, N> s{};
@@ -258,15 +196,13 @@ class LadderTPTStage : public AudioProcessingStage {
     std::atomic<bool> enabled_{true};
     std::atomic<double> cutoffHz_{20000.0};
     std::atomic<double> resonance_{0.0};
-    std::atomic<double> bassCompensation_{1.0};
 
     double sampleRate_ = 48000.0;
     double piOverFs_ = juce::MathConstants<double>::pi / 48000.0;
     double lastCutoffTarget_ = -1.0;
     double lastResonanceTarget_ = -1.0;
-    int lastNewtonIterations_ = 0;
 
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothCutoff_;
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothCutoff_;
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothResonance_;
 
     std::vector<ChannelState> channels_;

@@ -63,7 +63,7 @@
 #include "Source/audio_pipeline/OversamplingWrapper.h"
 #include "Source/audio_pipeline/DCBlockingFilter.h"
 #include "Source/audio_pipeline/LowpassStage.h"
-#include "Source/audio_pipeline/Tanh2xLUT.h"
+#include "Source/audio_pipeline/TanhLUT.h"
 #include "Source/audio_pipeline/LadderTPTStage.h"
 #include "Source/audio_pipeline/FilterStage.h"
 #include "Source/audio_pipeline/VirtualAnalogFilterStage.h"

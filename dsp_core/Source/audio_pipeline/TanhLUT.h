@@ -9,14 +9,10 @@ namespace dsp_core::audio_pipeline {
 /**
  * Precomputed tanh(2x) lookup table with linear interpolation.
  *
- * Naming is deliberate: lookup(x) returns tanh(2x), not tanh(x). The "2x"
- * shape is the chosen soft-saturation kernel for virtual-analog filter
- * stages — steeper knee than plain tanh, matching the FilterDrive prototype.
- * Callers read e.g. `lookup(R*y)` and get back `tanh(2*R*y)`; Jacobians must
- * include the chain factor 2 accordingly.
- *
- * Replacing per-sample std::tanh / std::function calls with this direct LUT
- * is the main reason these filters can hit reasonable CPU.
+ * Used as the soft-saturation kernel for virtual-analog filter stages
+ * (both feedforward integrator nonlinearity and feedback nonlinearity).
+ * Replacing per-sample std::tanh / std::function calls with a direct LUT
+ * lookup is the main reason these filters can hit reasonable CPU.
  *
  * Range: [-kRange, kRange] = [-4, 4]
  *   tanh(2 * 4) ≈ 0.99999977, so clamping outside this range loses
@@ -24,20 +20,20 @@ namespace dsp_core::audio_pipeline {
  *
  * Size: 8192 entries → lerp peak error vs std::tanh(2x) is < 1e-7.
  */
-class Tanh2xLUT {
+class TanhLUT {
   public:
     static constexpr int kSize = 8192;
     static constexpr double kRange = 4.0;
 
-    Tanh2xLUT() {
+    TanhLUT() {
         for (int i = 0; i < kSize; ++i) {
             const double x = -kRange + (2.0 * kRange * i) / static_cast<double>(kSize - 1);
             table_[static_cast<std::size_t>(i)] = std::tanh(2.0 * x);
         }
     }
 
-    /** Returns tanh(2 * x), linear-interpolated, clamped to the table range. */
     inline double lookup(double x) const noexcept {
+        // Branchless clamp.
         const double clamped = x < -kRange ? -kRange : (x > kRange ? kRange : x);
         const double idx = (clamped + kRange) * kInvStep;
         const int i0 = static_cast<int>(idx);
@@ -55,6 +51,6 @@ class Tanh2xLUT {
 
 // Single shared instance; the LUT is read-only after construction.
 // C++17 inline variable — one definition across all TUs.
-inline const Tanh2xLUT g_tanh2xLUT{};
+inline const TanhLUT g_tanhLUT{};
 
 } // namespace dsp_core::audio_pipeline
