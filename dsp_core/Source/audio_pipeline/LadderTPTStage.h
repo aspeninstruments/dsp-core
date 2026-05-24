@@ -73,6 +73,13 @@ class LadderTPTStage : public AudioProcessingStage {
     }
 
     void process(juce::AudioBuffer<double>& buffer) override {
+        // Flush denormals to zero for the per-sample loop. TPT integrator
+        // states decay asymptotically; without FTZ they enter the denormal
+        // range and cost 10-100x normal arithmetic on x86. JUCE plugin hosts
+        // usually set FTZ in processBlock, but standalone uses (tests, future
+        // headless paths) don't, so be defensive.
+        const juce::ScopedNoDenormals noDenormals;
+
         if (!enabled_.load(std::memory_order_acquire)) {
             return;
         }
@@ -173,6 +180,16 @@ class LadderTPTStage : public AudioProcessingStage {
         return cutoffHz_.load(std::memory_order_acquire);
     }
 
+    /**
+     * Current smoothed cutoff value (live audio-thread state).
+     * Intended for tests / metering; not RT-safe for cross-thread reads without
+     * external synchronization, but reading from the audio thread or between
+     * blocks is fine.
+     */
+    double getCurrentSmoothedCutoff() const {
+        return smoothCutoff_.getCurrentValue();
+    }
+
     /** Resonance, clamped to [0, 4]. Self-oscillation onset ≈ 3.95. */
     void setResonance(double r) {
         r = juce::jlimit(kMinResonance, kMaxResonance, r);
@@ -187,7 +204,7 @@ class LadderTPTStage : public AudioProcessingStage {
     static constexpr double kNyquistMargin = 0.45;
     static constexpr double kMinResonance = 0.0;
     static constexpr double kMaxResonance = 4.0;
-    static constexpr double kSmoothingTimeSec = 0.0002;
+    static constexpr double kSmoothingTimeSec = 0.001;
 
     struct ChannelState {
         std::array<double, N> s{};
