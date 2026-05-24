@@ -190,8 +190,12 @@ TEST(LadderTPTStage, CutoffAndResonanceClamping_24dB) {
     s.setResonance(-1.0);
     EXPECT_DOUBLE_EQ(0.0, s.getResonance());
 
+    // Max resonance must be > 0 and strictly below the self-osc threshold (R=4
+    // under the corrected tanh(R*y) feedback math). Concrete value is an impl
+    // tuning choice; assert the safety contract.
     s.setResonance(100.0);
-    EXPECT_DOUBLE_EQ(4.0, s.getResonance());
+    EXPECT_GT(s.getResonance(), 0.0);
+    EXPECT_LT(s.getResonance(), 4.0);
 }
 
 TEST(LadderTPTStage, CutoffAndResonanceClamping_12dB) {
@@ -208,11 +212,89 @@ TEST(LadderTPTStage, CutoffAndResonanceClamping_12dB) {
     EXPECT_DOUBLE_EQ(0.0, s.getResonance());
 
     s.setResonance(100.0);
-    EXPECT_DOUBLE_EQ(4.0, s.getResonance());
+    EXPECT_GT(s.getResonance(), 0.0);
+    EXPECT_LT(s.getResonance(), 4.0);
 }
 
 // --------------------------------------------------------------------------
-// Test 4 (Phase 3) — Newton convergence stress test at near-self-oscillation.
+// Phase 3.5 — Ringing must decay below max resonance.
+//
+// The original feedback math used tanh(2*R*y), which makes the small-signal
+// loop gain 2R. For a 4-pole ladder, self-oscillation occurs at loop gain 4,
+// i.e. **R = 2.0**. That's only 50% on a 0-4 knob — well below the documented
+// kMaxResonance and the user reported it as "self-oscillating around 54%".
+//
+// The fix drops the inner *2 from the feedback nonlinearity (per-stage tanh(2x)
+// saturation is unchanged — that's character, not loop gain). Self-osc moves
+// to R=4, and kMaxResonance drops to 3.9 so the knob top is safely below.
+//
+// Tests:
+//   - At R=2.5 (62% knob, well above the OLD self-osc point), impulse energy
+//     should decay to <1% in 100 blocks (~0.5 s @ 48k). Fails pre-fix (filter
+//     sustains), passes post-fix.
+//   - At R=3.9 (the new max), impulse energy still decays — looser threshold
+//     (<10%) because resonance is screaming but it shouldn't be self-oscillating.
+// --------------------------------------------------------------------------
+namespace {
+template <typename Stage>
+double impulseDecayRatio(Stage& s, double R, int numSilenceBlocks) {
+    s.setCutoffFrequency(1000.0);
+    s.setResonance(R);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    buf.clear();
+    buf.getWritePointer(0)[0] = 1.0;
+    s.process(buf);
+
+    double energyFirst = 0.0;
+    for (int i = 0; i < kBlockSize; ++i) {
+        const double v = buf.getReadPointer(0)[i];
+        energyFirst += v * v;
+    }
+
+    for (int b = 0; b < numSilenceBlocks; ++b) {
+        buf.clear();
+        s.process(buf);
+    }
+
+    double energyLast = 0.0;
+    for (int i = 0; i < kBlockSize; ++i) {
+        const double v = buf.getReadPointer(0)[i];
+        energyLast += v * v;
+    }
+    return energyLast / std::max(energyFirst, 1e-300);
+}
+} // namespace
+
+TEST(LadderTPTStage, RingingDecaysAtMidResonance_24dB) {
+    LadderTPT24dBStage s;
+    const double ratio = impulseDecayRatio(s, 2.5, 100);
+    EXPECT_LT(ratio, 0.01)
+        << "Filter self-oscillating at R=2.5 (tail energy / impulse energy = " << ratio
+        << "). Feedback path likely has hidden gain >1 at this R.";
+}
+
+TEST(LadderTPTStage, RingingDecaysAtMidResonance_12dB) {
+    LadderTPT12dBStage s;
+    const double ratio = impulseDecayRatio(s, 2.5, 100);
+    EXPECT_LT(ratio, 0.01)
+        << "12dB filter self-oscillating at R=2.5 (ratio = " << ratio << ")";
+}
+
+TEST(LadderTPTStage, RingingDecaysAtMaxResonance_24dB) {
+    LadderTPT24dBStage s;
+    // Drive to whatever the configured max is; we then read it back to log.
+    s.setResonance(100.0);
+    const double r = s.getResonance();
+    const double ratio = impulseDecayRatio(s, r, 200);
+    EXPECT_LT(ratio, 0.1)
+        << "Filter not decaying at max R=" << r
+        << " (ratio = " << ratio << "). Knob top is at/above self-osc threshold.";
+}
+
+// --------------------------------------------------------------------------
+// Test (Phase 3) — Newton convergence stress test at near-max resonance.
 //
 // Phase 3 changes the Newton loop from "fixed 3 iterations" to "early-out on
 // residual, cap at 4." At low R the linear ZDF guess is near-exact and we exit
@@ -229,7 +311,10 @@ TEST(LadderTPTStage, CutoffAndResonanceClamping_12dB) {
 TEST(LadderTPTStage, NewtonStableAtNearSelfOscillation_24dB) {
     LadderTPT24dBStage s;
     s.setCutoffFrequency(1000.0);
-    s.setResonance(3.95);
+    // Drive to whatever max the implementation enforces (clamped if higher).
+    s.setResonance(100.0);
+    const double rUsed = s.getResonance();
+    EXPECT_GT(rUsed, 3.0) << "max R unexpectedly low: " << rUsed;
     s.prepareToPlay(kSampleRate, kBlockSize, 1);
 
     juce::AudioBuffer<double> buf(1, kBlockSize);
@@ -249,10 +334,10 @@ TEST(LadderTPTStage, NewtonStableAtNearSelfOscillation_24dB) {
             const double v = buf.getReadPointer(0)[i];
             ASSERT_TRUE(std::isfinite(v))
                 << "Non-finite output at block " << b << " sample " << i
-                << " (R=3.95). Newton may have diverged.";
+                << " (R=" << rUsed << "). Newton may have diverged.";
             ASSERT_LT(std::abs(v), 10.0)
                 << "Runaway at block " << b << " sample " << i
-                << " val=" << v << " (R=3.95).";
+                << " val=" << v << " (R=" << rUsed << ").";
         }
     }
 }

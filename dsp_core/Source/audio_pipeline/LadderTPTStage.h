@@ -1,7 +1,6 @@
 #pragma once
 
 #include "AudioProcessingStage.h"
-#include "Tanh2xLUT.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -27,14 +26,18 @@ namespace dsp_core::audio_pipeline {
  *   For N=2: S = alpha * (G*s_1 + s_2)
  *   where alpha = 1/(1+g) = 1-G.
  *
- *   Feedback equation (zero-delay, nonlinear):
- *     u1 = x - tanh(2*R*yN)
- *   Combined: F(yN) = yN - G^N*(x - tanh(2*R*yN)) - S = 0
+ *   Feedback equation (zero-delay, nonlinear, textbook Moog):
+ *     u1 = x - tanh(R*yN)
+ *   Combined: F(yN) = yN - G^N*(x - tanh(R*yN)) - S = 0
  *
  *   Solved by Newton iteration with the linear ZDF result as initial guess:
- *     yN_0 = (G^N*x + S) / (1 + 2*R*G^N)
+ *     yN_0 = (G^N*x + S) / (1 + R*G^N)
  *     yN_{n+1} = yN_n - F(yN_n) / F'(yN_n)
- *     F'(y) = 1 + G^N * 2*R * (1 - tanh^2(2*R*y))   (always >= 1; unconditionally stable)
+ *     F'(y) = 1 + G^N * R * (1 - tanh^2(R*y))   (always >= 1; unconditionally stable)
+ *
+ *   Note: small-signal loop gain at DC is R. Self-oscillation onset at R=4
+ *   (textbook 4-pole Moog). kMaxResonance is capped at 3.9 to keep the knob
+ *   top safely below the threshold (resonance peak is huge, but ringing decays).
  *
  * Compile-time stage count via int template parameter:
  *   - N=2 → 12 dB/oct ("LadderTPT-12dB"), softer / Roland-flavored
@@ -106,7 +109,6 @@ class LadderTPTStage : public AudioProcessingStage {
             const double g = std::tan(piOverFs_ * cutoff);
             const double alpha = 1.0 / (1.0 + g); // = 1 - G
             const double G = g * alpha;
-            const double twoR = 2.0 * R;
 
             double GN = G * G;
             if constexpr (N == 4) {
@@ -128,18 +130,18 @@ class LadderTPTStage : public AudioProcessingStage {
                 }
 
                 // Linear-feedback ZDF as initial guess; exact when tanh ≈ identity.
-                double yN = (GN * x + S) / (1.0 + twoR * GN);
+                double yN = (GN * x + S) / (1.0 + R * GN);
 
-                // Newton iteration on F(y) = y - G^N*(x - tanh(2Ry)) - S.
-                // F' >= 1 (proven analytically) so Newton is unconditionally
-                // monotonic and the step magnitude bounds the residual; we
-                // can early-out once |dy| < kNewtonTol.
-                // g_tanh2xLUT.lookup(R*y) = tanh(2*R*y); the chain-rule 2R in
-                // F' is d(2Ry)/dy, not a duplicate of the LUT's internal *2.
+                // Newton iteration on F(y) = y - G^N*(x - tanh(R*y)) - S.
+                // Feedback is tanh(R*y) (not tanh(2R*y) — that would double the
+                // small-signal loop gain and move self-osc from R=4 to R=2,
+                // which is mid-knob and audibly broken). F'(y) = 1 + G^N*R*(1-tanh²);
+                // F' >= 1 so Newton is unconditionally monotonic and the step
+                // magnitude bounds the residual.
                 for (int iter = 0; iter < kNewtonMaxIter; ++iter) {
-                    const double fb = g_tanh2xLUT.lookup(R * yN);
+                    const double fb = std::tanh(R * yN);
                     const double Fy = yN - GN * (x - fb) - S;
-                    const double Fp = 1.0 + GN * twoR * (1.0 - fb * fb);
+                    const double Fp = 1.0 + GN * R * (1.0 - fb * fb);
                     const double dy = Fy / Fp;
                     yN -= dy;
                     if (std::abs(dy) < kNewtonTol) {
@@ -148,7 +150,7 @@ class LadderTPTStage : public AudioProcessingStage {
                 }
 
                 // Forward pass: states resolved, walk the cascade and commit.
-                double u = x - g_tanh2xLUT.lookup(R * yN);
+                double u = x - std::tanh(R * yN);
                 for (int n = 0; n < N; ++n) {
                     const auto k = static_cast<std::size_t>(n);
                     const double v = G * (u - st.s[k]);
@@ -211,7 +213,10 @@ class LadderTPTStage : public AudioProcessingStage {
     static constexpr double kMinCutoffHz = 20.0;
     static constexpr double kNyquistMargin = 0.45;
     static constexpr double kMinResonance = 0.0;
-    static constexpr double kMaxResonance = 4.0;
+    // Self-oscillation threshold (under the corrected tanh(R*y) feedback math)
+    // is R=4 — the textbook 4-pole Moog loop gain. Cap below that so the knob
+    // top can't sustain oscillation; user does not want self-osc.
+    static constexpr double kMaxResonance = 3.9;
     static constexpr double kSmoothingTimeSec = 0.002;
 
     // Newton step magnitude below this triggers early exit. F' >= 1 (proven

@@ -1,5 +1,6 @@
 #include "VirtualAnalogFilterStage.h"
 #include <algorithm>
+#include <cmath>
 #include <juce_core/juce_core.h>
 
 namespace dsp_core::audio_pipeline {
@@ -8,7 +9,9 @@ namespace {
 constexpr double kVaMinCutoffHz = 20.0;
 constexpr double kVaNyquistMargin = 0.45;
 constexpr double kVaMinResonance = 0.0;
-constexpr double kVaMaxResonance = 4.0;
+// Self-osc threshold for 4-pole ladder with tanh(R*y) feedback is R=4; cap
+// below it to keep the knob top out of self-oscillation per user preference.
+constexpr double kVaMaxResonance = 3.9;
 constexpr double kVaSmoothingTimeSec = 0.0002;
 constexpr double kVaSixth = 1.0 / 6.0;
 
@@ -69,8 +72,11 @@ VirtualAnalogFilterStage::cascade(double V, const std::array<double, kMaxStages>
     // Feedback always taps the last stored state slot (numStages_-1's value
     // is mirrored into the unused upper slots via the integration step below,
     // so s[kMaxStages-1] is correct regardless of numStages_).
-    // g_tanh2xLUT.lookup(z) = tanh(2*z), so this is tanh(2*R*s[N-1]).
-    const double fb = g_tanh2xLUT.lookup(R * s[static_cast<std::size_t>(numStages_ - 1)]);
+    // Feedback uses plain tanh(R*y), NOT tanh(2*R*y) — the latter doubles the
+    // small-signal loop gain and would put self-osc at R=2 (mid-knob). Per-stage
+    // tanh(2x) saturation in FilterStage.h is unchanged (that's character, not
+    // loop gain).
+    const double fb = std::tanh(R * s[static_cast<std::size_t>(numStages_ - 1)]);
 
     std::array<double, kMaxStages> d{};
     d[0] = T_ * stages_[0]->computeDelta(V - fb, s[0], gVal);
