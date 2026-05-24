@@ -131,14 +131,20 @@ class LadderTPTStage : public AudioProcessingStage {
                 double yN = (GN * x + S) / (1.0 + twoR * GN);
 
                 // Newton iteration on F(y) = y - G^N*(x - tanh(2Ry)) - S.
-                // 3 iterations is conservative; F' >= 1 so Newton is monotonic.
+                // F' >= 1 (proven analytically) so Newton is unconditionally
+                // monotonic and the step magnitude bounds the residual; we
+                // can early-out once |dy| < kNewtonTol.
                 // g_tanh2xLUT.lookup(R*y) = tanh(2*R*y); the chain-rule 2R in
                 // F' is d(2Ry)/dy, not a duplicate of the LUT's internal *2.
-                for (int iter = 0; iter < 3; ++iter) {
+                for (int iter = 0; iter < kNewtonMaxIter; ++iter) {
                     const double fb = g_tanh2xLUT.lookup(R * yN);
                     const double Fy = yN - GN * (x - fb) - S;
                     const double Fp = 1.0 + GN * twoR * (1.0 - fb * fb);
-                    yN -= Fy / Fp;
+                    const double dy = Fy / Fp;
+                    yN -= dy;
+                    if (std::abs(dy) < kNewtonTol) {
+                        break;
+                    }
                 }
 
                 // Forward pass: states resolved, walk the cascade and commit.
@@ -207,6 +213,14 @@ class LadderTPTStage : public AudioProcessingStage {
     static constexpr double kMinResonance = 0.0;
     static constexpr double kMaxResonance = 4.0;
     static constexpr double kSmoothingTimeSec = 0.002;
+
+    // Newton step magnitude below this triggers early exit. F' >= 1 (proven
+    // earlier) means the step size is an upper bound on the residual; 1e-9 is
+    // ~30 dB below the smallest 24-bit audio quantum, so any residual smaller
+    // than this is inaudible. At low R the linear ZDF guess is near-exact and
+    // we exit after 1-2 iterations.
+    static constexpr double kNewtonTol = 1e-9;
+    static constexpr int kNewtonMaxIter = 4;
 
     struct ChannelState {
         std::array<double, N> s{};

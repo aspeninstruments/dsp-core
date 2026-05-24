@@ -1124,6 +1124,31 @@ endif()
 
 add_test(NAME AutoGainStageTests COMMAND auto_gain_stage_tests)
 
+# FatStage tests (pre-filter low-shelf bass restoration)
+add_executable(fat_stage_tests
+    FatStageTest.cpp
+)
+
+target_include_directories(fat_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(fat_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(fat_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(fat_stage_tests)
+endif()
+
+add_test(NAME FatStageTests COMMAND fat_stage_tests)
+
 # LadderTPTStage tests (TPT-ZDF 12dB/24dB unit tests)
 add_executable(ladder_tpt_stage_tests
     LadderTPTStageTest.cpp

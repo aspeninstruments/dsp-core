@@ -68,6 +68,7 @@
 #include "Source/audio_pipeline/FilterStage.h"
 #include "Source/audio_pipeline/VirtualAnalogFilterStage.h"
 #include "Source/audio_pipeline/LowShelfStage.h"
+#include "Source/audio_pipeline/FatStage.h"
 #include "Source/audio_pipeline/HighShelfStage.h"
 #include "Source/audio_pipeline/SoftClippingStage.h"
 #include "Source/audio_pipeline/SurgeStage.h"

@@ -42,6 +42,7 @@
 #include "Source/audio_pipeline/LowpassStage.cpp"
 #include "Source/audio_pipeline/VirtualAnalogFilterStage.cpp"
 #include "Source/audio_pipeline/LowShelfStage.cpp"
+#include "Source/audio_pipeline/FatStage.cpp"
 #include "Source/audio_pipeline/HighShelfStage.cpp"
 #include "Source/audio_pipeline/SoftClippingStage.cpp"
 #include "Source/audio_pipeline/SurgeStage.cpp"

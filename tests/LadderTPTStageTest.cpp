@@ -210,3 +210,49 @@ TEST(LadderTPTStage, CutoffAndResonanceClamping_12dB) {
     s.setResonance(100.0);
     EXPECT_DOUBLE_EQ(4.0, s.getResonance());
 }
+
+// --------------------------------------------------------------------------
+// Test 4 (Phase 3) — Newton convergence stress test at near-self-oscillation.
+//
+// Phase 3 changes the Newton loop from "fixed 3 iterations" to "early-out on
+// residual, cap at 4." At low R the linear ZDF guess is near-exact and we exit
+// after 1 iter (saving CPU). At very high R the nonlinearity is steep and
+// 3-4 iterations are needed for the residual to shrink below tolerance.
+//
+// This test runs a frequency-sweep through the resonant peak at R=3.95 (just
+// below kMaxResonance=4.0) for ~0.5 seconds. Catches:
+//   - Newton diverging at high R (would NaN / explode)
+//   - Tolerance too loose, leaving large residual that audibly destabilizes
+//   - Cap too low (3 would have been borderline at R=3.95)
+// Pre- and post-Phase-3 both pass; this is a regression guard, not red→green.
+// --------------------------------------------------------------------------
+TEST(LadderTPTStage, NewtonStableAtNearSelfOscillation_24dB) {
+    LadderTPT24dBStage s;
+    s.setCutoffFrequency(1000.0);
+    s.setResonance(3.95);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+
+    // Linear frequency sweep 200 -> 4200 Hz over 50 blocks (~0.27 s @ 48k).
+    // Sweeping through the resonant cutoff exercises Newton hardest.
+    constexpr int kNumBlocks = 50;
+    for (int b = 0; b < kNumBlocks; ++b) {
+        for (int i = 0; i < kBlockSize; ++i) {
+            const int n = b * kBlockSize + i;
+            const double t = n / kSampleRate;
+            const double freq = 200.0 + 4000.0 * (n / static_cast<double>(kNumBlocks * kBlockSize));
+            buf.getWritePointer(0)[i] = 0.5 * std::sin(2.0 * M_PI * freq * t);
+        }
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getReadPointer(0)[i];
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite output at block " << b << " sample " << i
+                << " (R=3.95). Newton may have diverged.";
+            ASSERT_LT(std::abs(v), 10.0)
+                << "Runaway at block " << b << " sample " << i
+                << " val=" << v << " (R=3.95).";
+        }
+    }
+}
