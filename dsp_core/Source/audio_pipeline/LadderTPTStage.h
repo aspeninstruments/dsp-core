@@ -202,7 +202,7 @@ class LadderTPTStage : public AudioProcessingStage {
     double lastCutoffTarget_ = -1.0;
     double lastResonanceTarget_ = -1.0;
 
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothCutoff_;
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothCutoff_;
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothResonance_;
 
     std::vector<ChannelState> channels_;
