@@ -85,6 +85,14 @@ class LowpassStrategy : public ToneFilterStrategy {
         fat_.setFat(percent);
     }
 
+    void setLowShelfRatio(double /*ratio*/) override {
+        // No-op. The LS-to-HS frequency ratio is a Smile-strategy concept.
+    }
+
+    void setQ(double /*q*/) override {
+        // No-op. Bell Q is a Bell-strategy concept; ladder resonance has its own knob.
+    }
+
     /** Read current Fat percent — used by ToneStage::getFat to preserve the
      *  pre-refactor public API. */
     double getFatPercent() const {

@@ -1,23 +1,22 @@
 #pragma once
 
-#include "LowShelfStage.h"
+#include "HighShelfStage.h"
 #include "ToneFilterStrategy.h"
 
 namespace dsp_core::audio_pipeline {
 
 /**
- * Low-shelf tone-filter strategy: standalone user-tunable RBJ low shelf
- * (frequency in Hz, gain in dB, Butterworth Q). Boosts/cuts the band below
- * the corner frequency, leaving the high band largely intact.
+ * High-shelf tone-filter strategy: standalone user-tunable RBJ high shelf
+ * (frequency in Hz, gain in dB, Butterworth Q). Boosts/cuts the band above
+ * the corner frequency, leaving the low band largely intact.
  *
- * Unlike LowpassStrategy, this strategy does NOT own a Fat sub-stage. Fat is
- * a ladder-specific bass-restoration concept; a user-driven low shelf already
- * exposes "boost the bass" directly, so stacking Fat on top would just be a
- * second shelf in series.
+ * Mirrors LowShelfStrategy exactly — the only difference is which RBJ-shelf
+ * direction is applied. Both share the Tone_Cutoff / Tone_Gain APVTS params
+ * and the inline-panel Frequency / Gain controls.
  */
-class LowShelfStrategy : public ToneFilterStrategy {
+class HighShelfStrategy : public ToneFilterStrategy {
   public:
-    LowShelfStrategy() = default;
+    HighShelfStrategy() = default;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) override {
         shelf_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
@@ -32,7 +31,7 @@ class LowShelfStrategy : public ToneFilterStrategy {
     }
 
     juce::String getName() const override {
-        return "LowShelf";
+        return "HighShelf";
     }
 
     // ToneFilterStrategy universal setters
@@ -41,7 +40,7 @@ class LowShelfStrategy : public ToneFilterStrategy {
     }
 
     void setResonance(double /*zeroToOne*/) override {
-        // No-op. The RBJ low shelf uses a fixed Butterworth Q.
+        // No-op. The RBJ high shelf uses a fixed Butterworth Q.
     }
 
     void setShelfGainDb(double gainDb) override {
@@ -49,8 +48,7 @@ class LowShelfStrategy : public ToneFilterStrategy {
     }
 
     void setFat(double /*percent*/) override {
-        // No-op. Fat is a ladder-specific bass-restoration concept; users
-        // already control the shelf gain directly here.
+        // No-op. Fat is a ladder-specific bass-restoration concept.
     }
 
     void setLowShelfRatio(double /*ratio*/) override {
@@ -62,7 +60,7 @@ class LowShelfStrategy : public ToneFilterStrategy {
     }
 
   private:
-    LowShelfStage shelf_;
+    HighShelfStage shelf_;
 };
 
 } // namespace dsp_core::audio_pipeline

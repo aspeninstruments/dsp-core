@@ -16,6 +16,9 @@ void ToneStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numCha
     lp12_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lp24_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lowShelf_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    highShelf_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    smile_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    bell_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lastType_ = type_.load(std::memory_order_acquire);
 }
 
@@ -27,6 +30,12 @@ ToneFilterStrategy* ToneStage::strategyFor(Type t) {
             return &lp24_;
         case Type::LowShelf:
             return &lowShelf_;
+        case Type::HighShelf:
+            return &highShelf_;
+        case Type::Smile:
+            return &smile_;
+        case Type::Bell:
+            return &bell_;
         case Type::Off:
         default:
             return nullptr;
@@ -69,12 +78,18 @@ void ToneStage::reset() {
     lp12_.reset();
     lp24_.reset();
     lowShelf_.reset();
+    highShelf_.reset();
+    smile_.reset();
+    bell_.reset();
 }
 
 void ToneStage::setCutoffFrequency(double frequencyHz) {
     lp12_.setFrequency(frequencyHz);
     lp24_.setFrequency(frequencyHz);
     lowShelf_.setFrequency(frequencyHz);
+    highShelf_.setFrequency(frequencyHz);
+    smile_.setFrequency(frequencyHz); // drives Smile's HS corner; LS recomputes from ratio
+    bell_.setFrequency(frequencyHz);  // bell centre frequency
 }
 
 void ToneStage::setResonance(double zeroToOne) {
@@ -82,25 +97,52 @@ void ToneStage::setResonance(double zeroToOne) {
     const double r = clamped * kToneMaxResonance;
     lp12_.setResonance(r);
     lp24_.setResonance(r);
-    lowShelf_.setResonance(r); // no-op
+    lowShelf_.setResonance(r);  // no-op
+    highShelf_.setResonance(r); // no-op
+    smile_.setResonance(r);     // no-op
+    bell_.setResonance(r);      // no-op
 }
 
 void ToneStage::setShelfGainDb(double gainDb) {
-    lp12_.setShelfGainDb(gainDb);    // no-op
-    lp24_.setShelfGainDb(gainDb);    // no-op
+    lp12_.setShelfGainDb(gainDb); // no-op
+    lp24_.setShelfGainDb(gainDb); // no-op
     lowShelf_.setShelfGainDb(gainDb);
+    highShelf_.setShelfGainDb(gainDb);
+    smile_.setShelfGainDb(gainDb); // linked: drives both Smile shelves
+    bell_.setShelfGainDb(gainDb);  // bell peak gain (reuses Tone_Gain)
 }
 
 void ToneStage::setFat(double percent) {
     lp12_.setFat(percent);
     lp24_.setFat(percent);
-    lowShelf_.setFat(percent); // no-op
+    lowShelf_.setFat(percent);  // no-op
+    highShelf_.setFat(percent); // no-op
+    smile_.setFat(percent);     // no-op
+    bell_.setFat(percent);      // no-op
 }
 
 double ToneStage::getFat() const {
     // Both lowpass strategies are kept primed with the same Fat value via
     // the universal setter, so either is a valid source.
     return lp12_.getFatPercent();
+}
+
+void ToneStage::setLowShelfRatio(double ratio) {
+    lp12_.setLowShelfRatio(ratio);     // no-op
+    lp24_.setLowShelfRatio(ratio);     // no-op
+    lowShelf_.setLowShelfRatio(ratio); // no-op
+    highShelf_.setLowShelfRatio(ratio); // no-op
+    smile_.setLowShelfRatio(ratio);    // applied here (Smile-only)
+    bell_.setLowShelfRatio(ratio);     // no-op
+}
+
+void ToneStage::setQ(double q) {
+    lp12_.setQ(q);     // no-op
+    lp24_.setQ(q);     // no-op
+    lowShelf_.setQ(q); // no-op
+    highShelf_.setQ(q); // no-op
+    smile_.setQ(q);    // no-op
+    bell_.setQ(q);     // applied here (Bell-only)
 }
 
 } // namespace dsp_core::audio_pipeline

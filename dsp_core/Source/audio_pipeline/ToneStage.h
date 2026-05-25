@@ -1,8 +1,11 @@
 #pragma once
 
 #include "AudioProcessingStage.h"
+#include "BellStrategy.h"
+#include "HighShelfStrategy.h"
 #include "LowShelfStrategy.h"
 #include "LowpassStrategy.h"
+#include "SmileStrategy.h"
 #include "ToneFilterStrategy.h"
 #include <atomic>
 
@@ -37,7 +40,7 @@ class ToneStage : public AudioProcessingStage {
   public:
     // APPEND-ONLY: the integer values are persisted via APVTS choice indices
     // (preset/automation stability). Never reorder; only add at the end.
-    enum class Type { Off, Lowpass12dB, Lowpass24dB, LowShelf };
+    enum class Type { Off, Lowpass12dB, Lowpass24dB, LowShelf, HighShelf, Smile, Bell };
 
     ToneStage() = default;
 
@@ -81,10 +84,22 @@ class ToneStage : public AudioProcessingStage {
     void setFat(double percent);
     double getFat() const;
 
+    /** Low-shelf-to-high-shelf frequency ratio for the Smile strategy
+     *  (LS Hz = HS Hz × ratio). Clamped to [0.015, 0.5]. Smile-only;
+     *  other strategies ignore. */
+    void setLowShelfRatio(double ratio);
+
+    /** Bell Q (bandwidth). Clamped to [0.1, 10]. Bell-only; other
+     *  strategies ignore. */
+    void setQ(double q);
+
   private:
     LowpassStrategy<2> lp12_;
     LowpassStrategy<4> lp24_;
     LowShelfStrategy lowShelf_;
+    HighShelfStrategy highShelf_;
+    SmileStrategy smile_;
+    BellStrategy bell_;
 
     std::atomic<bool> enabled_{false};
     std::atomic<Type> type_{Type::Off};

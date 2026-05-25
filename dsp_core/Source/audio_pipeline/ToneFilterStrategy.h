@@ -53,6 +53,15 @@ class ToneFilterStrategy : public AudioProcessingStage {
     /** "Fat" percent (LP-internal bass restoration). LP-only; other
      *  strategies should make this a no-op. */
     virtual void setFat(double percent) = 0;
+
+    /** Low-shelf-to-high-shelf frequency ratio used by the Smile strategy
+     *  (LS Hz = HS Hz × ratio). Smile-only; other strategies should make
+     *  this a no-op. */
+    virtual void setLowShelfRatio(double ratio) = 0;
+
+    /** Bell Q (bandwidth). Bell-only; other strategies should make this
+     *  a no-op. Lower Q = broader bell; higher Q = narrower bell. */
+    virtual void setQ(double q) = 0;
 };
 
 } // namespace dsp_core::audio_pipeline
