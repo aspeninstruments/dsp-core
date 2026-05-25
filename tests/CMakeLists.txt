@@ -1124,6 +1124,31 @@ endif()
 
 add_test(NAME AutoGainStageTests COMMAND auto_gain_stage_tests)
 
+# ToneStage tests (Fat+LP composition; bypass-and-transition correctness)
+add_executable(tone_stage_tests
+    ToneStageTest.cpp
+)
+
+target_include_directories(tone_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(tone_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(tone_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(tone_stage_tests)
+endif()
+
+add_test(NAME ToneStageTests COMMAND tone_stage_tests)
+
 # FatStage tests (pre-filter low-shelf bass restoration)
 add_executable(fat_stage_tests
     FatStageTest.cpp
@@ -1173,6 +1198,31 @@ else()
 endif()
 
 add_test(NAME LadderTPTStageTests COMMAND ladder_tpt_stage_tests)
+
+# VirtualAnalogFilterStage tests (modular RK4 wrapper unit tests)
+add_executable(virtual_analog_filter_stage_tests
+    VirtualAnalogFilterStageTest.cpp
+)
+
+target_include_directories(virtual_analog_filter_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(virtual_analog_filter_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(virtual_analog_filter_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(virtual_analog_filter_stage_tests)
+endif()
+
+add_test(NAME VirtualAnalogFilterStageTests COMMAND virtual_analog_filter_stage_tests)
 
 # FilterTopologyBenchmark tests (SVF vs Ladder vs OTA — templated vs modular)
 add_executable(filter_topology_benchmark_tests

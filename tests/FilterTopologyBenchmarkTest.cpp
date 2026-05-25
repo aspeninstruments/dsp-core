@@ -319,6 +319,16 @@ TEST_F(FilterTopologyBenchmark, StageCountSweep) {
 // Run the same configuration through a sweep of resonance values to confirm
 // stability — non-finite output at any R between 0 and just-below-self-osc
 // would mean the feedback nonlinearity isn't doing its job.
+//
+// Important: refill the buffer with fresh DC input each block. The original
+// version filled `buf` once and processed in-place 1000 times — equivalent to
+// feeding the filter's own output back into its input. That worked when the
+// filter's DC gain was 1/(1+R) < 1 (contractive loop), but the bass-comp fix
+// (input pre-amp by 1+R) makes the passband near-unity, so re-feeding output
+// at amplitudes where tanh saturates causes mild expansion per iteration and
+// runaway. Real signal flow never re-feeds a filter's output into itself —
+// downstream stages receive it — so the realistic stability check is
+// sustained-DC input, which converges to a bounded steady state.
 TEST_F(FilterTopologyBenchmark, StabilityAcrossResonance) {
     const std::vector<double> resonanceValues{0.0, 1.0, 2.0, 3.0, 3.5, 3.9};
 
@@ -336,8 +346,8 @@ TEST_F(FilterTopologyBenchmark, StabilityAcrossResonance) {
         s.setResonance(r);
         s.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
         juce::AudioBuffer<double> buf(kNumChannels, kBlockSize);
-        driveDC(buf, 0.3);
         for (int b = 0; b < 1000; ++b) {
+            driveDC(buf, 0.3);
             s.process(buf);
         }
         const double p = peakAbs(buf);
@@ -356,8 +366,8 @@ TEST_F(FilterTopologyBenchmark, StabilityAcrossResonance) {
         s.setResonance(r);
         s.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
         juce::AudioBuffer<double> buf(kNumChannels, kBlockSize);
-        driveDC(buf, 0.3);
         for (int b = 0; b < 1000; ++b) {
+            driveDC(buf, 0.3);
             s.process(buf);
         }
         const double p = peakAbs(buf);

@@ -72,6 +72,14 @@ class VirtualAnalogFilterStage : public AudioProcessingStage {
         return resonance_.load(std::memory_order_acquire);
     }
 
+    /** Test-only read of the cutoff smoother's current value. */
+    double getCurrentSmoothedCutoff() const {
+        return smoothCutoff_.getCurrentValue();
+    }
+
+    /** Public for tests so they can compute the half-ramp window without hardcoding. */
+    static constexpr double kSmoothingTimeSec = 0.0002;
+
   private:
     struct ChannelState {
         std::array<double, kMaxStages> y{};
@@ -95,7 +103,10 @@ class VirtualAnalogFilterStage : public AudioProcessingStage {
     double lastCutoffTarget_ = -1.0;
     double lastResonanceTarget_ = -1.0;
 
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothCutoff_;
+    // Cutoff uses Multiplicative (exponential / log-in-Hz) — pitch perception
+    // is logarithmic. Resonance stays Linear: no analogous log scale, and
+    // Multiplicative can't cross zero.
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothCutoff_;
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothResonance_;
 
     std::vector<ChannelState> channels_;

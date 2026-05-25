@@ -12,7 +12,6 @@ constexpr double kVaMinResonance = 0.0;
 // Self-osc threshold for 4-pole ladder with tanh(R*y) feedback is R=4; cap
 // below it to keep the knob top out of self-oscillation per user preference.
 constexpr double kVaMaxResonance = 3.9;
-constexpr double kVaSmoothingTimeSec = 0.0002;
 constexpr double kVaSixth = 1.0 / 6.0;
 
 double vaMaxCutoffForSampleRate(double sampleRate) {
@@ -58,8 +57,8 @@ void VirtualAnalogFilterStage::prepareToPlay(double sampleRate, int /*samplesPer
         juce::jlimit(kVaMinCutoffHz, maxCutoff, cutoffHz_.load(std::memory_order_acquire));
     cutoffHz_.store(clampedCutoff, std::memory_order_release);
 
-    smoothCutoff_.reset(sampleRate, kVaSmoothingTimeSec);
-    smoothResonance_.reset(sampleRate, kVaSmoothingTimeSec);
+    smoothCutoff_.reset(sampleRate, VirtualAnalogFilterStage::kSmoothingTimeSec);
+    smoothResonance_.reset(sampleRate, VirtualAnalogFilterStage::kSmoothingTimeSec);
     smoothCutoff_.setCurrentAndTargetValue(clampedCutoff);
     smoothResonance_.setCurrentAndTargetValue(resonance_.load(std::memory_order_acquire));
     lastCutoffTarget_ = clampedCutoff;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioProcessingStage.h"
+#include "FatStage.h"
 #include "LadderTPTStage.h"
 #include <atomic>
 
@@ -60,9 +61,17 @@ class ToneStage : public AudioProcessingStage {
      *  [0, kToneMaxResonance] range (just below self-oscillation). */
     void setResonance(double zeroToOne);
 
+    /** Fat percent [0, 100] — pre-LP low-shelf bass restoration. At 0% the
+     *  inner FatStage is skipped entirely (no biquad work, no IIR state
+     *  accumulation). Only active in the lowpass branches; the Type::Off
+     *  early-return prevents Fat from running outside lowpass modes. */
+    void setFat(double percent);
+    double getFat() const;
+
   private:
     LadderTPT12dBStage lp12_;
     LadderTPT24dBStage lp24_;
+    FatStage fat_;
 
     std::atomic<bool> enabled_{false};
     std::atomic<Type> type_{Type::Off};
@@ -71,6 +80,11 @@ class ToneStage : public AudioProcessingStage {
     // activated filter on the audio thread rather than from setType (which
     // would race concurrent process() reads).
     Type lastType_ = Type::Off;
+
+    // Audio-thread cache for the Fat bypass gate. False until the audio
+    // thread has seen fat > 0; flipping false -> true triggers fat_.reset()
+    // so the shelf IIR doesn't replay stale state from before the bypass.
+    bool lastFatActive_ = false;
 };
 
 } // namespace dsp_core::audio_pipeline

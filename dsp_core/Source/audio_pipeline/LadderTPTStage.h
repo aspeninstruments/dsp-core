@@ -116,9 +116,25 @@ class LadderTPTStage : public AudioProcessingStage {
             }
             // (for N == 2, GN is already G^2)
 
+            // Bass compensation: pre-amp input by (1+R) so the cascade's
+            // small-signal DC gain — 1/(1+R) without compensation — lands at
+            // unity. Coefficient derived from the linearized feedback equation
+            // y_N = x_eff - tanh(R*y_N): for tanh ≈ identity, y_N = x_eff/(1+R);
+            // setting x_eff = (1+R)*x yields y_N = x.
+            //
+            // History: commit ae8ba9a tried (1 + 2R) — twice the correct value —
+            // and was reverted (48854a3, "sounded worse"). Tests in this file
+            // (LadderTPTStage.BassCompensation_*) pin the coefficient down.
+            //
+            // Saturation note: at hot input levels (R*x > 1) the tanh feedback
+            // saturates and compensation slightly over-shoots, adding a touch
+            // of tanh-driven harmonic warmth at large amplitudes — musically
+            // appropriate inside a distortion plugin.
+            const double bassMakeup = 1.0 + R;
+
             for (int ch = 0; ch < numChannels; ++ch) {
                 auto& st = channels_[static_cast<std::size_t>(ch)];
-                const double x = buffer.getWritePointer(ch)[i];
+                const double x = buffer.getWritePointer(ch)[i] * bassMakeup;
 
                 double S;
                 if constexpr (N == 2) {
@@ -200,6 +216,9 @@ class LadderTPTStage : public AudioProcessingStage {
         return smoothCutoff_.getCurrentValue();
     }
 
+    /** Public for tests so they can compute the half-ramp window without hardcoding. */
+    static constexpr double kSmoothingTimeSec = 0.002;
+
     /** Resonance, clamped to [0, 4]. Self-oscillation onset ≈ 3.95. */
     void setResonance(double r) {
         r = juce::jlimit(kMinResonance, kMaxResonance, r);
@@ -217,7 +236,6 @@ class LadderTPTStage : public AudioProcessingStage {
     // is R=4 — the textbook 4-pole Moog loop gain. Cap below that so the knob
     // top can't sustain oscillation; user does not want self-osc.
     static constexpr double kMaxResonance = 3.9;
-    static constexpr double kSmoothingTimeSec = 0.002;
 
     // Newton step magnitude below this triggers early exit. F' >= 1 (proven
     // earlier) means the step size is an upper bound on the residual; 1e-9 is
@@ -240,7 +258,10 @@ class LadderTPTStage : public AudioProcessingStage {
     double lastCutoffTarget_ = -1.0;
     double lastResonanceTarget_ = -1.0;
 
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothCutoff_;
+    // Cutoff uses Multiplicative (exponential / log-in-Hz) — pitch perception
+    // is logarithmic, so equal-time steps cover equal musical distance. Resonance
+    // stays Linear: no analogous log scale, and Multiplicative can't cross zero.
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothCutoff_;
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothResonance_;
 
     std::vector<ChannelState> channels_;

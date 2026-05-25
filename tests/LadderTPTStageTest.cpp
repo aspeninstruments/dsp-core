@@ -92,6 +92,70 @@ TEST(LadderTPTStage, SmoothingTakesMillisecondsToReachTarget_12dB) {
 }
 
 // --------------------------------------------------------------------------
+// Phase 5 — Cutoff smoothing follows a log (multiplicative) curve, not linear.
+//
+// Pitch perception is logarithmic. Linear-in-Hz smoothing means a sweep from
+// 100 Hz → 8000 Hz is already at 4050 Hz (≈6 octaves above start, out of 6.3
+// total) at the midpoint — the bass region whips by in a flash, the top end
+// crawls. Multiplicative smoothing makes each per-sample step a constant
+// ratio: at the midpoint the value is sqrt(100 * 8000) ≈ 894 Hz, exactly
+// half the musical distance.
+//
+// At ramp midpoint (24 samples into a 48-sample / 1 ms ramp at 48k):
+//   Multiplicative midpoint = sqrt(100 * 8000)  ≈ 894 Hz
+//   Linear midpoint         = (100 + 8000) / 2  = 4050 Hz
+//
+// The < 2000 threshold is the differentiator — Linear's 4050 fails, Multiplicative's
+// 894 passes. EXPECT_NEAR tightens to confirm we're actually on the log curve,
+// not just "below 2000 by coincidence."
+// --------------------------------------------------------------------------
+TEST(LadderTPTStage, CutoffSmoothingFollowsLogCurve_24dB) {
+    LadderTPT24dBStage s;
+    s.setCutoffFrequency(100.0);
+    s.prepareToPlay(kSampleRate, 64, 1);
+
+    s.setCutoffFrequency(8000.0);
+
+    // Advance smoother by exactly half the ramp window so we compare midpoint
+    // values. Computing this from kSmoothingTimeSec keeps the test robust to
+    // future smoothing-time tuning.
+    const int halfRampSamples =
+        static_cast<int>(LadderTPT24dBStage::kSmoothingTimeSec * kSampleRate * 0.5);
+    juce::AudioBuffer<double> halfRamp(1, halfRampSamples);
+    halfRamp.clear();
+    s.process(halfRamp);
+
+    const double cutoff = s.getCurrentSmoothedCutoff();
+    EXPECT_GT(cutoff, 400.0)
+        << "Smoother didn't advance from 100 Hz: " << cutoff;
+    EXPECT_LT(cutoff, 2000.0)
+        << "Cutoff at midpoint is " << cutoff
+        << " Hz — Linear smoothing would give ~4050. Expected ~894 (geometric mean).";
+    EXPECT_NEAR(894.4, cutoff, 250.0)
+        << "Cutoff at midpoint should be near sqrt(100*8000)≈894 Hz, got " << cutoff;
+}
+
+TEST(LadderTPTStage, CutoffSmoothingFollowsLogCurve_12dB) {
+    LadderTPT12dBStage s;
+    s.setCutoffFrequency(100.0);
+    s.prepareToPlay(kSampleRate, 64, 1);
+
+    s.setCutoffFrequency(8000.0);
+
+    const int halfRampSamples =
+        static_cast<int>(LadderTPT12dBStage::kSmoothingTimeSec * kSampleRate * 0.5);
+    juce::AudioBuffer<double> halfRamp(1, halfRampSamples);
+    halfRamp.clear();
+    s.process(halfRamp);
+
+    const double cutoff = s.getCurrentSmoothedCutoff();
+    EXPECT_GT(cutoff, 400.0);
+    EXPECT_LT(cutoff, 2000.0)
+        << "12dB variant: midpoint " << cutoff << " Hz suggests Linear smoothing";
+    EXPECT_NEAR(894.4, cutoff, 250.0);
+}
+
+// --------------------------------------------------------------------------
 // Test 2 — State must flush to exactly 0 after long silence.
 //
 // Pre-Phase-1: no ScopedNoDenormals. The TPT integrator states decay
@@ -338,6 +402,216 @@ TEST(LadderTPTStage, NewtonStableAtNearSelfOscillation_24dB) {
             ASSERT_LT(std::abs(v), 10.0)
                 << "Runaway at block " << b << " sample " << i
                 << " val=" << v << " (R=" << rUsed << ").";
+        }
+    }
+}
+
+// --------------------------------------------------------------------------
+// Bass compensation tests (TDD for resonance-induced volume drop).
+//
+// Without compensation, the textbook 4-pole Moog ladder has small-signal
+// DC gain 1/(1+R). At kToneMaxResonance (R=3.5) that's -13 dB — a very
+// audible volume drop as the user sweeps resonance up. This test group
+// pins down the desired post-compensation behavior: signals below cutoff
+// pass through at unity gain across the full resonance range, while the
+// resonance peak character is preserved.
+//
+// Prior history: commit ae8ba9a tried input-side `x *= (1 + 2R)` and was
+// reverted (48854a3, "sounded worse") — the 2R coefficient over-compensated
+// by 2× in the linear regime. The correct linear coefficient is (1 + R),
+// derived from y_N = x_eff - tanh(R*y_N); small-signal y_N = x_eff/(1+R);
+// pre-amp by (1+R) yields unity DC gain. These tests would have caught
+// the previous error.
+// --------------------------------------------------------------------------
+namespace {
+
+// Process N samples of a DC step at amp, return the steady-state output (last
+// sample). DC settles in ~7/cutoff_rad seconds; for cutoff=1kHz that's ≈1ms,
+// well under the 5000-sample (≈104ms) window. Resonance smoother (2ms) is
+// also flushed.
+template <typename Stage>
+double dcSteadyStateGain(double cutoffHz, double R, double inputAmp) {
+    Stage s;
+    s.setCutoffFrequency(cutoffHz);
+    s.setResonance(R);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kSettleSamples = 5000;
+    juce::AudioBuffer<double> buf(1, kSettleSamples);
+    for (int i = 0; i < kSettleSamples; ++i) {
+        buf.getWritePointer(0)[i] = inputAmp;
+    }
+    s.process(buf);
+    return buf.getReadPointer(0)[kSettleSamples - 1] / inputAmp;
+}
+
+// RMS of a buffer over the last `tailSamples` samples (skips startup transient).
+double tailRms(const juce::AudioBuffer<double>& buf, int tailSamples) {
+    const int n = buf.getNumSamples();
+    const int start = std::max(0, n - tailSamples);
+    double sumSq = 0.0;
+    int count = 0;
+    for (int i = start; i < n; ++i) {
+        const double v = buf.getReadPointer(0)[i];
+        sumSq += v * v;
+        ++count;
+    }
+    return std::sqrt(sumSq / std::max(1, count));
+}
+
+template <typename Stage>
+double subCutoffSineGain(double cutoffHz, double sineHz, double R, double amp) {
+    Stage s;
+    s.setCutoffFrequency(cutoffHz);
+    s.setResonance(R);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kTotalSamples = 9600; // 0.2s @ 48k — well past smoothing + 7τ.
+    juce::AudioBuffer<double> buf(1, kTotalSamples);
+    for (int i = 0; i < kTotalSamples; ++i) {
+        buf.getWritePointer(0)[i] = amp * std::sin(2.0 * M_PI * sineHz * i / kSampleRate);
+    }
+    s.process(buf);
+    const double rms = tailRms(buf, 4800); // last 100ms
+    const double inputRms = amp / std::sqrt(2.0);
+    return rms / inputRms;
+}
+
+template <typename Stage>
+double atCutoffSinePeak(double cutoffHz, double R, double amp) {
+    Stage s;
+    s.setCutoffFrequency(cutoffHz);
+    s.setResonance(R);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kTotalSamples = 14400; // 0.3s @ 48k — resonant tail can take longer.
+    juce::AudioBuffer<double> buf(1, kTotalSamples);
+    for (int i = 0; i < kTotalSamples; ++i) {
+        buf.getWritePointer(0)[i] = amp * std::sin(2.0 * M_PI * cutoffHz * i / kSampleRate);
+    }
+    s.process(buf);
+    // Peak amplitude in the steady-state tail.
+    double peak = 0.0;
+    const int start = kTotalSamples - 4800;
+    for (int i = start; i < kTotalSamples; ++i) {
+        peak = std::max(peak, std::abs(buf.getReadPointer(0)[i]));
+    }
+    return peak / amp;
+}
+
+} // namespace
+
+// At small signal levels (amp ≤ 0.1, well below tanh saturation), DC gain
+// should be ≈ 1.0 across the full resonance range. This is the primary
+// correctness assertion — the bug the user reported is exactly this drop.
+// Tolerance: ±0.5 dB (ratio 0.944 to 1.059).
+TEST(LadderTPTStage, BassCompensation_DcGainUnity_SmallSignal_24dB) {
+    for (double R : {0.0, 0.5, 1.0, 2.0, 3.0, 3.5}) {
+        const double gain = dcSteadyStateGain<LadderTPT24dBStage>(1000.0, R, 0.1);
+        EXPECT_NEAR(gain, 1.0, 0.06)
+            << "DC gain at R=" << R << " is " << gain
+            << " (linear theory predicts 1/(1+R) = " << 1.0 / (1.0 + R)
+            << " without compensation). Expected ≈1.0 with (1+R) input makeup.";
+    }
+}
+
+TEST(LadderTPTStage, BassCompensation_DcGainUnity_SmallSignal_12dB) {
+    // For the 12dB (2-pole) variant the linear DC gain is also 1/(1+R) — the
+    // feedback equation y_N = x - tanh(R*y_N) and cascade-DC-gain-of-1 both
+    // generalize to N=2. So the same compensation suffices.
+    for (double R : {0.0, 0.5, 1.0, 2.0, 3.0, 3.5}) {
+        const double gain = dcSteadyStateGain<LadderTPT12dBStage>(1000.0, R, 0.1);
+        EXPECT_NEAR(gain, 1.0, 0.06)
+            << "12dB DC gain at R=" << R << " is " << gain;
+    }
+}
+
+// Sub-cutoff sine RMS should be preserved across resonance. 100 Hz at amp
+// 0.1 with 1 kHz cutoff is well below the corner (frequency response is
+// near-flat in passband) and small enough to stay in the linear-tanh regime.
+TEST(LadderTPTStage, BassCompensation_SubCutoffSineRmsPreserved_24dB) {
+    for (double R : {0.0, 0.5, 1.0, 2.0, 3.0, 3.5}) {
+        const double gain = subCutoffSineGain<LadderTPT24dBStage>(1000.0, 100.0, R, 0.1);
+        EXPECT_NEAR(gain, 1.0, 0.122)
+            << "Sub-cutoff RMS gain at R=" << R << " is " << gain
+            << " (≈" << 20.0 * std::log10(gain) << " dB)";
+    }
+}
+
+TEST(LadderTPTStage, BassCompensation_SubCutoffSineRmsPreserved_12dB) {
+    for (double R : {0.0, 0.5, 1.0, 2.0, 3.0, 3.5}) {
+        const double gain = subCutoffSineGain<LadderTPT12dBStage>(1000.0, 100.0, R, 0.1);
+        EXPECT_NEAR(gain, 1.0, 0.122)
+            << "12dB sub-cutoff RMS gain at R=" << R << " is " << gain;
+    }
+}
+
+// Resonance peak must still bloom — compensation can't flatten the character
+// that makes resonance musically useful. At cutoff frequency, peak amplitude
+// at R=3.0 should be visibly larger than at R=0 (low cutoff resonance keeps
+// the passband intact). At least 2× growth (≈+6 dB) is a conservative bound;
+// real peak gain at R=3.0 is typically +10 dB or more.
+TEST(LadderTPTStage, BassCompensation_ResonancePeakStillBlooms_24dB) {
+    const double peakR0 = atCutoffSinePeak<LadderTPT24dBStage>(1000.0, 0.0, 0.1);
+    const double peakR3 = atCutoffSinePeak<LadderTPT24dBStage>(1000.0, 3.0, 0.1);
+    EXPECT_GT(peakR3, peakR0 * 2.0)
+        << "Resonance peak at R=3.0 (" << peakR3
+        << ") is not meaningfully louder than at R=0 (" << peakR0
+        << "). Compensation appears to flatten the resonant character.";
+}
+
+TEST(LadderTPTStage, BassCompensation_ResonancePeakStillBlooms_12dB) {
+    const double peakR0 = atCutoffSinePeak<LadderTPT12dBStage>(1000.0, 0.0, 0.1);
+    const double peakR3 = atCutoffSinePeak<LadderTPT12dBStage>(1000.0, 3.0, 0.1);
+    // 12dB variant has a lower-Q resonance peak; threshold is a bit looser.
+    EXPECT_GT(peakR3, peakR0 * 1.5)
+        << "12dB resonance peak at R=3.0 (" << peakR3
+        << ") not meaningfully louder than at R=0 (" << peakR0 << ").";
+}
+
+// At R=0 the compensation factor (1+R) is 1.0 — a no-op. Any nonzero R should
+// produce a different output than R=0 for the same input, but R=0 should
+// produce numerically identical output to a hypothetical uncompensated R=0
+// (which is the same code path, since 1+0=1). This is a sanity test that
+// compensation truly degenerates to identity at R=0.
+TEST(LadderTPTStage, BassCompensation_NoOpAtZeroResonance_24dB) {
+    // Process the same input twice; with R=0 the result should match a known
+    // pre-compensation reference. We don't have the reference handy in-test,
+    // so instead verify the weaker property: at R=0, DC gain is exactly 1.0
+    // (within numerical precision), and at R=0 the filter is identical to
+    // a sequential cascade of 4 unity-DC-gain integrators — i.e., passband
+    // is flat at unity, irrespective of the (1+R) multiplier.
+    const double gain = dcSteadyStateGain<LadderTPT24dBStage>(1000.0, 0.0, 0.5);
+    EXPECT_NEAR(gain, 1.0, 1e-6)
+        << "At R=0 the compensation must be a true no-op. Got DC gain " << gain;
+}
+
+// Stability at hot signals + max R. Compensation pre-amps input by 4.5× at
+// R=3.5 — this drives tanh deep into saturation but must remain stable
+// (no NaN, bounded output). The user complained about volume drop, not
+// instability; this guards that the fix doesn't trade one bug for another.
+TEST(LadderTPTStage, BassCompensation_StableAtHotSignalMaxR_24dB) {
+    LadderTPT24dBStage s;
+    s.setCutoffFrequency(500.0);
+    s.setResonance(3.5);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kBlocks = 100; // ~0.5s
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    for (int b = 0; b < kBlocks; ++b) {
+        // Alternating ±1 (rail-to-rail square wave): worst case for input
+        // amplitude after the (1+R) pre-amp = ±4.5.
+        for (int i = 0; i < kBlockSize; ++i) {
+            buf.getWritePointer(0)[i] = (((b * kBlockSize + i) & 1) != 0) ? 1.0 : -1.0;
+        }
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getReadPointer(0)[i];
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite output at block " << b << " sample " << i << ": " << v;
+            ASSERT_LT(std::abs(v), 6.0)
+                << "Runaway at block " << b << " sample " << i << ": " << v
+                << " — pre-amped input is bounded ±4.5; output should not exceed ~5.";
         }
     }
 }
