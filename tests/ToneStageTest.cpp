@@ -1180,3 +1180,107 @@ TEST(ToneStage, Bell_NoClickOnDeactivation) {
         sampleCount += kBlockSize;
     }
 }
+
+// --------------------------------------------------------------------------
+// Hysteresis tests. HysteresisStrategy is a no-op MARKER strategy — the actual
+// magnetic-tape DSP runs at the pipeline-level HysteresisStage (which wraps
+// the waveshaper). These tests pin the contract that ToneStage::process does
+// not touch the buffer when Type::Hysteresis is active, and that activation /
+// deactivation transitions are click-free at the ToneStage boundary.
+// --------------------------------------------------------------------------
+
+TEST(ToneStage, Hysteresis_StrategyIsNoOp) {
+    // With Type::Hysteresis, the buffer should pass through ToneStage
+    // unchanged — the actual hysteresis DSP runs downstream in the pipeline.
+    ToneStage s;
+    s.setType(ToneStage::Type::Hysteresis);
+    s.setEnabled(true);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> input(1, kBlockSize);
+    juce::AudioBuffer<double> output(1, kBlockSize);
+    for (int i = 0; i < kBlockSize; ++i) {
+        const double v = 0.3 * std::sin(2.0 * M_PI * 200.0 * i / kSampleRate);
+        input.setSample(0, i, v);
+        output.setSample(0, i, v);
+    }
+
+    s.process(output);
+
+    for (int i = 0; i < kBlockSize; ++i) {
+        ASSERT_DOUBLE_EQ(input.getSample(0, i), output.getSample(0, i))
+            << "Hysteresis tone type must be a strict no-op at ToneStage (sample " << i << ")";
+    }
+}
+
+TEST(ToneStage, Hysteresis_IgnoresAllParams) {
+    // Even with all the other tone-strategy params pushed to extreme values,
+    // the Hysteresis strategy must remain inert (pass-through at ToneStage).
+    ToneStage s;
+    s.setType(ToneStage::Type::Hysteresis);
+    s.setEnabled(true);
+    s.setCutoffFrequency(50.0);
+    s.setResonance(1.0);
+    s.setFat(100.0);
+    s.setShelfGainDb(24.0);
+    s.setLowShelfRatio(0.5);
+    s.setQ(10.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> input(1, kBlockSize);
+    juce::AudioBuffer<double> output(1, kBlockSize);
+    for (int i = 0; i < kBlockSize; ++i) {
+        const double v = 0.3 * std::sin(2.0 * M_PI * 120.0 * i / kSampleRate);
+        input.setSample(0, i, v);
+        output.setSample(0, i, v);
+    }
+
+    s.process(output);
+
+    for (int i = 0; i < kBlockSize; ++i) {
+        ASSERT_DOUBLE_EQ(input.getSample(0, i), output.getSample(0, i))
+            << "Hysteresis strategy must ignore every other strategy's params (sample " << i << ")";
+    }
+}
+
+TEST(ToneStage, Hysteresis_NoClickOnActivation) {
+    // Switch LP24 -> Hysteresis mid-flight with loud signal; verify no NaN/inf
+    // and no catastrophic sample-to-sample delta at the boundary. (The activated
+    // Hysteresis strategy is a no-op, so the post-switch output equals the input
+    // sine wave — no LP processing — but still must transition cleanly.)
+    ToneStage s;
+    s.setType(ToneStage::Type::Lowpass24dB);
+    s.setEnabled(true);
+    s.setCutoffFrequency(1500.0);
+    s.setResonance(0.6);
+    s.setFat(80.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    int sampleCount = 0;
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 80.0, sampleCount, 0.9);
+        s.process(buf);
+        sampleCount += kBlockSize;
+    }
+    ASSERT_TRUE(std::isfinite(maxAbs(buf)));
+
+    s.setType(ToneStage::Type::Hysteresis);
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 80.0, sampleCount, 0.9);
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getSample(0, i);
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite after LP->Hysteresis switch at block " << block << " sample " << i << " v=" << v;
+            ASSERT_LT(std::abs(v), 10.0)
+                << "Runaway after LP->Hysteresis switch at block " << block << " sample " << i << " v=" << v;
+        }
+        const double delta = maxSampleToSampleDelta(buf);
+        ASSERT_LT(delta, 1.0)
+            << "Click at LP->Hysteresis switch boundary, block " << block << " delta=" << delta;
+        sampleCount += kBlockSize;
+    }
+}

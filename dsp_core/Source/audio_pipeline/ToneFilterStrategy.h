@@ -26,6 +26,12 @@ namespace dsp_core::audio_pipeline {
  *   8. (UI) Add a visibility-toggled sub-row to ToneOptionsPanel and, if the
  *      new type changes the hover-dial role, extend rebindTonePrimary().
  *
+ * Exception — wrap-around-the-waveshaper effects (e.g. Hysteresis): if the new
+ * type doesn't fit a buffer-in/buffer-out model because it wraps the waveshaper
+ * itself, make the strategy a no-op marker. Drive the actual DSP from the
+ * pipeline-level stage's enabled flag (read Tone_Type in processBlock and toggle
+ * the stage). See HysteresisStrategy for the canonical example.
+ *
  * Thread safety:
  *   - process(), reset() run on the audio thread.
  *   - Setters run on the UI thread; they may allocate (RBJ shelf coefficient

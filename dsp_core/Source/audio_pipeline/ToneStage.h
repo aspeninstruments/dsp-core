@@ -3,6 +3,7 @@
 #include "AudioProcessingStage.h"
 #include "BellStrategy.h"
 #include "HighShelfStrategy.h"
+#include "HysteresisStrategy.h"
 #include "LowShelfStrategy.h"
 #include "LowpassStrategy.h"
 #include "SmileStrategy.h"
@@ -40,7 +41,13 @@ class ToneStage : public AudioProcessingStage {
   public:
     // APPEND-ONLY: the integer values are persisted via APVTS choice indices
     // (preset/automation stability). Never reorder; only add at the end.
-    enum class Type { Off, Lowpass12dB, Lowpass24dB, LowShelf, HighShelf, Smile, Bell };
+    //
+    // Note on Hysteresis: HysteresisStrategy is a marker — its process() is a
+    // no-op. The actual hysteresis DSP runs at the pipeline-level HysteresisStage
+    // (which wraps the waveshaper). PluginProcessor::processBlock reads Tone_Type
+    // and toggles HysteresisStage::setHysteresisEnabled accordingly. See
+    // HysteresisStrategy.h for the rationale.
+    enum class Type { Off, Lowpass12dB, Lowpass24dB, LowShelf, HighShelf, Smile, Bell, Hysteresis };
 
     ToneStage() = default;
 
@@ -100,6 +107,7 @@ class ToneStage : public AudioProcessingStage {
     HighShelfStrategy highShelf_;
     SmileStrategy smile_;
     BellStrategy bell_;
+    HysteresisStrategy hysteresis_;
 
     std::atomic<bool> enabled_{false};
     std::atomic<Type> type_{Type::Off};

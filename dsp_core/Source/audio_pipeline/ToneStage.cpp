@@ -19,6 +19,7 @@ void ToneStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numCha
     highShelf_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     smile_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     bell_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    hysteresis_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lastType_ = type_.load(std::memory_order_acquire);
 }
 
@@ -36,6 +37,8 @@ ToneFilterStrategy* ToneStage::strategyFor(Type t) {
             return &smile_;
         case Type::Bell:
             return &bell_;
+        case Type::Hysteresis:
+            return &hysteresis_;
         case Type::Off:
         default:
             return nullptr;
@@ -81,6 +84,7 @@ void ToneStage::reset() {
     highShelf_.reset();
     smile_.reset();
     bell_.reset();
+    hysteresis_.reset();
 }
 
 void ToneStage::setCutoffFrequency(double frequencyHz) {
@@ -90,6 +94,7 @@ void ToneStage::setCutoffFrequency(double frequencyHz) {
     highShelf_.setFrequency(frequencyHz);
     smile_.setFrequency(frequencyHz); // drives Smile's HS corner; LS recomputes from ratio
     bell_.setFrequency(frequencyHz);  // bell centre frequency
+    hysteresis_.setFrequency(frequencyHz); // no-op (marker strategy)
 }
 
 void ToneStage::setResonance(double zeroToOne) {
@@ -101,6 +106,7 @@ void ToneStage::setResonance(double zeroToOne) {
     highShelf_.setResonance(r); // no-op
     smile_.setResonance(r);     // no-op
     bell_.setResonance(r);      // no-op
+    hysteresis_.setResonance(r); // no-op (marker strategy)
 }
 
 void ToneStage::setShelfGainDb(double gainDb) {
@@ -110,6 +116,7 @@ void ToneStage::setShelfGainDb(double gainDb) {
     highShelf_.setShelfGainDb(gainDb);
     smile_.setShelfGainDb(gainDb); // linked: drives both Smile shelves
     bell_.setShelfGainDb(gainDb);  // bell peak gain (reuses Tone_Gain)
+    hysteresis_.setShelfGainDb(gainDb); // no-op (marker strategy)
 }
 
 void ToneStage::setFat(double percent) {
@@ -119,6 +126,7 @@ void ToneStage::setFat(double percent) {
     highShelf_.setFat(percent); // no-op
     smile_.setFat(percent);     // no-op
     bell_.setFat(percent);      // no-op
+    hysteresis_.setFat(percent); // no-op (marker strategy)
 }
 
 double ToneStage::getFat() const {
@@ -134,6 +142,7 @@ void ToneStage::setLowShelfRatio(double ratio) {
     highShelf_.setLowShelfRatio(ratio); // no-op
     smile_.setLowShelfRatio(ratio);    // applied here (Smile-only)
     bell_.setLowShelfRatio(ratio);     // no-op
+    hysteresis_.setLowShelfRatio(ratio); // no-op (marker strategy)
 }
 
 void ToneStage::setQ(double q) {
@@ -143,6 +152,7 @@ void ToneStage::setQ(double q) {
     highShelf_.setQ(q); // no-op
     smile_.setQ(q);    // no-op
     bell_.setQ(q);     // applied here (Bell-only)
+    hysteresis_.setQ(q); // no-op (marker strategy)
 }
 
 } // namespace dsp_core::audio_pipeline

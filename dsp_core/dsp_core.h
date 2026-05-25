@@ -72,6 +72,7 @@
 #include "Source/audio_pipeline/ToneFilterStrategy.h"
 #include "Source/audio_pipeline/LowpassStrategy.h"
 #include "Source/audio_pipeline/LowShelfStrategy.h"
+#include "Source/audio_pipeline/HysteresisStrategy.h"
 #include "Source/audio_pipeline/SmileStrategy.h"
 #include "Source/audio_pipeline/HighShelfStage.h"
 #include "Source/audio_pipeline/HighShelfStrategy.h"
