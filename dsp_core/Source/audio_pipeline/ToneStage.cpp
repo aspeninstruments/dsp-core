@@ -11,13 +11,26 @@ constexpr double kToneMaxResonance = 3.5; // Safely below LadderTPT self-osc ons
 } // namespace
 
 void ToneStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numChannels) {
-    // Prepare both inner filters; only one runs per block but both must
-    // have valid coefficients/state in case Type is switched mid-playback.
+    // Prepare every strategy — only one runs per block, but all must have
+    // valid coefficients/state in case Type is switched mid-playback.
     lp12_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lp24_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
-    fat_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    lowShelf_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lastType_ = type_.load(std::memory_order_acquire);
-    lastFatActive_ = (fat_.getFat() > 0.0);
+}
+
+ToneFilterStrategy* ToneStage::strategyFor(Type t) {
+    switch (t) {
+        case Type::Lowpass12dB:
+            return &lp12_;
+        case Type::Lowpass24dB:
+            return &lp24_;
+        case Type::LowShelf:
+            return &lowShelf_;
+        case Type::Off:
+        default:
+            return nullptr;
+    }
 }
 
 void ToneStage::process(juce::AudioBuffer<double>& buffer) {
@@ -27,57 +40,41 @@ void ToneStage::process(juce::AudioBuffer<double>& buffer) {
 
     const Type t = type_.load(std::memory_order_acquire);
     if (t == Type::Off) {
-        // Fat is intentionally inert here: the user-facing contract binds it
-        // to the lowpass branches only, and skipping process() also means we
-        // never advance lastFatActive_ while Off — so the first lowpass
-        // block sees the 0->nonzero transition correctly.
+        // Fat / shelf state is intentionally inert here: the user-facing
+        // contract binds tone processing to a non-Off type. Skipping process()
+        // means we never advance per-strategy bypass caches while Off — so the
+        // first non-Off block enters cleanly.
         return;
     }
 
     if (t != lastType_) {
-        if (t == Type::Lowpass12dB) {
-            lp12_.reset();
-        } else {
-            lp24_.reset();
+        if (auto* s = strategyFor(t)) {
+            // Reset the newly-active strategy on the audio thread to clear
+            // any stale internal state before it re-enters the signal path.
+            // (LP12 <-> LP24 transitions worked under the pre-refactor
+            // shared-Fat code because the per-block forwarding kept cutoff/
+            // resonance synchronised; that still holds. LP <-> LS topology
+            // switches accept a brief RBJ settle.)
+            s->reset();
         }
-        // Realign Fat's shelf state with whichever LP runs next so an
-        // in-flight topology switch doesn't carry stale shelf output into a
-        // freshly-reset filter.
-        fat_.reset();
         lastType_ = t;
     }
 
-    // Strict 0% bypass: single atomic load, single branch — when Fat is at
-    // zero we incur no biquad work and no FatStage::process call.
-    const double fatPct = fat_.getFat();
-    const bool fatActive = (fatPct > 0.0);
-    if (fatActive) {
-        if (!lastFatActive_) {
-            // Just emerged from bypass — flush whatever state was frozen
-            // when we last skipped processing so the shelf re-enters cleanly.
-            fat_.reset();
-        }
-        fat_.process(buffer);
-    }
-    lastFatActive_ = fatActive;
-
-    if (t == Type::Lowpass12dB) {
-        lp12_.process(buffer);
-    } else {
-        lp24_.process(buffer);
+    if (auto* s = strategyFor(t)) {
+        s->process(buffer);
     }
 }
 
 void ToneStage::reset() {
     lp12_.reset();
     lp24_.reset();
-    fat_.reset();
-    lastFatActive_ = false;
+    lowShelf_.reset();
 }
 
 void ToneStage::setCutoffFrequency(double frequencyHz) {
-    lp12_.setCutoffFrequency(frequencyHz);
-    lp24_.setCutoffFrequency(frequencyHz);
+    lp12_.setFrequency(frequencyHz);
+    lp24_.setFrequency(frequencyHz);
+    lowShelf_.setFrequency(frequencyHz);
 }
 
 void ToneStage::setResonance(double zeroToOne) {
@@ -85,14 +82,25 @@ void ToneStage::setResonance(double zeroToOne) {
     const double r = clamped * kToneMaxResonance;
     lp12_.setResonance(r);
     lp24_.setResonance(r);
+    lowShelf_.setResonance(r); // no-op
+}
+
+void ToneStage::setShelfGainDb(double gainDb) {
+    lp12_.setShelfGainDb(gainDb);    // no-op
+    lp24_.setShelfGainDb(gainDb);    // no-op
+    lowShelf_.setShelfGainDb(gainDb);
 }
 
 void ToneStage::setFat(double percent) {
-    fat_.setFat(percent);
+    lp12_.setFat(percent);
+    lp24_.setFat(percent);
+    lowShelf_.setFat(percent); // no-op
 }
 
 double ToneStage::getFat() const {
-    return fat_.getFat();
+    // Both lowpass strategies are kept primed with the same Fat value via
+    // the universal setter, so either is a valid source.
+    return lp12_.getFatPercent();
 }
 
 } // namespace dsp_core::audio_pipeline

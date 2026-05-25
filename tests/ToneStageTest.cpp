@@ -290,3 +290,237 @@ TEST(ToneStage, FatResetsOnTypeChange) {
         sampleCount += kBlockSize;
     }
 }
+
+namespace {
+// Bandpass-style narrowband RMS estimator: applies a quick goertzel-flavored
+// RMS at the target frequency over the buffer's tail. Used to verify a shelf
+// actually shapes the low band without depending on which specific samples.
+double rmsAtFrequency(const juce::AudioBuffer<double>& buf, double freqHz,
+                      int startSample, int endSample) {
+    double sumI = 0.0;
+    double sumQ = 0.0;
+    int n = 0;
+    for (int i = startSample; i < endSample; ++i) {
+        const double phase = 2.0 * M_PI * freqHz * i / kSampleRate;
+        const double v = buf.getSample(0, i);
+        sumI += v * std::cos(phase);
+        sumQ += v * std::sin(phase);
+        ++n;
+    }
+    const double normI = sumI / n;
+    const double normQ = sumQ / n;
+    // Amplitude of the freqHz tone in the signal (peak = 2*sqrt(I^2+Q^2));
+    // RMS = peak/sqrt(2).
+    return std::sqrt(2.0) * std::sqrt(normI * normI + normQ * normQ);
+}
+} // namespace
+
+// --------------------------------------------------------------------------
+// LowShelf tests. The DSP itself is exercised by LowShelfStage's own tests;
+// these pin the ToneStage strategy plumbing: that LowShelf is reachable
+// through ToneStage, ignores LP-only params, and is click-free on activation
+// or deactivation.
+// --------------------------------------------------------------------------
+
+TEST(ToneStage, LowShelf_AtZeroDb_IsApproxIdentity) {
+    ToneStage s;
+    s.setType(ToneStage::Type::LowShelf);
+    s.setEnabled(true);
+    s.setCutoffFrequency(200.0);
+    s.setShelfGainDb(0.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kTotalSamples = 9600; // 0.2s @ 48k
+    constexpr double kSineHz = 100.0;
+    constexpr double kAmp = 0.3;
+
+    juce::AudioBuffer<double> buf(1, kTotalSamples);
+    for (int i = 0; i < kTotalSamples; ++i) {
+        buf.setSample(0, i, kAmp * std::sin(2.0 * M_PI * kSineHz * i / kSampleRate));
+    }
+    s.process(buf);
+
+    // RBJ low shelf at 0 dB gain is mathematically identity, but accumulates
+    // tiny floating-point error. Tail-window RMS should match the input RMS
+    // to within ±0.1 dB.
+    const double inputRms = kAmp / std::sqrt(2.0);
+    const double outRms = rmsAtFrequency(buf, kSineHz, kTotalSamples - 4800, kTotalSamples);
+    const double gainDb = 20.0 * std::log10(outRms / inputRms);
+    EXPECT_NEAR(gainDb, 0.0, 0.1)
+        << "LowShelf at 0 dB should be transparent — measured " << gainDb << " dB";
+}
+
+TEST(ToneStage, LowShelf_PositiveGain_BoostsBass) {
+    ToneStage s;
+    s.setType(ToneStage::Type::LowShelf);
+    s.setEnabled(true);
+    s.setCutoffFrequency(400.0); // Comfortably above 100 Hz probe
+    s.setShelfGainDb(12.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kTotalSamples = 9600;
+    constexpr double kSineHz = 100.0;
+    constexpr double kAmp = 0.1;
+
+    juce::AudioBuffer<double> buf(1, kTotalSamples);
+    for (int i = 0; i < kTotalSamples; ++i) {
+        buf.setSample(0, i, kAmp * std::sin(2.0 * M_PI * kSineHz * i / kSampleRate));
+    }
+    s.process(buf);
+
+    const double inputRms = kAmp / std::sqrt(2.0);
+    const double outRms = rmsAtFrequency(buf, kSineHz, kTotalSamples - 4800, kTotalSamples);
+    const double gainDb = 20.0 * std::log10(outRms / inputRms);
+    // RBJ shelf reaches the full plateau gain well below the corner. 100 Hz
+    // sits a comfortable octave+ below the 400 Hz corner, so the boost should
+    // be within ~1 dB of the +12 dB target.
+    EXPECT_NEAR(gainDb, 12.0, 1.5)
+        << "LowShelf +12 dB at 100 Hz (corner 400 Hz) should boost ~12 dB; got " << gainDb;
+}
+
+TEST(ToneStage, LowShelf_NegativeGain_CutsBass) {
+    ToneStage s;
+    s.setType(ToneStage::Type::LowShelf);
+    s.setEnabled(true);
+    s.setCutoffFrequency(400.0);
+    s.setShelfGainDb(-12.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kTotalSamples = 9600;
+    constexpr double kSineHz = 100.0;
+    constexpr double kAmp = 0.1;
+
+    juce::AudioBuffer<double> buf(1, kTotalSamples);
+    for (int i = 0; i < kTotalSamples; ++i) {
+        buf.setSample(0, i, kAmp * std::sin(2.0 * M_PI * kSineHz * i / kSampleRate));
+    }
+    s.process(buf);
+
+    const double inputRms = kAmp / std::sqrt(2.0);
+    const double outRms = rmsAtFrequency(buf, kSineHz, kTotalSamples - 4800, kTotalSamples);
+    const double gainDb = 20.0 * std::log10(outRms / inputRms);
+    EXPECT_NEAR(gainDb, -12.0, 1.5)
+        << "LowShelf -12 dB at 100 Hz should cut ~12 dB; got " << gainDb;
+}
+
+TEST(ToneStage, LowShelf_IgnoresResonanceAndFat) {
+    // Resonance and Fat are LP-only — LowShelf strategy must treat them as
+    // no-ops. Compare two ToneStage instances driven identically except one
+    // has Resonance=1.0 and Fat=100 set.
+    ToneStage clean;
+    ToneStage poisoned;
+
+    auto configure = [](ToneStage& s) {
+        s.setType(ToneStage::Type::LowShelf);
+        s.setEnabled(true);
+        s.setCutoffFrequency(300.0);
+        s.setShelfGainDb(6.0);
+        s.prepareToPlay(kSampleRate, kBlockSize, 1);
+    };
+    configure(clean);
+    configure(poisoned);
+    poisoned.setResonance(1.0);
+    poisoned.setFat(100.0);
+
+    juce::AudioBuffer<double> bufA(1, kBlockSize);
+    juce::AudioBuffer<double> bufB(1, kBlockSize);
+    constexpr double kAmp = 0.2;
+    for (int i = 0; i < kBlockSize; ++i) {
+        const double v = kAmp * std::sin(2.0 * M_PI * 120.0 * i / kSampleRate);
+        bufA.setSample(0, i, v);
+        bufB.setSample(0, i, v);
+    }
+    clean.process(bufA);
+    poisoned.process(bufB);
+
+    for (int i = 0; i < kBlockSize; ++i) {
+        ASSERT_DOUBLE_EQ(bufA.getSample(0, i), bufB.getSample(0, i))
+            << "LowShelf must ignore Resonance/Fat at sample " << i;
+    }
+}
+
+TEST(ToneStage, LowShelf_NoClickOnActivation) {
+    // Switch LP24 -> LowShelf mid-flight with loud signal; verify no
+    // NaN/inf and no catastrophic sample-to-sample discontinuity in the
+    // first post-switch block.
+    ToneStage s;
+    s.setType(ToneStage::Type::Lowpass24dB);
+    s.setEnabled(true);
+    s.setCutoffFrequency(1500.0);
+    s.setResonance(0.6);
+    s.setFat(80.0);
+    s.setShelfGainDb(9.0); // priming LS while it's idle
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    int sampleCount = 0;
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 80.0, sampleCount, 0.9);
+        s.process(buf);
+        sampleCount += kBlockSize;
+    }
+    ASSERT_TRUE(std::isfinite(maxAbs(buf)));
+
+    s.setType(ToneStage::Type::LowShelf);
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 80.0, sampleCount, 0.9);
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getSample(0, i);
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite after LP->LowShelf switch at block " << block
+                << " sample " << i << " v=" << v;
+            ASSERT_LT(std::abs(v), 10.0)
+                << "Runaway after LP->LowShelf switch at block " << block
+                << " sample " << i << " v=" << v;
+        }
+        const double delta = maxSampleToSampleDelta(buf);
+        ASSERT_LT(delta, 1.0) << "Click at LP->LowShelf switch boundary, block " << block
+                              << " delta=" << delta;
+        sampleCount += kBlockSize;
+    }
+}
+
+TEST(ToneStage, LowShelf_NoClickOnDeactivation) {
+    // Symmetric to activation: LowShelf -> LP12 mid-flight.
+    ToneStage s;
+    s.setType(ToneStage::Type::LowShelf);
+    s.setEnabled(true);
+    s.setCutoffFrequency(300.0);
+    s.setShelfGainDb(12.0);
+    s.setResonance(0.5); // priming LP while it's idle
+    s.setFat(50.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    int sampleCount = 0;
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 80.0, sampleCount, 0.9);
+        s.process(buf);
+        sampleCount += kBlockSize;
+    }
+    ASSERT_TRUE(std::isfinite(maxAbs(buf)));
+
+    s.setType(ToneStage::Type::Lowpass12dB);
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 80.0, sampleCount, 0.9);
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getSample(0, i);
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite after LowShelf->LP switch at block " << block
+                << " sample " << i << " v=" << v;
+            ASSERT_LT(std::abs(v), 10.0)
+                << "Runaway after LowShelf->LP switch at block " << block
+                << " sample " << i << " v=" << v;
+        }
+        const double delta = maxSampleToSampleDelta(buf);
+        ASSERT_LT(delta, 1.0) << "Click at LowShelf->LP switch boundary, block " << block
+                              << " delta=" << delta;
+        sampleCount += kBlockSize;
+    }
+}
