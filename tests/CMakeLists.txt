@@ -301,6 +301,31 @@ endif()
 
 add_test(NAME LowShelfStageTests COMMAND low_shelf_stage_tests)
 
+# FirstOrderShelfStage tests
+add_executable(first_order_shelf_stage_tests
+    FirstOrderShelfStageTest.cpp
+)
+
+target_include_directories(first_order_shelf_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(first_order_shelf_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(first_order_shelf_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(first_order_shelf_stage_tests)
+endif()
+
+add_test(NAME FirstOrderShelfStageTests COMMAND first_order_shelf_stage_tests)
+
 # HighShelfStage tests
 add_executable(high_shelf_stage_tests
     HighShelfStageTest.cpp

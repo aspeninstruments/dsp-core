@@ -59,6 +59,10 @@ class BellStrategy : public ToneFilterStrategy {
         bell_.setQ(q);
     }
 
+    void setEmph(double /*zeroToOne*/) override {
+        // No-op. Emph is a Hysteresis pre/de-emphasis concept.
+    }
+
   private:
     BellStage bell_;
 };

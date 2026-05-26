@@ -59,6 +59,10 @@ class HighShelfStrategy : public ToneFilterStrategy {
         // No-op. Bell Q is a Bell-strategy concept; this shelf uses fixed Butterworth Q.
     }
 
+    void setEmph(double /*zeroToOne*/) override {
+        // No-op. Emph is a Hysteresis pre/de-emphasis concept.
+    }
+
   private:
     HighShelfStage shelf_;
 };

@@ -8,6 +8,7 @@
 #include "LowpassStrategy.h"
 #include "SmileStrategy.h"
 #include "ToneFilterStrategy.h"
+#include <array>
 #include <atomic>
 
 namespace dsp_core::audio_pipeline {
@@ -69,6 +70,7 @@ class ToneStage : public AudioProcessingStage {
 
     void setType(Type t) {
         type_.store(t, std::memory_order_release);
+        markFrequencyResponseDirty();
     }
     Type getType() const {
         return type_.load(std::memory_order_acquire);
@@ -100,6 +102,71 @@ class ToneStage : public AudioProcessingStage {
      *  strategies ignore. */
     void setQ(double q);
 
+    /** Hysteresis pre/de-emphasis macro [0, 1]. Drives the HF shelf gain
+     *  around the saturator (this stage's hysteresis_ runs the shelf in
+     *  either the pre- or de-emphasis role; see setHysteresisRole). */
+    void setEmph(double zeroToOne);
+
+    /** Configure this stage's hysteresis_ sub-strategy as the pre-emphasis or
+     *  de-emphasis arm of the NAB-style shelf pair. Call once at plugin
+     *  construction BEFORE prepareToPlay — does not change at runtime. */
+    void setHysteresisRole(HysteresisStrategy::Role role) {
+        hysteresis_.setRole(role);
+    }
+
+    // ── Frequency-response LUT (UI-thread pull source for the visualizer) ──
+    //
+    // Sampled magnitude response of the *currently selected* strategy at
+    // log-spaced frequencies from 10 Hz to 20 kHz, in dB. Published via
+    // atomic version bump.
+    //
+    // Threading: parameter setters store the new value and flag the LUT
+    // dirty (no recompute, no allocation — safe to call from the audio
+    // thread, which PluginProcessor::updatePipelineParameters does every
+    // block). The owner of the message thread (in this plugin, the editor
+    // timer) drives the actual recompute via recomputeFrequencyResponseIfDirty().
+    //
+    // 1024 samples (≈93 per octave across 11 octaves) is dense enough that
+    // a Bell at Q=10 or Moog ladder at R≈3.5 — both with sub-octave peak
+    // bandwidths — render smoothly at typical plot widths and stay stable
+    // as cutoff modulates (sparse sampling would let the peak's apex slip
+    // between bins frame-to-frame, producing visible jitter).
+    //
+    // Hysteresis: the curve represents the net pre+de NAB linear cascade —
+    // see ToneFrequencyResponse.h for the per-strategy magnitude details.
+
+    static constexpr int kFrequencyResponseSize = 1024;
+    static constexpr double kFrequencyResponseMinHz = 10.0;
+    static constexpr double kFrequencyResponseMaxHz = 20000.0;
+    static constexpr double kFrequencyResponseDbRange = 24.0; // matches Tone_Gain extremes
+
+    const double* getFrequencyResponseLUT() const {
+        return frequencyResponseBuffers_[frequencyResponseBufferIndex_.load(std::memory_order_acquire)].data();
+    }
+    const std::atomic<uint64_t>* getFrequencyResponseVersion() const {
+        return &frequencyResponseVersion_;
+    }
+    int getFrequencyResponseSize() const {
+        return kFrequencyResponseSize;
+    }
+    double getFrequencyResponseMinHz() const {
+        return kFrequencyResponseMinHz;
+    }
+    double getFrequencyResponseMaxHz() const {
+        return kFrequencyResponseMaxHz;
+    }
+    double getFrequencyResponseDbRange() const {
+        return kFrequencyResponseDbRange;
+    }
+
+    /** Recompute the frequency-response LUT if any parameter setter has
+     *  marked it dirty since the last recompute. Safe to call at any
+     *  cadence — coalesces multiple setters into one recompute, no-op if
+     *  nothing changed. MUST be called from a non-audio thread (allocates
+     *  via juce::dsp::IIR::Coefficients::makeXxx for biquad strategies).
+     *  Driven by the editor's per-frame timer; tests can call directly. */
+    void recomputeFrequencyResponseIfDirty();
+
   private:
     LowpassStrategy<2> lp12_;
     LowpassStrategy<4> lp24_;
@@ -119,6 +186,42 @@ class ToneStage : public AudioProcessingStage {
 
     /** Returns the strategy for the given type, or nullptr for Type::Off. */
     ToneFilterStrategy* strategyFor(Type t);
+
+    // Cached params for the UI-thread frequency-response recompute. Each
+    // setter writes its corresponding atomic before recomputeFrequencyResponse()
+    // runs. Defaults match the per-strategy defaults documented in
+    // PluginProcessor / APVTS so the LUT is sensible at construction.
+    std::atomic<double> cachedCutoffHz_{3000.0};
+    std::atomic<double> cachedResonanceNorm_{0.0};
+    std::atomic<double> cachedShelfGainDb_{0.0};
+    std::atomic<double> cachedFatPercent_{0.0};
+    std::atomic<double> cachedLowShelfRatio_{0.0625};
+    std::atomic<double> cachedBellQ_{1.0};
+    std::atomic<double> cachedEmphNorm_{0.5};
+    std::atomic<double> cachedSampleRate_{48000.0};
+
+    // Double-buffered frequency-response LUT. Writers fill the inactive
+    // buffer (index = 1 - active), atomically flip the index, and bump the
+    // version. Readers (visualizer paint) load index + version with acquire
+    // ordering and read the active buffer.
+    std::array<std::array<double, kFrequencyResponseSize>, 2> frequencyResponseBuffers_{};
+    std::atomic<int> frequencyResponseBufferIndex_{0};
+    std::atomic<uint64_t> frequencyResponseVersion_{0};
+    std::array<double, kFrequencyResponseSize> frequencyResponseHz_{};
+
+    // Dirty flag bumped by audio-thread setters; cleared by the message-
+    // thread recomputeFrequencyResponseIfDirty(). Using a counter rather
+    // than a bool so the editor timer can detect that multiple setter
+    // calls happened between polls (still results in one recompute — the
+    // observed-and-acted-on counter value tracks the last-seen state).
+    std::atomic<uint64_t> frequencyResponseDirtyCounter_{0};
+    std::atomic<uint64_t> frequencyResponseLastBuiltCounter_{0};
+
+    void initFrequencyResponseFrequencies();
+    void recomputeFrequencyResponse();
+    void markFrequencyResponseDirty() {
+        frequencyResponseDirtyCounter_.fetch_add(1, std::memory_order_release);
+    }
 };
 
 } // namespace dsp_core::audio_pipeline

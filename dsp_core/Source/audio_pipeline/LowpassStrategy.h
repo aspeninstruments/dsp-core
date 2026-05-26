@@ -93,6 +93,10 @@ class LowpassStrategy : public ToneFilterStrategy {
         // No-op. Bell Q is a Bell-strategy concept; ladder resonance has its own knob.
     }
 
+    void setEmph(double /*zeroToOne*/) override {
+        // No-op. Emph is a Hysteresis pre/de-emphasis concept.
+    }
+
     /** Read current Fat percent — used by ToneStage::getFat to preserve the
      *  pre-refactor public API. */
     double getFatPercent() const {
