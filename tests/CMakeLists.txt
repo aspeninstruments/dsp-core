@@ -1124,6 +1124,33 @@ endif()
 
 add_test(NAME BiasStageTests COMMAND bias_stage_tests)
 
+# SlotVisualizerPublisher tests — verifies the lock-free publish channel
+# (env ring wrap, LFO phase / shape-version bumps, ModulatorSlotStage::setType
+# propagation). Bundled together because they all exercise the same struct.
+add_executable(slot_visualizer_publisher_tests
+    SlotVisualizerPublisherTest.cpp
+)
+
+target_include_directories(slot_visualizer_publisher_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(slot_visualizer_publisher_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(slot_visualizer_publisher_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(slot_visualizer_publisher_tests)
+endif()
+
+add_test(NAME SlotVisualizerPublisherTests COMMAND slot_visualizer_publisher_tests)
+
 # EnvelopeFollowerStage tests
 add_executable(envelope_follower_stage_tests
     EnvelopeFollowerStageTest.cpp

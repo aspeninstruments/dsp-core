@@ -8,6 +8,9 @@
 
 namespace dsp_core::audio_pipeline {
 
+struct SlotVisualizerPublisher;
+
+
 /**
  * Passthrough envelope follower — measures input level and publishes it
  * to an atomic owned by the processor for modulation routing. Audio is
@@ -86,6 +89,14 @@ class EnvelopeFollowerStage : public AudioProcessingStage {
         return releaseSec_;
     }
 
+    /// Lock-free publish channel for the envelope-follower's UI trace. nullptr
+    /// disables publishing. The downsample ratio used to populate the channel's
+    /// ring is recomputed against the current sample rate by prepareToPlay.
+    void setVisualizerPublisher(SlotVisualizerPublisher* pub) {
+        visualizerPublisher_ = pub;
+        envDownsampleCounter_ = 0;
+    }
+
   private:
     void recomputeCoefficients();
     void updateHpfCoefficients();
@@ -116,6 +127,13 @@ class EnvelopeFollowerStage : public AudioProcessingStage {
     // (mutated in-place on cutoff changes — allocation-free per block).
     std::vector<juce::dsp::IIR::Filter<double>> hpfFilters_;
     juce::dsp::IIR::Coefficients<double>::Ptr hpfCoefficients_;
+
+    // Lock-free publish channel for the scrolling envelope trace, set by
+    // ModulatorSlotStage::setVisualizerPublisher. nullptr means "no UI is
+    // listening" — process() then skips ring writes entirely.
+    SlotVisualizerPublisher* visualizerPublisher_{nullptr};
+    int envDownsampleRatio_{1};  // ring stride in audio samples — computed in prepareToPlay
+    int envDownsampleCounter_{0};
 
     // dB floor — silence sits here. Used both as the smoother's lower bound
     // and as the minus-infinity reference for JUCE's gain<->dB helpers.

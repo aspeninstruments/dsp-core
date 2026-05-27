@@ -117,6 +117,7 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AutoSquashStage.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AutoRestoreStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AutoRestoreStage.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/SlotVisualizerPublisher.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/EnvelopeFollowerStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/EnvelopeFollowerStage.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/LfoStage.h"

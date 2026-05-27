@@ -90,6 +90,7 @@
 #include "Source/audio_pipeline/AutoGainState.h"
 #include "Source/audio_pipeline/AutoSquashStage.h"
 #include "Source/audio_pipeline/AutoRestoreStage.h"
+#include "Source/audio_pipeline/SlotVisualizerPublisher.h"
 #include "Source/audio_pipeline/EnvelopeFollowerStage.h"
 #include "Source/audio_pipeline/LfoStage.h"
 #include "Source/audio_pipeline/ModulatorSlotStage.h"

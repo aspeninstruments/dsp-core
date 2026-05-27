@@ -1,4 +1,5 @@
 #include "EnvelopeFollowerStage.h"
+#include "SlotVisualizerPublisher.h"
 #include <algorithm>
 #include <cmath>
 
@@ -44,6 +45,15 @@ void EnvelopeFollowerStage::prepareToPlay(double sampleRate, int /*samplesPerBlo
     const double cutoffHz = hpfCutoffHz_.load(std::memory_order_acquire);
     hpfCoefficients_ = juce::dsp::IIR::Coefficients<double>::makeFirstOrderHighPass(sampleRate_, cutoffHz);
     resizeHpfFiltersForChannels(2);
+
+    // Pick the visualizer ring stride so kEnvRingSize entries cover roughly
+    // kEnvTargetHistorySec of audio at the current SR. At 48 kHz / 300 ms /
+    // 512 entries that's a stride of ~28 audio samples per UI sample, which
+    // gives the message thread > 4× the ring resolution per 60 Hz paint.
+    envDownsampleRatio_ = std::max(1, static_cast<int>(std::lround(
+        sampleRate_ * SlotVisualizerPublisher::kEnvTargetHistorySec
+        / static_cast<double>(SlotVisualizerPublisher::kEnvRingSize))));
+    envDownsampleCounter_ = 0;
 }
 
 void EnvelopeFollowerStage::setAttackReleaseSec(double attackSec, double releaseSec) {
@@ -161,6 +171,19 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
 
         // 4. dB-domain one-pole. Walks envDb toward targetDb at the chosen rate.
         envDb += coef * (targetDb - envDb);
+
+        // Publish a ring entry every envDownsampleRatio_ samples so the UI can
+        // draw a scrolling time-domain trace. Ring slot is a plain double; the
+        // release-store on envWriteIndex is what synchronizes the slot writes
+        // with the UI's acquire-load. envVersion is bumped once per block below.
+        if (visualizerPublisher_ != nullptr && ++envDownsampleCounter_ >= envDownsampleRatio_) {
+            envDownsampleCounter_ = 0;
+            const double sampleLin = juce::Decibels::decibelsToGain(envDb, kEnvDbFloor_);
+            const int idx = visualizerPublisher_->envWriteIndex.load(std::memory_order_relaxed);
+            visualizerPublisher_->envRing[static_cast<size_t>(idx)] = sampleLin;
+            const int next = (idx + 1) & SlotVisualizerPublisher::kEnvRingMask;
+            visualizerPublisher_->envWriteIndex.store(next, std::memory_order_release);
+        }
     }
 
     envDb_ = envDb;
@@ -170,6 +193,14 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
     // floor, so silence reads as exactly 0 downstream.
     const double envLin = juce::Decibels::decibelsToGain(envDb, kEnvDbFloor_);
     envelopeStorage_.store(envLin, std::memory_order_release);
+
+    // Per-block heartbeat for the UI — bumping the version flags "new data
+    // available" so the visualizer's repaint logic and any test observers can
+    // notice activity even when writeIndex hasn't moved (zero ring writes in a
+    // sub-stride block at high SR is theoretically possible).
+    if (visualizerPublisher_ != nullptr) {
+        visualizerPublisher_->envVersion.fetch_add(1, std::memory_order_release);
+    }
 }
 
 void EnvelopeFollowerStage::reset() {

@@ -3,6 +3,7 @@
 #include "AudioProcessingStage.h"
 #include "EnvelopeFollowerStage.h"
 #include "LfoStage.h"
+#include "SlotVisualizerPublisher.h"
 #include <atomic>
 
 namespace dsp_core::audio_pipeline {
@@ -60,6 +61,15 @@ class ModulatorSlotStage : public AudioProcessingStage {
                 envStage_.setEnabled(false);
             }
             slotStorage_.store(0.0, std::memory_order_release);
+            if (visualizerPublisher_ != nullptr) {
+                // Reflect the new type for the UI's trace selection, and bump
+                // both version counters so the visualizer rebuilds (don't
+                // briefly show a stale envelope ring or LFO shape from the
+                // previous type).
+                visualizerPublisher_->activeKind.store(static_cast<int>(t), std::memory_order_release);
+                visualizerPublisher_->envVersion.fetch_add(1, std::memory_order_release);
+                visualizerPublisher_->lfoShapeVersion.fetch_add(1, std::memory_order_release);
+            }
         }
     }
 
@@ -74,11 +84,26 @@ class ModulatorSlotStage : public AudioProcessingStage {
         return lfoStage_;
     }
 
+    /// Attach (or detach, with nullptr) the lock-free visualizer publish channel
+    /// for this slot. Forwards the same pointer to both sub-stages so whichever
+    /// is active publishes into the shared channel. Safe to call before or
+    /// between prepareToPlay/process calls; not safe to call concurrently with
+    /// process().
+    void setVisualizerPublisher(SlotVisualizerPublisher* pub) {
+        visualizerPublisher_ = pub;
+        envStage_.setVisualizerPublisher(pub);
+        lfoStage_.setVisualizerPublisher(pub);
+        if (pub != nullptr) {
+            pub->activeKind.store(type_.load(std::memory_order_acquire), std::memory_order_release);
+        }
+    }
+
   private:
     std::atomic<double>& slotStorage_;
     EnvelopeFollowerStage envStage_;
     LfoStage lfoStage_;
     std::atomic<int> type_{static_cast<int>(Type::Envelope)};
+    SlotVisualizerPublisher* visualizerPublisher_{nullptr};
 };
 
 } // namespace dsp_core::audio_pipeline

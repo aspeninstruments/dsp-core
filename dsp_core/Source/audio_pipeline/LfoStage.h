@@ -6,6 +6,9 @@
 
 namespace dsp_core::audio_pipeline {
 
+struct SlotVisualizerPublisher;
+
+
 /**
  * Low-frequency oscillator. Audio is passthrough — like EnvelopeFollowerStage,
  * the stage publishes a unipolar [0, 1] modulation value to a processor-owned
@@ -79,12 +82,36 @@ class LfoStage : public AudioProcessingStage {
     /// testing and for UI display.
     static double periodInBeats(Division d, Flavor f);
 
-  private:
     /// phase is the wrapped position in [0, 1) used by the periodic shapes;
     /// cyclePosition is the unwrapped running cycle count used by Random so
-    /// each cycle traverses a fresh region of noise space.
+    /// each cycle traverses a fresh region of noise space. Public so the UI
+    /// can render the same one-cycle shape the audio thread is computing.
     static double evaluateShape(Shape s, double phase, double cyclePosition, unsigned int seed);
 
+    /// Lock-free publish channel for the LFO's UI trace (phase indicator +
+    /// shape-version bumps). nullptr disables publishing. The change-detection
+    /// state is reset on attach so the next process() always re-bumps
+    /// lfoShapeVersion — the visualizer rebuilds even if shape/seed haven't
+    /// moved since the previous attachment.
+    void setVisualizerPublisher(SlotVisualizerPublisher* pub) {
+        visualizerPublisher_ = pub;
+        lastPublishedShape_ = -1;
+        lastPublishedSeed_ = 0;
+        lastPublishedCycleFloor_ = -1.0;
+    }
+
+    /// Direct atomic-pointer accessors for the visualizer's static-shape
+    /// rebuild path. The editor reads shape + seed at rebuild time so the
+    /// rendered curve always matches whatever the audio thread is actually
+    /// evaluating.
+    const std::atomic<int>* getShapeAtomicPtr() const {
+        return &shape_;
+    }
+    const std::atomic<unsigned int>* getSeedAtomicPtr() const {
+        return &seed_;
+    }
+
+  private:
     std::atomic<double>& lfoStorage_;
 
     std::atomic<bool> enabled_{false};
@@ -96,6 +123,12 @@ class LfoStage : public AudioProcessingStage {
     std::atomic<double> phaseOffset_{0.0};
     std::atomic<unsigned int> seed_{0xA5F37B12u};
 
+    /// Push the current audio-thread state out to the visualizer publisher
+    /// (phase indicator + per-cycle shape rebuild). Cheap when the publisher
+    /// is null. Extracted from process() so the dispatch loop's cognitive
+    /// complexity stays low.
+    void publishVisualizerStateIfAttached(Shape shape, double effectivePhase, double phaseOffset, unsigned int seed);
+
     double sampleRate_{48000.0};
 
     // Audio-thread-only state.
@@ -106,6 +139,17 @@ class LfoStage : public AudioProcessingStage {
     double hostBpm_{120.0};
     double hostPpq_{0.0};
     bool hostIsPlaying_{false};
+
+    // Lock-free publish channel for the UI's phase indicator + shape rebuild.
+    // nullptr means "no UI is listening" — process() then skips the publish.
+    SlotVisualizerPublisher* visualizerPublisher_{nullptr};
+
+    // Change-detection state for the shape-version bump. Initial sentinels
+    // (-1 / 0 / -1.0) cannot equal any legitimate shape/seed/cycleFloor, so
+    // the first process() after attach always bumps the version.
+    int lastPublishedShape_{-1};
+    unsigned int lastPublishedSeed_{0};
+    double lastPublishedCycleFloor_{-1.0};
 };
 
 } // namespace dsp_core::audio_pipeline
