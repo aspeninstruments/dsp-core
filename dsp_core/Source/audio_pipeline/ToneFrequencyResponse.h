@@ -34,6 +34,10 @@ struct ToneFrequencyResponseParams {
     double bellQ = 1.0;
     double emphNorm = 0.5;
     double sampleRate = 48000.0;
+
+    // Member-wise equality so the editor can fingerprint and skip recompute
+    // when nothing changed since the last timer tick.
+    bool operator==(const ToneFrequencyResponseParams&) const = default;
 };
 
 namespace tone_response_detail {
@@ -91,6 +95,24 @@ inline double ladderMagLinear(double hz, double cutoffHz, double R, int order) {
     const double wc = 2.0 * kPi * cutoffHz;
     const std::complex<double> denom(1.0, omega / wc);
     const std::complex<double> G = 1.0 / denom;
+    std::complex<double> GN = G;
+    for (int i = 1; i < order; ++i) {
+        GN *= G;
+    }
+    const std::complex<double> H = GN / (1.0 + R * GN);
+    return std::abs(H);
+}
+
+inline double ladderHighpassMagLinear(double hz, double cutoffHz, double R, int order) {
+    // Moog HP cascade small-signal linear transfer function:
+    //   G_HP(jω) = (jω/ωc) / (1 + jω/ωc)
+    //   |H_N(jω)| = |G_HP^N / (1 + R·G_HP^N)|
+    // (1 + R) passband-makeup is applied by the caller in dB.
+    const double omega = 2.0 * kPi * hz;
+    const double wc = 2.0 * kPi * cutoffHz;
+    const std::complex<double> num(0.0, omega / wc);
+    const std::complex<double> denom(1.0, omega / wc);
+    const std::complex<double> G = num / denom;
     std::complex<double> GN = G;
     for (int i = 1; i < order; ++i) {
         GN *= G;
@@ -184,6 +206,17 @@ inline void computeFrequencyResponseDb(const ToneFrequencyResponseParams& params
             auto coeffs = juce::dsp::IIR::Coefficients<double>::makePeakFilter(sr, cutoffHz, q, gainLinear);
             for (int i = 0; i < count; ++i) {
                 magnitudesDb[i] = linearToDb(biquadMagLinear(*coeffs, freqsHz[i], sr));
+            }
+            break;
+        }
+        case ToneStage::Type::Highpass12dB:
+        case ToneStage::Type::Highpass24dB: {
+            const int order = (params.type == ToneStage::Type::Highpass12dB) ? 2 : 4;
+            const double R = juce::jlimit(0.0, 1.0, params.resonanceNorm) * kToneMaxResonance;
+            const double passbandMakeupDb = 20.0 * std::log10(1.0 + R);
+            for (int i = 0; i < count; ++i) {
+                const double mag = ladderHighpassMagLinear(freqsHz[i], cutoffHz, R, order);
+                magnitudesDb[i] = linearToDb(mag) + passbandMakeupDb;
             }
             break;
         }

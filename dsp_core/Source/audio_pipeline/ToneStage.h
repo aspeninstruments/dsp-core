@@ -3,6 +3,7 @@
 #include "AudioProcessingStage.h"
 #include "BellStrategy.h"
 #include "HighShelfStrategy.h"
+#include "HighpassStrategy.h"
 #include "HysteresisStrategy.h"
 #include "LowShelfStrategy.h"
 #include "LowpassStrategy.h"
@@ -12,6 +13,13 @@
 #include <atomic>
 
 namespace dsp_core::audio_pipeline {
+
+// Forward declaration — full definition lives in ToneFrequencyResponse.h,
+// which references ToneStage::Type and so includes this file. Methods that
+// take this by reference are defined in ToneStage.cpp, which pulls in the
+// full header.
+struct ToneFrequencyResponseParams;
+
 
 /**
  * Tone filter stage: a thin host that dispatches to one of several filter
@@ -48,7 +56,18 @@ class ToneStage : public AudioProcessingStage {
     // (which wraps the waveshaper). PluginProcessor::processBlock reads Tone_Type
     // and toggles HysteresisStage::setHysteresisEnabled accordingly. See
     // HysteresisStrategy.h for the rationale.
-    enum class Type { Off, Lowpass12dB, Lowpass24dB, LowShelf, HighShelf, Smile, Bell, Hysteresis };
+    enum class Type {
+        Off,
+        Lowpass12dB,
+        Lowpass24dB,
+        LowShelf,
+        HighShelf,
+        Smile,
+        Bell,
+        Hysteresis,
+        Highpass12dB,
+        Highpass24dB
+    };
 
     ToneStage() = default;
 
@@ -70,7 +89,6 @@ class ToneStage : public AudioProcessingStage {
 
     void setType(Type t) {
         type_.store(t, std::memory_order_release);
-        markFrequencyResponseDirty();
     }
     Type getType() const {
         return type_.load(std::memory_order_acquire);
@@ -120,11 +138,13 @@ class ToneStage : public AudioProcessingStage {
     // log-spaced frequencies from 10 Hz to 20 kHz, in dB. Published via
     // atomic version bump.
     //
-    // Threading: parameter setters store the new value and flag the LUT
-    // dirty (no recompute, no allocation — safe to call from the audio
-    // thread, which PluginProcessor::updatePipelineParameters does every
-    // block). The owner of the message thread (in this plugin, the editor
-    // timer) drives the actual recompute via recomputeFrequencyResponseIfDirty().
+    // Threading: the editor's 60 Hz timer reads APVTS directly (with
+    // modulation math applied) and calls recomputeFrequencyResponse(params)
+    // when the param fingerprint changes. The audio thread is NOT involved
+    // in the visualization path — that's what makes the trace update while
+    // the host transport is stopped. Audio-thread parameter setters still
+    // mutate the strategies' DSP state for actual filtering, but they no
+    // longer drive the LUT.
     //
     // 1024 samples (≈93 per octave across 11 octaves) is dense enough that
     // a Bell at Q=10 or Moog ladder at R≈3.5 — both with sub-octave peak
@@ -159,13 +179,14 @@ class ToneStage : public AudioProcessingStage {
         return kFrequencyResponseDbRange;
     }
 
-    /** Recompute the frequency-response LUT if any parameter setter has
-     *  marked it dirty since the last recompute. Safe to call at any
-     *  cadence — coalesces multiple setters into one recompute, no-op if
-     *  nothing changed. MUST be called from a non-audio thread (allocates
+    /** Recompute the frequency-response LUT from caller-supplied params.
+     *  The editor reads APVTS directly (including modulation math) and feeds
+     *  the result here so the trace updates regardless of whether the audio
+     *  thread is running. MUST be called from a non-audio thread (allocates
      *  via juce::dsp::IIR::Coefficients::makeXxx for biquad strategies).
-     *  Driven by the editor's per-frame timer; tests can call directly. */
-    void recomputeFrequencyResponseIfDirty();
+     *  Thread-safe vs. concurrent audio-thread writes to the cached params —
+     *  this method does not read or write any of the cachedXxx atomics. */
+    void recomputeFrequencyResponse(const ToneFrequencyResponseParams& params);
 
   private:
     LowpassStrategy<2> lp12_;
@@ -175,6 +196,8 @@ class ToneStage : public AudioProcessingStage {
     SmileStrategy smile_;
     BellStrategy bell_;
     HysteresisStrategy hysteresis_;
+    HighpassStrategy<2> hp12_;
+    HighpassStrategy<4> hp24_;
 
     std::atomic<bool> enabled_{false};
     std::atomic<Type> type_{Type::Off};
@@ -187,9 +210,11 @@ class ToneStage : public AudioProcessingStage {
     /** Returns the strategy for the given type, or nullptr for Type::Off. */
     ToneFilterStrategy* strategyFor(Type t);
 
-    // Cached params for the UI-thread frequency-response recompute. Each
-    // setter writes its corresponding atomic before recomputeFrequencyResponse()
-    // runs. Defaults match the per-strategy defaults documented in
+    // Cached params for the audio-thread strategies. Each setter writes its
+    // corresponding atomic so the strategies' DSP state stays current. The
+    // visualization path bypasses these (editor reads APVTS directly) so the
+    // trace stays live when the host transport is stopped. Defaults match
+    // the per-strategy defaults documented in
     // PluginProcessor / APVTS so the LUT is sensible at construction.
     std::atomic<double> cachedCutoffHz_{3000.0};
     std::atomic<double> cachedResonanceNorm_{0.0};
@@ -209,19 +234,7 @@ class ToneStage : public AudioProcessingStage {
     std::atomic<uint64_t> frequencyResponseVersion_{0};
     std::array<double, kFrequencyResponseSize> frequencyResponseHz_{};
 
-    // Dirty flag bumped by audio-thread setters; cleared by the message-
-    // thread recomputeFrequencyResponseIfDirty(). Using a counter rather
-    // than a bool so the editor timer can detect that multiple setter
-    // calls happened between polls (still results in one recompute — the
-    // observed-and-acted-on counter value tracks the last-seen state).
-    std::atomic<uint64_t> frequencyResponseDirtyCounter_{0};
-    std::atomic<uint64_t> frequencyResponseLastBuiltCounter_{0};
-
     void initFrequencyResponseFrequencies();
-    void recomputeFrequencyResponse();
-    void markFrequencyResponseDirty() {
-        frequencyResponseDirtyCounter_.fetch_add(1, std::memory_order_release);
-    }
 };
 
 } // namespace dsp_core::audio_pipeline

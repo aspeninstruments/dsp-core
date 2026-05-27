@@ -21,11 +21,12 @@ void ToneStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numCha
     smile_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     bell_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     hysteresis_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    hp12_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    hp24_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lastType_ = type_.load(std::memory_order_acquire);
 
     cachedSampleRate_.store(sampleRate, std::memory_order_release);
     initFrequencyResponseFrequencies();
-    markFrequencyResponseDirty();
 }
 
 void ToneStage::initFrequencyResponseFrequencies() {
@@ -39,30 +40,11 @@ void ToneStage::initFrequencyResponseFrequencies() {
     }
 }
 
-void ToneStage::recomputeFrequencyResponseIfDirty() {
-    const uint64_t latest = frequencyResponseDirtyCounter_.load(std::memory_order_acquire);
-    if (latest == frequencyResponseLastBuiltCounter_.load(std::memory_order_acquire)) {
-        return;
-    }
-    recomputeFrequencyResponse();
-    // Record the counter value that triggered this build. If another setter
-    // fires between the load above and the store here, we'll catch it on the
-    // next poll because latest < new counter value.
-    frequencyResponseLastBuiltCounter_.store(latest, std::memory_order_release);
-}
-
-void ToneStage::recomputeFrequencyResponse() {
-    ToneFrequencyResponseParams params;
-    params.type = type_.load(std::memory_order_acquire);
-    params.cutoffHz = cachedCutoffHz_.load(std::memory_order_acquire);
-    params.resonanceNorm = cachedResonanceNorm_.load(std::memory_order_acquire);
-    params.shelfGainDb = cachedShelfGainDb_.load(std::memory_order_acquire);
-    params.fatPercent = cachedFatPercent_.load(std::memory_order_acquire);
-    params.lowShelfRatio = cachedLowShelfRatio_.load(std::memory_order_acquire);
-    params.bellQ = cachedBellQ_.load(std::memory_order_acquire);
-    params.emphNorm = cachedEmphNorm_.load(std::memory_order_acquire);
-    params.sampleRate = cachedSampleRate_.load(std::memory_order_acquire);
-
+void ToneStage::recomputeFrequencyResponse(const ToneFrequencyResponseParams& params) {
+    // Fill the inactive buffer, flip the index, bump the version. The audio
+    // thread's cachedXxx atomics are NOT read here — callers supply params
+    // they read from APVTS (with modulation math applied) so this method
+    // can run on the editor timer regardless of audio-thread activity.
     const int active = frequencyResponseBufferIndex_.load(std::memory_order_relaxed);
     const int inactive = 1 - active;
     auto& dst = frequencyResponseBuffers_[static_cast<std::size_t>(inactive)];
@@ -88,6 +70,10 @@ ToneFilterStrategy* ToneStage::strategyFor(Type t) {
             return &bell_;
         case Type::Hysteresis:
             return &hysteresis_;
+        case Type::Highpass12dB:
+            return &hp12_;
+        case Type::Highpass24dB:
+            return &hp24_;
         case Type::Off:
         default:
             return nullptr;
@@ -134,6 +120,8 @@ void ToneStage::reset() {
     smile_.reset();
     bell_.reset();
     hysteresis_.reset();
+    hp12_.reset();
+    hp24_.reset();
 }
 
 void ToneStage::setCutoffFrequency(double frequencyHz) {
@@ -144,8 +132,9 @@ void ToneStage::setCutoffFrequency(double frequencyHz) {
     smile_.setFrequency(frequencyHz); // drives Smile's HS corner; LS recomputes from ratio
     bell_.setFrequency(frequencyHz);  // bell centre frequency
     hysteresis_.setFrequency(frequencyHz); // no-op (marker strategy)
+    hp12_.setFrequency(frequencyHz);
+    hp24_.setFrequency(frequencyHz);
     cachedCutoffHz_.store(frequencyHz, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 void ToneStage::setResonance(double zeroToOne) {
@@ -158,8 +147,9 @@ void ToneStage::setResonance(double zeroToOne) {
     smile_.setResonance(r);     // no-op
     bell_.setResonance(r);      // no-op
     hysteresis_.setResonance(r); // no-op (marker strategy)
+    hp12_.setResonance(r);
+    hp24_.setResonance(r);
     cachedResonanceNorm_.store(clamped, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 void ToneStage::setShelfGainDb(double gainDb) {
@@ -170,8 +160,9 @@ void ToneStage::setShelfGainDb(double gainDb) {
     smile_.setShelfGainDb(gainDb); // linked: drives both Smile shelves
     bell_.setShelfGainDb(gainDb);  // bell peak gain (reuses Tone_Gain)
     hysteresis_.setShelfGainDb(gainDb); // no-op (marker strategy)
+    hp12_.setShelfGainDb(gainDb); // no-op
+    hp24_.setShelfGainDb(gainDb); // no-op
     cachedShelfGainDb_.store(gainDb, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 void ToneStage::setFat(double percent) {
@@ -182,8 +173,9 @@ void ToneStage::setFat(double percent) {
     smile_.setFat(percent);     // no-op
     bell_.setFat(percent);      // no-op
     hysteresis_.setFat(percent); // no-op (marker strategy)
+    hp12_.setFat(percent); // no-op (HPF has no Fat sub-stage)
+    hp24_.setFat(percent); // no-op
     cachedFatPercent_.store(percent, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 double ToneStage::getFat() const {
@@ -200,8 +192,9 @@ void ToneStage::setLowShelfRatio(double ratio) {
     smile_.setLowShelfRatio(ratio);    // applied here (Smile-only)
     bell_.setLowShelfRatio(ratio);     // no-op
     hysteresis_.setLowShelfRatio(ratio); // no-op (marker strategy)
+    hp12_.setLowShelfRatio(ratio); // no-op
+    hp24_.setLowShelfRatio(ratio); // no-op
     cachedLowShelfRatio_.store(ratio, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 void ToneStage::setQ(double q) {
@@ -212,8 +205,9 @@ void ToneStage::setQ(double q) {
     smile_.setQ(q);    // no-op
     bell_.setQ(q);     // applied here (Bell-only)
     hysteresis_.setQ(q); // no-op (marker strategy)
+    hp12_.setQ(q); // no-op
+    hp24_.setQ(q); // no-op
     cachedBellQ_.store(q, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 void ToneStage::setEmph(double zeroToOne) {
@@ -224,8 +218,9 @@ void ToneStage::setEmph(double zeroToOne) {
     smile_.setEmph(zeroToOne);     // no-op
     bell_.setEmph(zeroToOne);      // no-op
     hysteresis_.setEmph(zeroToOne); // applied here (Hysteresis pre/de-emph shelf gain)
+    hp12_.setEmph(zeroToOne); // no-op
+    hp24_.setEmph(zeroToOne); // no-op
     cachedEmphNorm_.store(zeroToOne, std::memory_order_release);
-    markFrequencyResponseDirty();
 }
 
 } // namespace dsp_core::audio_pipeline

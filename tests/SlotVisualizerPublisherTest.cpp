@@ -113,85 +113,15 @@ TEST(SlotVisualizerPublisherEnvRing, DisabledStageDoesNotWriteRing) {
 }
 
 // --------------------------------------------------------------------------
-// LFO shape-version + phase publishing
+// LFO phase + cyclePosition publishing
+//
+// NOTE: shape-version bumps were removed from the audio thread when the
+// visualization was decoupled from audio-thread activity. The editor now
+// runs its own (shape, seed, cycleFloor) change-detect on each timer tick,
+// reading those atomics directly. The audio thread only publishes the live
+// phase (for the indicator) and the unwrapped cyclePosition (so the editor
+// can spot Random's per-cycle snapshot boundary).
 // --------------------------------------------------------------------------
-
-TEST(SlotVisualizerPublisherLfo, FirstProcessBumpsShapeVersionExactlyOnce) {
-    SlotVisualizerPublisher pub;
-    std::atomic<double> storage{0.0};
-    LfoStage lfo(storage);
-    lfo.prepareToPlay(kSampleRate, kBlockSize, 1);
-    lfo.setEnabled(true);
-    lfo.setShape(LfoStage::Shape::Sin);
-    lfo.setRateHz(0.5); // < 1 Hz so cyclePosition floor doesn't advance during a few blocks
-    lfo.setVisualizerPublisher(&pub);
-
-    auto buf = makeBuffer(1, kBlockSize);
-    lfo.process(buf);
-    const uint64_t afterFirst = pub.lfoShapeVersion.load(std::memory_order_acquire);
-    EXPECT_EQ(afterFirst, 1ULL) << "Initial process() after attach should bump shapeVersion exactly once";
-
-    // Subsequent processes with no shape/seed/cycle change must not bump.
-    for (int b = 0; b < 5; ++b) {
-        lfo.process(buf);
-    }
-    EXPECT_EQ(pub.lfoShapeVersion.load(std::memory_order_acquire), afterFirst);
-}
-
-TEST(SlotVisualizerPublisherLfo, ShapeChangeBumpsShapeVersion) {
-    SlotVisualizerPublisher pub;
-    std::atomic<double> storage{0.0};
-    LfoStage lfo(storage);
-    lfo.prepareToPlay(kSampleRate, kBlockSize, 1);
-    lfo.setEnabled(true);
-    lfo.setShape(LfoStage::Shape::Sin);
-    lfo.setRateHz(0.5);
-    lfo.setVisualizerPublisher(&pub);
-
-    auto buf = makeBuffer(1, kBlockSize);
-    lfo.process(buf);
-    const uint64_t baseline = pub.lfoShapeVersion.load(std::memory_order_acquire);
-
-    lfo.setShape(LfoStage::Shape::Tri);
-    lfo.process(buf);
-    EXPECT_EQ(pub.lfoShapeVersion.load(std::memory_order_acquire), baseline + 1);
-
-    lfo.setShape(LfoStage::Shape::Saw);
-    lfo.process(buf);
-    EXPECT_EQ(pub.lfoShapeVersion.load(std::memory_order_acquire), baseline + 2);
-}
-
-TEST(SlotVisualizerPublisherLfo, RandomShapeBumpsOnceAtCycleBoundary) {
-    SlotVisualizerPublisher pub;
-    std::atomic<double> storage{0.0};
-    LfoStage lfo(storage);
-    lfo.prepareToPlay(kSampleRate, kBlockSize, 1);
-    lfo.setEnabled(true);
-    lfo.setShape(LfoStage::Shape::Random);
-    // 1 cycle per second; one block = ~10 ms; 100 blocks ≈ 1.067 s, so cycle
-    // floor should advance from 0 → 1 exactly once across the run.
-    lfo.setRateHz(1.0);
-    lfo.setVisualizerPublisher(&pub);
-
-    auto buf = makeBuffer(1, kBlockSize);
-    lfo.process(buf);
-    const uint64_t initial = pub.lfoShapeVersion.load(std::memory_order_acquire);
-    // Initial process bumps version once (first attach, shape latched).
-
-    int bumps = 0;
-    uint64_t previous = initial;
-    for (int b = 0; b < 100; ++b) {
-        lfo.process(buf);
-        const uint64_t now = pub.lfoShapeVersion.load(std::memory_order_acquire);
-        if (now != previous) {
-            ++bumps;
-            previous = now;
-        }
-    }
-    // Exactly one cycle-boundary crossing in ~1 second at 1 Hz.
-    EXPECT_EQ(bumps, 1);
-    EXPECT_EQ(pub.lfoShapeVersion.load(std::memory_order_acquire), initial + 1);
-}
 
 TEST(SlotVisualizerPublisherLfo, PhaseAndCyclePositionPublished) {
     SlotVisualizerPublisher pub;
@@ -219,7 +149,7 @@ TEST(SlotVisualizerPublisherLfo, PhaseAndCyclePositionPublished) {
 // ModulatorSlotStage type switch propagates activeKind + version bumps
 // --------------------------------------------------------------------------
 
-TEST(ModulatorSlotStageVisualizer, SetTypeUpdatesActiveKindAndBumpsVersions) {
+TEST(ModulatorSlotStageVisualizer, SetTypeUpdatesActiveKindAndBumpsEnvVersion) {
     SlotVisualizerPublisher pub;
     std::atomic<double> storage{0.0};
     ModulatorSlotStage slot(storage);
@@ -229,16 +159,12 @@ TEST(ModulatorSlotStageVisualizer, SetTypeUpdatesActiveKindAndBumpsVersions) {
     EXPECT_EQ(pub.activeKind.load(std::memory_order_acquire), 0);
 
     const uint64_t envBefore = pub.envVersion.load(std::memory_order_acquire);
-    const uint64_t lfoBefore = pub.lfoShapeVersion.load(std::memory_order_acquire);
     slot.setType(ModulatorSlotStage::Type::Lfo);
     EXPECT_EQ(pub.activeKind.load(std::memory_order_acquire), 1);
     EXPECT_GT(pub.envVersion.load(std::memory_order_acquire), envBefore);
-    EXPECT_GT(pub.lfoShapeVersion.load(std::memory_order_acquire), lfoBefore);
 
     // Idempotent setType — re-setting to the same type doesn't bump.
     const uint64_t envAfter = pub.envVersion.load(std::memory_order_acquire);
-    const uint64_t lfoAfter = pub.lfoShapeVersion.load(std::memory_order_acquire);
     slot.setType(ModulatorSlotStage::Type::Lfo);
     EXPECT_EQ(pub.envVersion.load(std::memory_order_acquire), envAfter);
-    EXPECT_EQ(pub.lfoShapeVersion.load(std::memory_order_acquire), lfoAfter);
 }

@@ -89,15 +89,9 @@ class LfoStage : public AudioProcessingStage {
     static double evaluateShape(Shape s, double phase, double cyclePosition, unsigned int seed);
 
     /// Lock-free publish channel for the LFO's UI trace (phase indicator +
-    /// shape-version bumps). nullptr disables publishing. The change-detection
-    /// state is reset on attach so the next process() always re-bumps
-    /// lfoShapeVersion — the visualizer rebuilds even if shape/seed haven't
-    /// moved since the previous attachment.
+    /// Random per-cycle change-detect). nullptr disables publishing.
     void setVisualizerPublisher(SlotVisualizerPublisher* pub) {
         visualizerPublisher_ = pub;
-        lastPublishedShape_ = -1;
-        lastPublishedSeed_ = 0;
-        lastPublishedCycleFloor_ = -1.0;
     }
 
     /// Direct atomic-pointer accessors for the visualizer's static-shape
@@ -123,11 +117,12 @@ class LfoStage : public AudioProcessingStage {
     std::atomic<double> phaseOffset_{0.0};
     std::atomic<unsigned int> seed_{0xA5F37B12u};
 
-    /// Push the current audio-thread state out to the visualizer publisher
-    /// (phase indicator + per-cycle shape rebuild). Cheap when the publisher
-    /// is null. Extracted from process() so the dispatch loop's cognitive
+    /// Push the current effective phase + unwrapped cycle position to the
+    /// visualizer publisher (drives the phase indicator and the editor-side
+    /// Random-shape per-cycle change-detect). Cheap when the publisher is
+    /// null. Extracted from process() so the dispatch loop's cognitive
     /// complexity stays low.
-    void publishVisualizerStateIfAttached(Shape shape, double effectivePhase, double phaseOffset, unsigned int seed);
+    void publishVisualizerStateIfAttached(double effectivePhase);
 
     double sampleRate_{48000.0};
 
@@ -140,16 +135,10 @@ class LfoStage : public AudioProcessingStage {
     double hostPpq_{0.0};
     bool hostIsPlaying_{false};
 
-    // Lock-free publish channel for the UI's phase indicator + shape rebuild.
-    // nullptr means "no UI is listening" — process() then skips the publish.
+    // Lock-free publish channel for the UI's phase indicator + Random per-
+    // cycle change-detect (editor reads lfoPhase01 / lfoCyclePosition). nullptr
+    // means "no UI is listening" — process() then skips the publish.
     SlotVisualizerPublisher* visualizerPublisher_{nullptr};
-
-    // Change-detection state for the shape-version bump. Initial sentinels
-    // (-1 / 0 / -1.0) cannot equal any legitimate shape/seed/cycleFloor, so
-    // the first process() after attach always bumps the version.
-    int lastPublishedShape_{-1};
-    unsigned int lastPublishedSeed_{0};
-    double lastPublishedCycleFloor_{-1.0};
 };
 
 } // namespace dsp_core::audio_pipeline

@@ -1276,6 +1276,31 @@ endif()
 
 add_test(NAME LadderTPTStageTests COMMAND ladder_tpt_stage_tests)
 
+# LadderHighpassTPTStage tests (TPT-ZDF HPF cascade 12dB/24dB unit tests)
+add_executable(ladder_highpass_tpt_stage_tests
+    LadderHighpassTPTStageTest.cpp
+)
+
+target_include_directories(ladder_highpass_tpt_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(ladder_highpass_tpt_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(ladder_highpass_tpt_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(ladder_highpass_tpt_stage_tests)
+endif()
+
+add_test(NAME LadderHighpassTPTStageTests COMMAND ladder_highpass_tpt_stage_tests)
+
 # VirtualAnalogFilterStage tests (modular RK4 wrapper unit tests)
 add_executable(virtual_analog_filter_stage_tests
     VirtualAnalogFilterStageTest.cpp

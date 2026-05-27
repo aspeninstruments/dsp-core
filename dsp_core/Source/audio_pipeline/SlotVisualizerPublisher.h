@@ -45,9 +45,14 @@ struct SlotVisualizerPublisher {
     std::atomic<int> envWriteIndex{0};
     std::atomic<uint64_t> envVersion{0};
 
+    // LFO phase + unwrapped cycle position. Phase drives the UI's indicator
+    // sub-segment; cyclePosition's floor change is what the editor watches
+    // to know "Random shape stepped to a new cycle, time to redraw the
+    // snapshot." Shape / seed are NOT published here — the editor reads
+    // them directly from LfoStage's atomic params so visualization stays
+    // live when the audio thread is idle (host transport stopped).
     std::atomic<double> lfoPhase01{0.0};
     std::atomic<double> lfoCyclePosition{0.0};
-    std::atomic<uint64_t> lfoShapeVersion{0};
 
     // 0 = envelope, 1 = lfo. Mirrors ModulatorSlotStage::Type. Written by
     // ModulatorSlotStage::setType so the UI can pick which trace to bind.

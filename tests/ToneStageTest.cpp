@@ -1,4 +1,5 @@
 #include "../dsp_core/Source/audio_pipeline/ToneStage.h"
+#include "../dsp_core/Source/audio_pipeline/ToneFrequencyResponse.h"
 #include <gtest/gtest.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
@@ -1391,3 +1392,239 @@ TEST(ToneStage, Hysteresis_NoClickOnActivation) {
         sampleCount += kBlockSize;
     }
 }
+
+// --------------------------------------------------------------------------
+// Highpass — sibling of the Lowpass tests. Verifies the new Highpass12dB /
+// Highpass24dB Tone types dispatch to the HPF strategy correctly and survive
+// type switches without clicks.
+// --------------------------------------------------------------------------
+
+namespace {
+
+// Drive a sine into ToneStage at the given Type/cutoff/resonance and measure
+// settled RMS gain relative to input. Skips startup transient.
+double toneStageSettledSineGain(ToneStage::Type type, double cutoffHz, double sineHz,
+                                double resonanceNorm, double amp) {
+    ToneStage s;
+    s.setType(type);
+    s.setEnabled(true);
+    s.setCutoffFrequency(cutoffHz);
+    s.setResonance(resonanceNorm);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    constexpr int kBlocks = 24; // ~250 ms @ 48k, 512-sample blocks
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    int sampleCount = 0;
+    // Warm-up — discard.
+    for (int b = 0; b < kBlocks / 2; ++b) {
+        fillSineBlock(buf, sineHz, sampleCount, amp);
+        s.process(buf);
+        sampleCount += kBlockSize;
+    }
+    // Measure across the latter half.
+    double sumSq = 0.0;
+    int count = 0;
+    for (int b = 0; b < kBlocks / 2; ++b) {
+        fillSineBlock(buf, sineHz, sampleCount, amp);
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getSample(0, i);
+            sumSq += v * v;
+            ++count;
+        }
+        sampleCount += kBlockSize;
+    }
+    const double rms = std::sqrt(sumSq / std::max(1, count));
+    const double inputRms = amp / std::sqrt(2.0);
+    return rms / inputRms;
+}
+
+} // namespace
+
+TEST(ToneStage, Highpass24dB_PassesHfAttenuatesLf) {
+    // Cutoff 1 kHz. 50 Hz (well below) should be strongly attenuated; 8 kHz
+    // (well above) should pass at ≈unity (small-signal passband makeup).
+    const double lfGain = toneStageSettledSineGain(ToneStage::Type::Highpass24dB,
+                                                   /*cutoffHz=*/1000.0, /*sineHz=*/50.0,
+                                                   /*resonanceNorm=*/0.0, /*amp=*/0.1);
+    EXPECT_LT(lfGain, 0.01)
+        << "24dB HPF passed 50 Hz at gain " << lfGain << " — expected <-40 dB";
+
+    const double hfGain = toneStageSettledSineGain(ToneStage::Type::Highpass24dB,
+                                                   /*cutoffHz=*/1000.0, /*sineHz=*/8000.0,
+                                                   /*resonanceNorm=*/0.0, /*amp=*/0.1);
+    EXPECT_NEAR(hfGain, 1.0, 0.05)
+        << "24dB HPF HF gain at 8 kHz is " << hfGain << " (expected ≈1.0)";
+}
+
+TEST(ToneStage, Highpass12dB_PassesHfAttenuatesLf) {
+    const double lfGain = toneStageSettledSineGain(ToneStage::Type::Highpass12dB,
+                                                   /*cutoffHz=*/1000.0, /*sineHz=*/50.0,
+                                                   /*resonanceNorm=*/0.0, /*amp=*/0.1);
+    EXPECT_LT(lfGain, 0.05)
+        << "12dB HPF passed 50 Hz at gain " << lfGain;
+
+    const double hfGain = toneStageSettledSineGain(ToneStage::Type::Highpass12dB,
+                                                   /*cutoffHz=*/1000.0, /*sineHz=*/8000.0,
+                                                   /*resonanceNorm=*/0.0, /*amp=*/0.1);
+    EXPECT_NEAR(hfGain, 1.0, 0.05)
+        << "12dB HPF HF gain at 8 kHz is " << hfGain;
+}
+
+TEST(ToneStage, Highpass_ResonanceSweepHfRmsPreserved_24dB) {
+    // Mirror of BassCompensation_ResonanceSweepRmsPreserved — across the
+    // resonance range, the passband (HF) RMS should stay near unity. Pinning
+    // this guards the (1+R) HF makeup. Tolerance ±0.7 dB to allow for the
+    // slight pre-peak dip just below cutoff (3 kHz is above cutoff but the
+    // resonance peak skirt still nudges it).
+    for (double r : {0.0, 0.25, 0.5, 0.75}) {
+        const double gain = toneStageSettledSineGain(ToneStage::Type::Highpass24dB,
+                                                     /*cutoffHz=*/300.0, /*sineHz=*/8000.0,
+                                                     /*resonanceNorm=*/r, /*amp=*/0.1);
+        EXPECT_NEAR(gain, 1.0, 0.08)
+            << "HF RMS gain at resonanceNorm=" << r << " is " << gain
+            << " (≈" << 20.0 * std::log10(gain) << " dB)";
+    }
+}
+
+TEST(ToneStage, Highpass_NoClickOnActivationFromLowpass) {
+    // LP24 -> HP24 with same cutoff/resonance must transition cleanly. Both
+    // strategies are kept primed via per-block forwarding, so the switch
+    // boundary should not introduce a step discontinuity.
+    ToneStage s;
+    s.setType(ToneStage::Type::Lowpass24dB);
+    s.setEnabled(true);
+    s.setCutoffFrequency(1500.0);
+    s.setResonance(0.4);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    int sampleCount = 0;
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 800.0, sampleCount, 0.5);
+        s.process(buf);
+        sampleCount += kBlockSize;
+    }
+    ASSERT_TRUE(std::isfinite(maxAbs(buf)));
+
+    s.setType(ToneStage::Type::Highpass24dB);
+
+    for (int block = 0; block < 20; ++block) {
+        fillSineBlock(buf, 800.0, sampleCount, 0.5);
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getSample(0, i);
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite after LP->HP switch at block " << block << " sample " << i;
+            ASSERT_LT(std::abs(v), 10.0)
+                << "Runaway after LP->HP switch at block " << block << " sample " << i << " v=" << v;
+        }
+        const double delta = maxSampleToSampleDelta(buf);
+        ASSERT_LT(delta, 1.0)
+            << "Click at LP24->HP24 boundary, block " << block << " delta=" << delta;
+        sampleCount += kBlockSize;
+    }
+}
+
+TEST(ToneStage, Highpass_FatSetterIsNoOp) {
+    // HighpassStrategy ignores setFat (no Fat sub-stage). Setting Fat to
+    // 100 % before and after activation must not change the HPF's output.
+    ToneStage withFat;
+    ToneStage withoutFat;
+    withFat.setType(ToneStage::Type::Highpass24dB);
+    withoutFat.setType(ToneStage::Type::Highpass24dB);
+    withFat.setEnabled(true);
+    withoutFat.setEnabled(true);
+    for (auto* s : {&withFat, &withoutFat}) {
+        s->setCutoffFrequency(500.0);
+        s->setResonance(0.3);
+        s->prepareToPlay(kSampleRate, kBlockSize, 1);
+    }
+    withFat.setFat(100.0);
+
+    juce::AudioBuffer<double> a(1, kBlockSize);
+    juce::AudioBuffer<double> b(1, kBlockSize);
+    for (int block = 0; block < 8; ++block) {
+        fillSineBlock(a, 1200.0, block * kBlockSize, 0.5);
+        fillSineBlock(b, 1200.0, block * kBlockSize, 0.5);
+        withFat.process(a);
+        withoutFat.process(b);
+    }
+    for (int i = 0; i < kBlockSize; ++i) {
+        EXPECT_DOUBLE_EQ(a.getSample(0, i), b.getSample(0, i))
+            << "HPF output differs with Fat=100% vs untouched at sample " << i
+            << " — setFat() should be a no-op on the HPF";
+    }
+}
+
+// --------------------------------------------------------------------------
+// Editor-driven recompute: handing a caller-supplied params struct writes
+// the LUT and bumps the version, regardless of whether the audio thread has
+// ever called process() or moved cachedXxx atomics. This is what lets the
+// freq-response trace update while the host transport is stopped.
+//
+// Sanity check: a Lowpass24dB centred at 1 kHz should attenuate well below
+// 0 dB by 10 kHz (Moog ladder, ~-24 dB/oct asymptote → roughly -48 dB at 10×
+// the cutoff with R=0; we test only "loudly down" to keep the assertion
+// loose against the ladder's exact analytical shape).
+// --------------------------------------------------------------------------
+TEST(ToneStage, RecomputeFrequencyResponseFromParams_WritesLut) {
+    ToneStage stage;
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    const auto* version = stage.getFrequencyResponseVersion();
+    ASSERT_NE(version, nullptr);
+    const uint64_t versionBefore = version->load(std::memory_order_acquire);
+
+    ToneFrequencyResponseParams params;
+    params.type = ToneStage::Type::Lowpass24dB;
+    params.cutoffHz = 1000.0;
+    params.resonanceNorm = 0.0;
+    params.sampleRate = kSampleRate;
+    stage.recomputeFrequencyResponse(params);
+
+    EXPECT_GT(version->load(std::memory_order_acquire), versionBefore);
+
+    // Pull the freshly published LUT and check a few sentinel samples:
+    //  - at ~1 kHz (cutoff) the magnitude should be near 0 dB or down a little.
+    //  - at ~10 kHz it should be well below 0 dB.
+    const double* lut = stage.getFrequencyResponseLUT();
+    ASSERT_NE(lut, nullptr);
+    const int n = stage.getFrequencyResponseSize();
+    const double logMin = std::log10(stage.getFrequencyResponseMinHz());
+    const double logMax = std::log10(stage.getFrequencyResponseMaxHz());
+    auto indexAtHz = [&](double hz) {
+        const double t = (std::log10(hz) - logMin) / (logMax - logMin);
+        return std::clamp(static_cast<int>(std::round(t * (n - 1))), 0, n - 1);
+    };
+
+    // Pin only what the test really cares about: the new public method
+    // actually fills the LUT with a monotonically-rolling-off lowpass shape.
+    // The exact dB at cutoff depends on the ladder topology (4 cascaded poles
+    // each ~-3 dB at fc → ~-12 dB) which is exercised by other ToneStage
+    // tests; here we only check the rolloff is present and proportional.
+    const double dbAt100  = lut[indexAtHz(100.0)];
+    const double dbAt1k   = lut[indexAtHz(1000.0)];
+    const double dbAt10k  = lut[indexAtHz(10000.0)];
+    EXPECT_NEAR(dbAt100, 0.0, 1.0) << "LP24 deep below cutoff must pass with ~0 dB";
+    EXPECT_LT(dbAt10k, dbAt1k)     << "LP24 must roll off past cutoff";
+    EXPECT_LT(dbAt10k, -30.0)      << "LP24 at 10× cutoff should be deeply attenuated";
+}
+
+TEST(ToneStage, RecomputeFrequencyResponse_OffTypeProducesUnityGain) {
+    ToneStage stage;
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    ToneFrequencyResponseParams params;
+    params.type = ToneStage::Type::Off;
+    params.sampleRate = kSampleRate;
+    stage.recomputeFrequencyResponse(params);
+
+    const double* lut = stage.getFrequencyResponseLUT();
+    const int n = stage.getFrequencyResponseSize();
+    ASSERT_NE(lut, nullptr);
+    for (int i = 0; i < n; ++i) {
+        EXPECT_NEAR(lut[i], 0.0, 1e-9) << "Type::Off should publish a flat 0 dB response at i=" << i;
+    }
+}
+

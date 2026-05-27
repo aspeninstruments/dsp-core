@@ -164,30 +164,19 @@ void LfoStage::process(juce::AudioBuffer<double>& buffer) {
     const double value = evaluateShape(shape, effectivePhase, cyclePosition_ + phaseOffset, seed);
     lfoStorage_.store(value, std::memory_order_release);
 
-    publishVisualizerStateIfAttached(shape, effectivePhase, phaseOffset, seed);
+    publishVisualizerStateIfAttached(effectivePhase);
 }
 
-void LfoStage::publishVisualizerStateIfAttached(Shape shape, double effectivePhase, double phaseOffset,
-                                                unsigned int seed) {
-    // Cycle-floor changes drive a one-shot shape-version bump so the Random
-    // shape's per-cycle Perlin snapshot swaps at the cycle boundary —
-    // consistent with periodic shapes, where shape/seed changes also bump
-    // the version exactly once.
+void LfoStage::publishVisualizerStateIfAttached(double effectivePhase) {
+    // Phase + unwrapped cycle position are the only state the UI can't recover
+    // from APVTS — the audio thread is the sole driver of LFO time advance.
+    // Shape / seed / cycleFloor change-detection moved to the editor; it polls
+    // shape / seed atomics on every timer tick and reads lfoCyclePosition here.
     if (visualizerPublisher_ == nullptr) {
         return;
     }
     visualizerPublisher_->lfoPhase01.store(effectivePhase, std::memory_order_release);
     visualizerPublisher_->lfoCyclePosition.store(cyclePosition_, std::memory_order_release);
-
-    const int shapeInt = static_cast<int>(shape);
-    const double cycleFloor = std::floor(cyclePosition_ + phaseOffset);
-    if (shapeInt == lastPublishedShape_ && seed == lastPublishedSeed_ && cycleFloor == lastPublishedCycleFloor_) {
-        return;
-    }
-    lastPublishedShape_ = shapeInt;
-    lastPublishedSeed_ = seed;
-    lastPublishedCycleFloor_ = cycleFloor;
-    visualizerPublisher_->lfoShapeVersion.fetch_add(1, std::memory_order_release);
 }
 
 } // namespace dsp_core::audio_pipeline

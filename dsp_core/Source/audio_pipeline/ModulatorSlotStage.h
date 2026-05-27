@@ -63,12 +63,12 @@ class ModulatorSlotStage : public AudioProcessingStage {
             slotStorage_.store(0.0, std::memory_order_release);
             if (visualizerPublisher_ != nullptr) {
                 // Reflect the new type for the UI's trace selection, and bump
-                // both version counters so the visualizer rebuilds (don't
-                // briefly show a stale envelope ring or LFO shape from the
-                // previous type).
+                // envVersion so the visualizer rebuilds (don't briefly show a
+                // stale envelope ring from the previous type). The LFO shape
+                // is rebuilt by the editor's per-tick (shape, seed, cycleFloor)
+                // fingerprint, which is shape-independent — no bump needed.
                 visualizerPublisher_->activeKind.store(static_cast<int>(t), std::memory_order_release);
                 visualizerPublisher_->envVersion.fetch_add(1, std::memory_order_release);
-                visualizerPublisher_->lfoShapeVersion.fetch_add(1, std::memory_order_release);
             }
         }
     }
