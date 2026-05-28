@@ -41,16 +41,13 @@ void ToneStage::initFrequencyResponseFrequencies() {
 }
 
 void ToneStage::recomputeFrequencyResponse(const ToneFrequencyResponseParams& params) {
-    // Fill the inactive buffer, flip the index, bump the version. The audio
-    // thread's cachedXxx atomics are NOT read here — callers supply params
-    // they read from APVTS (with modulation math applied) so this method
-    // can run on the editor timer regardless of audio-thread activity.
-    const int active = frequencyResponseBufferIndex_.load(std::memory_order_relaxed);
-    const int inactive = 1 - active;
-    auto& dst = frequencyResponseBuffers_[static_cast<std::size_t>(inactive)];
-    computeFrequencyResponseDb(params, frequencyResponseHz_.data(), dst.data(), kFrequencyResponseSize);
-
-    frequencyResponseBufferIndex_.store(inactive, std::memory_order_release);
+    // Write in place into the single LUT buffer and bump the version. Writer
+    // (editor 60 Hz timer) and reader (visualizer VBlank paint) both run on
+    // the message thread, so there's no concurrent access to guard against —
+    // see the buffer comment in ToneStage.h for why the previous double-buffer
+    // was removed.
+    computeFrequencyResponseDb(params, frequencyResponseHz_.data(),
+                               frequencyResponseBuffer_.data(), kFrequencyResponseSize);
     frequencyResponseVersion_.fetch_add(1, std::memory_order_release);
 }
 

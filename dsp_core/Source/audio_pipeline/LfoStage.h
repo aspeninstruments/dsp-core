@@ -94,13 +94,11 @@ class LfoStage : public AudioProcessingStage {
         visualizerPublisher_ = pub;
     }
 
-    /// Direct atomic-pointer accessors for the visualizer's static-shape
-    /// rebuild path. The editor reads shape + seed at rebuild time so the
-    /// rendered curve always matches whatever the audio thread is actually
-    /// evaluating.
-    const std::atomic<int>* getShapeAtomicPtr() const {
-        return &shape_;
-    }
+    /// Direct atomic-pointer accessor for the visualizer's static-shape
+    /// rebuild path. Seed is a fixed stage constant fed into the Random
+    /// shape's evaluator so the rendered curve uses the same noise seed as
+    /// the audio thread. (Shape is sourced from APVTS by the editor, not
+    /// from this stage — see SlotVisualizerSource in PluginProcessor.h.)
     const std::atomic<unsigned int>* getSeedAtomicPtr() const {
         return &seed_;
     }

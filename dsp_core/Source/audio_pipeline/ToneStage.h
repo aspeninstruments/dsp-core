@@ -161,7 +161,7 @@ class ToneStage : public AudioProcessingStage {
     static constexpr double kFrequencyResponseDbRange = 24.0; // matches Tone_Gain extremes
 
     const double* getFrequencyResponseLUT() const {
-        return frequencyResponseBuffers_[frequencyResponseBufferIndex_.load(std::memory_order_acquire)].data();
+        return frequencyResponseBuffer_.data();
     }
     const std::atomic<uint64_t>* getFrequencyResponseVersion() const {
         return &frequencyResponseVersion_;
@@ -225,12 +225,14 @@ class ToneStage : public AudioProcessingStage {
     std::atomic<double> cachedEmphNorm_{0.5};
     std::atomic<double> cachedSampleRate_{48000.0};
 
-    // Double-buffered frequency-response LUT. Writers fill the inactive
-    // buffer (index = 1 - active), atomically flip the index, and bump the
-    // version. Readers (visualizer paint) load index + version with acquire
-    // ordering and read the active buffer.
-    std::array<std::array<double, kFrequencyResponseSize>, 2> frequencyResponseBuffers_{};
-    std::atomic<int> frequencyResponseBufferIndex_{0};
+    // Single-buffered frequency-response LUT. The only writer is the editor's
+    // 60 Hz timer (message thread); the only reader is the visualizer's
+    // VBlank-driven paint (also message thread). With both on the same thread
+    // a single buffer is sufficient, and the published pointer never changes —
+    // so the visualizer's overlay registry can keep its captured pointer
+    // indefinitely. The version atomic alone signals "data changed" for the
+    // overlay's pull-mode path-rebuild check.
+    std::array<double, kFrequencyResponseSize> frequencyResponseBuffer_{};
     std::atomic<uint64_t> frequencyResponseVersion_{0};
     std::array<double, kFrequencyResponseSize> frequencyResponseHz_{};
 
