@@ -25,8 +25,8 @@ namespace dsp_core::audio_pipeline {
  *  - LowShelf / HighShelf / Bell: juce::dsp::IIR::Coefficients RBJ biquads
  *    (built once per recompute, evaluated at every requested frequency).
  *  - Smile: dB sum of LowShelf and HighShelf cascaded.
- *  - Hysteresis: net linear cascade of the NAB pre/de-emphasis pair (the
- *    saturator is fundamentally nonlinear and is not represented here).
+ *  - Hysteresis: flat (0 dB) — the saturator is fundamentally nonlinear and
+ *    runs at the pipeline-level HysteresisStage, so the tone curve is identity.
  */
 struct ToneFrequencyResponseParams {
     ToneStage::Type type = ToneStage::Type::Off;
@@ -36,7 +36,6 @@ struct ToneFrequencyResponseParams {
     double fatPercent = 0.0;
     double lowShelfRatio = 0.0625;
     double bellQ = 1.0;
-    double emphNorm = 0.5;
     double sampleRate = 48000.0;
 
     // ImpulseResponse type only. Caller (editor) computes the FFT-based
@@ -64,36 +63,6 @@ constexpr double kToneMaxResonance = 3.5;
 constexpr double kFatShelfHz = 200.0;
 constexpr double kFatShelfMaxDb = 6.0;
 constexpr double kButterworthQ = 0.7071067811865476;
-
-// Hysteresis NAB constants (mirror HysteresisStrategy.h).
-constexpr double kHystHfCornerHz = 3183.0;
-constexpr double kHystLfCornerHz = 50.0;
-constexpr double kHystLfBumpDb = 1.5;
-constexpr double kHystPreEmphMaxDb = 12.0;
-constexpr double kHystDeEmphMaxDb = 9.0;
-
-// 1st-order shelf magnitude using the analog prototype (matches NAB shelf
-// behaviour at frequencies well below Nyquist, which covers the entire
-// 10 Hz–20 kHz display range).
-inline double firstOrderShelfMagLinear(double hz, double cornerHz, double gainDb, bool highShelf) {
-    if (gainDb == 0.0) {
-        return 1.0;
-    }
-    const double A = std::pow(10.0, gainDb / 20.0);
-    const double alpha = std::sqrt(A);
-    const double omega = 2.0 * kPi * hz;
-    const double omega0 = 2.0 * kPi * cornerHz;
-    // HighShelf: H(s) = A·(s + ω0/α) / (s + ω0·α)
-    // LowShelf:  H(s) =     (s + ω0·α) / (s + ω0/α)
-    if (highShelf) {
-        const std::complex<double> num(omega0 / alpha, omega);
-        const std::complex<double> den(omega0 * alpha, omega);
-        return A * std::abs(num) / std::abs(den);
-    }
-    const std::complex<double> num(omega0 * alpha, omega);
-    const std::complex<double> den(omega0 / alpha, omega);
-    return std::abs(num) / std::abs(den);
-}
 
 inline double biquadMagLinear(const juce::dsp::IIR::Coefficients<double>& coeffs, double hz, double sampleRate) {
     return coeffs.getMagnitudeForFrequency(hz, sampleRate);
@@ -286,7 +255,9 @@ inline void computeFrequencyResponseDb(const ToneFrequencyResponseParams& params
                                        const double* freqsHz, double* magnitudesDb, int count) {
     using namespace tone_response_detail;
 
-    if (params.type == ToneStage::Type::Off) {
+    if (params.type == ToneStage::Type::Off || params.type == ToneStage::Type::Hysteresis) {
+        // Hysteresis has no linear tone shaping — the saturator is nonlinear and
+        // runs at the pipeline-level HysteresisStage. Draw a flat (0 dB) curve.
         for (int i = 0; i < count; ++i) {
             magnitudesDb[i] = 0.0;
         }
@@ -380,22 +351,8 @@ inline void computeFrequencyResponseDb(const ToneFrequencyResponseParams& params
             }
             break;
         }
-        case ToneStage::Type::Hysteresis: {
-            // Net linear cascade of the NAB pre/de-emphasis pair plus the de-side LF bump.
-            // Pre: +emph·12 dB high shelf @ 3183 Hz. De: -emph·9 dB high shelf @ 3183 Hz, plus +1.5 dB LF shelf @ 50 Hz.
-            const double emph = juce::jlimit(0.0, 1.0, params.emphNorm);
-            const double preDb = +emph * kHystPreEmphMaxDb;
-            const double deDb = -emph * kHystDeEmphMaxDb;
-            for (int i = 0; i < count; ++i) {
-                const double hz = freqsHz[i];
-                double mag = firstOrderShelfMagLinear(hz, kHystHfCornerHz, preDb, /*highShelf=*/true)
-                           * firstOrderShelfMagLinear(hz, kHystHfCornerHz, deDb, /*highShelf=*/true)
-                           * firstOrderShelfMagLinear(hz, kHystLfCornerHz, kHystLfBumpDb, /*highShelf=*/false);
-                magnitudesDb[i] = linearToDb(mag);
-            }
-            break;
-        }
         case ToneStage::Type::Off:
+        case ToneStage::Type::Hysteresis:
         case ToneStage::Type::ImpulseResponse:
             // Handled above by the early return — included here so the switch
             // covers every enum value (silences -Wswitch).

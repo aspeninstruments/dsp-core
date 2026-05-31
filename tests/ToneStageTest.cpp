@@ -1183,43 +1183,20 @@ TEST(ToneStage, Bell_NoClickOnDeactivation) {
 }
 
 // --------------------------------------------------------------------------
-// Hysteresis tests. HysteresisStrategy is the NAB-style pre/de-emphasis arm
-// around the pipeline-level HysteresisStage (which wraps the waveshaper).
-// Each ToneStage instance runs one role: PreEmphasis (tonePreStage_) or
-// DeEmphasis (tonePostStage_). These tests pin the role-aware shelf
-// behaviour and the click-free transition contract.
+// Hysteresis. HysteresisStrategy is now a pure marker — its process() is a
+// no-op. Selecting Hysteresis as the tone type only signals the pipeline-level
+// HysteresisStage (the saturator that wraps the waveshaper) to engage; the
+// ToneStage itself produces no audio. These tests pin that contract.
 // --------------------------------------------------------------------------
 
-namespace {
-// Goertzel-flavored single-bin RMS estimator at probe frequency, over a
-// tail window to skip the IIR warmup transient.
-double measureRmsAt(const juce::AudioBuffer<double>& buf, double freqHz, int startSample, int endSample) {
-    double sumI = 0.0;
-    double sumQ = 0.0;
-    int n = 0;
-    for (int i = startSample; i < endSample; ++i) {
-        const double phase = 2.0 * M_PI * freqHz * i / kSampleRate;
-        const double v = buf.getSample(0, i);
-        sumI += v * std::cos(phase);
-        sumQ += v * std::sin(phase);
-        ++n;
-    }
-    const double normI = sumI / n;
-    const double normQ = sumQ / n;
-    return std::sqrt(2.0) * std::sqrt(normI * normI + normQ * normQ);
-}
-} // namespace
-
-// At emph=0 the HF shelf is flat (0 dB). The PreEmphasis role only runs the
-// HF shelf, so at emph=0 the pre-stage's output should be sample-identical to
-// its input — verifying both the bypass-when-flat optimization and the strict
-// "no LF bump on the pre side" contract.
-TEST(ToneStage, Hysteresis_PreEmphZero_IsTrueBypass) {
+// With type == Hysteresis the stage is a sample-identical pass-through: the
+// emphasis shelves were removed and the saturation lives elsewhere.
+TEST(ToneStage, Hysteresis_IsPassThroughNoOp) {
     ToneStage s;
-    s.setHysteresisRole(HysteresisStrategy::Role::PreEmphasis);
     s.setType(ToneStage::Type::Hysteresis);
     s.setEnabled(true);
-    s.setEmph(0.0);
+    s.setCutoffFrequency(1500.0); // forwarded to the marker; must stay a no-op
+    s.setResonance(0.6);
     s.prepareToPlay(kSampleRate, kBlockSize, 1);
 
     juce::AudioBuffer<double> input(1, kBlockSize);
@@ -1233,135 +1210,20 @@ TEST(ToneStage, Hysteresis_PreEmphZero_IsTrueBypass) {
 
     for (int i = 0; i < kBlockSize; ++i) {
         ASSERT_DOUBLE_EQ(input.getSample(0, i), output.getSample(0, i))
-            << "PreEmphasis at emph=0 must be strict bypass (sample " << i << ")";
+            << "Hysteresis tone type must be a strict pass-through (sample " << i << ")";
     }
 }
 
-// At emph=1 the pre-emphasis HF shelf reaches +12 dB at HF. Probe at 18 kHz
-// — well above the 3183 Hz corner — and confirm the asymptotic gain.
-TEST(ToneStage, Hysteresis_PreEmphMax_BoostsHighsByTwelveDb) {
-    ToneStage s;
-    s.setHysteresisRole(HysteresisStrategy::Role::PreEmphasis);
-    s.setType(ToneStage::Type::Hysteresis);
-    s.setEnabled(true);
-    s.setEmph(1.0);
-    s.prepareToPlay(kSampleRate, 4096, 1);
-
-    juce::AudioBuffer<double> buf(1, 4096);
-    constexpr double kProbeHz = 18000.0;
-    constexpr double kAmp = 0.2;
-    for (int i = 0; i < 4096; ++i) {
-        buf.setSample(0, i, kAmp * std::sin(2.0 * M_PI * kProbeHz * i / kSampleRate));
-    }
-    s.process(buf);
-
-    const double inputRms = kAmp / std::sqrt(2.0);
-    const double outRms = measureRmsAt(buf, kProbeHz, 2048, 4096);
-    const double gainDb = 20.0 * std::log10(outRms / inputRms);
-
-    EXPECT_NEAR(gainDb, 12.0, 0.5) << "PreEmphasis at emph=1 should boost 18 kHz by ~12 dB; got " << gainDb;
-}
-
-// The DeEmphasis role attenuates by -emph·9 dB at HF, so the cascade of
-// pre (+12 dB) and de (-9 dB) at emph=1 leaves a net +3 dB HF lift — the
-// "tape that's been pushed but still has presence" character.
-TEST(ToneStage, Hysteresis_PreDeAtMaxEmph_LeavesPlusThreeDbNetLift) {
-    ToneStage pre;
-    ToneStage de;
-    pre.setHysteresisRole(HysteresisStrategy::Role::PreEmphasis);
-    de.setHysteresisRole(HysteresisStrategy::Role::DeEmphasis);
-    for (auto* s : {&pre, &de}) {
-        s->setType(ToneStage::Type::Hysteresis);
-        s->setEnabled(true);
-        s->setEmph(1.0);
-        s->prepareToPlay(kSampleRate, 4096, 1);
-    }
-
-    juce::AudioBuffer<double> buf(1, 4096);
-    constexpr double kProbeHz = 18000.0;
-    constexpr double kAmp = 0.2;
-    for (int i = 0; i < 4096; ++i) {
-        buf.setSample(0, i, kAmp * std::sin(2.0 * M_PI * kProbeHz * i / kSampleRate));
-    }
-    pre.process(buf);
-    de.process(buf);
-
-    const double inputRms = kAmp / std::sqrt(2.0);
-    const double outRms = measureRmsAt(buf, kProbeHz, 2048, 4096);
-    const double gainDb = 20.0 * std::log10(outRms / inputRms);
-
-    // Pre +12 dB cascaded with de -9 dB → +3 dB net at HF.
-    EXPECT_NEAR(gainDb, 3.0, 0.5) << "Pre+De at emph=1 should net ~+3 dB HF lift; got " << gainDb;
-}
-
-// The fixed +1.5 dB / 50 Hz NAB low bump is on the DeEmphasis side only and
-// is NEVER scaled by emph. At emph=0 the DeEmphasis stage's HF shelf is flat
-// but the LF bump still runs. Probe at 30 Hz (below the corner) to confirm
-// the low-band lift; probe at the PreEmphasis stage's output to confirm the
-// LF bump is NOT present there.
-TEST(ToneStage, Hysteresis_LfBumpAt50Hz_OnDeOnly) {
-    ToneStage pre;
-    ToneStage de;
-    pre.setHysteresisRole(HysteresisStrategy::Role::PreEmphasis);
-    de.setHysteresisRole(HysteresisStrategy::Role::DeEmphasis);
-    for (auto* s : {&pre, &de}) {
-        s->setType(ToneStage::Type::Hysteresis);
-        s->setEnabled(true);
-        s->setEmph(0.0); // HF shelves flat
-        s->prepareToPlay(kSampleRate, 4096, 1);
-    }
-
-    constexpr double kProbeHz = 30.0;
-    constexpr double kAmp = 0.3;
-    const double inputRms = kAmp / std::sqrt(2.0);
-
-    {
-        // PreEmphasis at emph=0 is a strict sample-identical bypass (HF shelf
-        // skipped, no LF bump on this side), so compare input/output exactly
-        // — avoids single-bin DFT leakage error at low probe frequencies.
-        juce::AudioBuffer<double> input(1, 4096);
-        juce::AudioBuffer<double> bufPre(1, 4096);
-        for (int i = 0; i < 4096; ++i) {
-            const double v = kAmp * std::sin(2.0 * M_PI * kProbeHz * i / kSampleRate);
-            input.setSample(0, i, v);
-            bufPre.setSample(0, i, v);
-        }
-        pre.process(bufPre);
-        for (int i = 0; i < 4096; ++i) {
-            ASSERT_DOUBLE_EQ(input.getSample(0, i), bufPre.getSample(0, i))
-                << "PreEmphasis at emph=0 must be strict bypass — no LF bump (sample " << i << ")";
-        }
-    }
-
-    {
-        juce::AudioBuffer<double> bufDe(1, 4096);
-        for (int i = 0; i < 4096; ++i) {
-            bufDe.setSample(0, i, kAmp * std::sin(2.0 * M_PI * kProbeHz * i / kSampleRate));
-        }
-        de.process(bufDe);
-        const double outRmsDe = measureRmsAt(bufDe, kProbeHz, 2048, 4096);
-        const double gainDbDe = 20.0 * std::log10(outRmsDe / inputRms);
-        // 30 Hz is below the 50 Hz corner — should be near the +1.5 dB DC asymptote.
-        // Generous tolerance because single-bin DFT at 30 Hz over 2048 samples
-        // has notable spectral-leakage error (~0.5 dB).
-        EXPECT_GT(gainDbDe, 0.3) << "DeEmphasis at 30 Hz should approach +1.5 dB LF bump; got " << gainDbDe;
-        EXPECT_LT(gainDbDe, 1.5) << "DeEmphasis at 30 Hz can't exceed its DC asymptote +1.5 dB; got " << gainDbDe;
-    }
-}
-
-// Switch LP24 → Hysteresis mid-flight with loud signal; verify no NaN/Inf
-// and no catastrophic sample-to-sample delta at the boundary. The new
-// HysteresisStrategy DOES process (HF shelf + LF bump on de) so this is a
-// stricter check than the previous no-op-marker version.
+// Switch LP24 -> Hysteresis mid-flight with a loud signal; verify no NaN/Inf
+// and no runaway. After the switch the stage is a pass-through, so the only
+// risk is stale state surviving the type transition.
 TEST(ToneStage, Hysteresis_NoClickOnActivation) {
     ToneStage s;
-    s.setHysteresisRole(HysteresisStrategy::Role::DeEmphasis); // the busier role
     s.setType(ToneStage::Type::Lowpass24dB);
     s.setEnabled(true);
     s.setCutoffFrequency(1500.0);
     s.setResonance(0.6);
     s.setFat(80.0);
-    s.setEmph(0.5);
     s.prepareToPlay(kSampleRate, kBlockSize, 1);
 
     juce::AudioBuffer<double> buf(1, kBlockSize);

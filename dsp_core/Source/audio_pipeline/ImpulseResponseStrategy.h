@@ -105,7 +105,6 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
     void setFat(double /*percent*/) override {}
     void setLowShelfRatio(double /*ratio*/) override {}
     void setQ(double /*q*/) override {}
-    void setEmph(double /*zeroToOne*/) override {}
 
     /** Load an IR from disk. Must be called from the message thread.
      *  juce::dsp::Convolution::loadImpulseResponse loads on a background thread

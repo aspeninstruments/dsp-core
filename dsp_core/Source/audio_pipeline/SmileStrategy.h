@@ -84,10 +84,6 @@ class SmileStrategy : public ToneFilterStrategy {
         // No-op. Bell Q is a Bell-strategy concept; Smile uses fixed Butterworth shelves.
     }
 
-    void setEmph(double /*zeroToOne*/) override {
-        // No-op. Emph is a Hysteresis pre/de-emphasis concept.
-    }
-
   private:
     void applyLowShelfFrequency() {
         const double hsHz = hsHz_.load(std::memory_order_acquire);

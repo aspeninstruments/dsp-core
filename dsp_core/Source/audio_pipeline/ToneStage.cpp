@@ -217,18 +217,4 @@ void ToneStage::setQ(double q) {
     cachedBellQ_.store(q, std::memory_order_release);
 }
 
-void ToneStage::setEmph(double zeroToOne) {
-    lp12_.setEmph(zeroToOne);      // no-op
-    lp24_.setEmph(zeroToOne);      // no-op
-    lowShelf_.setEmph(zeroToOne);  // no-op
-    highShelf_.setEmph(zeroToOne); // no-op
-    smile_.setEmph(zeroToOne);     // no-op
-    bell_.setEmph(zeroToOne);      // no-op
-    hysteresis_.setEmph(zeroToOne); // applied here (Hysteresis pre/de-emph shelf gain)
-    hp12_.setEmph(zeroToOne); // no-op
-    hp24_.setEmph(zeroToOne); // no-op
-    ir_.setEmph(zeroToOne); // no-op
-    cachedEmphNorm_.store(zeroToOne, std::memory_order_release);
-}
-
 } // namespace dsp_core::audio_pipeline

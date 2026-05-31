@@ -122,18 +122,6 @@ class ToneStage : public AudioProcessingStage {
      *  strategies ignore. */
     void setQ(double q);
 
-    /** Hysteresis pre/de-emphasis macro [0, 1]. Drives the HF shelf gain
-     *  around the saturator (this stage's hysteresis_ runs the shelf in
-     *  either the pre- or de-emphasis role; see setHysteresisRole). */
-    void setEmph(double zeroToOne);
-
-    /** Configure this stage's hysteresis_ sub-strategy as the pre-emphasis or
-     *  de-emphasis arm of the NAB-style shelf pair. Call once at plugin
-     *  construction BEFORE prepareToPlay — does not change at runtime. */
-    void setHysteresisRole(HysteresisStrategy::Role role) {
-        hysteresis_.setRole(role);
-    }
-
     /** Load the .wav file used by the ImpulseResponse strategy. Routes only
      *  to ir_ (the IR is strategy-specific, unlike Frequency/Gain/etc. which
      *  are forwarded to all strategies to keep idle ones primed). Must be
@@ -163,8 +151,8 @@ class ToneStage : public AudioProcessingStage {
     // as cutoff modulates (sparse sampling would let the peak's apex slip
     // between bins frame-to-frame, producing visible jitter).
     //
-    // Hysteresis: the curve represents the net pre+de NAB linear cascade —
-    // see ToneFrequencyResponse.h for the per-strategy magnitude details.
+    // Hysteresis: a flat (0 dB) trace — the saturation is nonlinear and lives
+    // at the pipeline-level HysteresisStage, so the tone curve is identity.
 
     static constexpr int kFrequencyResponseSize = 1024;
     static constexpr double kFrequencyResponseMinHz = 10.0;
@@ -241,7 +229,6 @@ class ToneStage : public AudioProcessingStage {
     std::atomic<double> cachedFatPercent_{0.0};
     std::atomic<double> cachedLowShelfRatio_{0.0625};
     std::atomic<double> cachedBellQ_{1.0};
-    std::atomic<double> cachedEmphNorm_{0.5};
     std::atomic<double> cachedSampleRate_{48000.0};
 
     // Single-buffered frequency-response LUT. The only writer is the editor's

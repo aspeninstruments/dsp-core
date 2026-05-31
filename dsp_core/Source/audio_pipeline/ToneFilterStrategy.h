@@ -26,14 +26,11 @@ namespace dsp_core::audio_pipeline {
  *   8. (UI) Add a visibility-toggled sub-row to ToneOptionsPanel and, if the
  *      new type changes the hover-dial role, extend rebindTonePrimary().
  *
- * Exception — wrap-around-the-waveshaper effects: HysteresisStrategy is a
- * partial example. The Jiles-Atherton magnetisation loop itself runs at the
- * pipeline-level HysteresisStage (driven by Tone_Type), but the pre/post tone
- * stages around it host NAB-style pre-emphasis (before saturation) and
- * de-emphasis (after saturation) shelves. Each ToneStage instance is told its
- * role (PreEmphasis / DeEmphasis) at construction; the two share the same
- * Tone_Type but their hysteresis_ strategies process differently. See
- * HysteresisStrategy::Role and ToneStage::setHysteresisRole.
+ * Exception — Hysteresis: HysteresisStrategy is a pure marker (its process()
+ * is a no-op). The Jiles-Atherton magnetisation loop runs at the pipeline-level
+ * HysteresisStage (which wraps the waveshaper); selecting Hysteresis as a tone
+ * type on the pre or post side merely toggles that saturator on — there is no
+ * pre/de-emphasis shaping. See HysteresisStrategy.h.
  *
  * Thread safety:
  *   - process(), reset() run on the audio thread.
@@ -71,11 +68,6 @@ class ToneFilterStrategy : public AudioProcessingStage {
     /** Bell Q (bandwidth). Bell-only; other strategies should make this
      *  a no-op. Lower Q = broader bell; higher Q = narrower bell. */
     virtual void setQ(double q) = 0;
-
-    /** Hysteresis-emphasis macro [0, 1]. Hysteresis-only; other strategies
-     *  should make this a no-op. Drives the pre-/de-emphasis high-shelf gain
-     *  around the saturator (see HysteresisStrategy::Role). */
-    virtual void setEmph(double zeroToOne) = 0;
 };
 
 } // namespace dsp_core::audio_pipeline
