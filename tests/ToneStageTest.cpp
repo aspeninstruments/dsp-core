@@ -1628,3 +1628,160 @@ TEST(ToneStage, RecomputeFrequencyResponse_OffTypeProducesUnityGain) {
     }
 }
 
+// ── computeIRMagnitudeResponseDb ────────────────────────────────────────────
+
+namespace {
+
+std::array<double, ToneStage::kFrequencyResponseSize> makeLogFreqGrid() {
+    std::array<double, ToneStage::kFrequencyResponseSize> grid{};
+    const double logMin = std::log10(ToneStage::kFrequencyResponseMinHz);
+    const double logMax = std::log10(ToneStage::kFrequencyResponseMaxHz);
+    const double denom = static_cast<double>(ToneStage::kFrequencyResponseSize - 1);
+    for (int i = 0; i < ToneStage::kFrequencyResponseSize; ++i) {
+        const double t = static_cast<double>(i) / denom;
+        grid[static_cast<size_t>(i)] = std::pow(10.0, logMin + t * (logMax - logMin));
+    }
+    return grid;
+}
+
+int indexOfFreq(const std::array<double, ToneStage::kFrequencyResponseSize>& grid, double hz) {
+    const double logMin = std::log10(ToneStage::kFrequencyResponseMinHz);
+    const double logMax = std::log10(ToneStage::kFrequencyResponseMaxHz);
+    const double t = (std::log10(hz) - logMin) / (logMax - logMin);
+    const auto last = static_cast<int>(grid.size()) - 1;
+    return std::clamp(static_cast<int>(std::round(t * static_cast<double>(last))), 0, last);
+}
+
+} // namespace
+
+TEST(ComputeIRMagnitudeResponseDb, DeltaIRProducesFlatPeakNormalizedResponse) {
+    // Kronecker delta: H(f) = 1 for all f → after peak-normalization every bin
+    // should sit at 0 dB (within the dB floor that the function applies).
+    constexpr int kIRLen = 4096;
+    std::vector<float> ir(kIRLen, 0.0f);
+    ir[0] = 1.0f;
+
+    const auto grid = makeLogFreqGrid();
+    std::array<double, ToneStage::kFrequencyResponseSize> mags{};
+    computeIRMagnitudeResponseDb(ir.data(), kIRLen, kSampleRate, grid.data(),
+                                  mags.data(), static_cast<int>(grid.size()));
+
+    for (int i = 0; i < static_cast<int>(mags.size()); ++i) {
+        const double hz = grid[static_cast<size_t>(i)];
+        if (hz >= kSampleRate * 0.5) {
+            continue; // above Nyquist — function may floor these
+        }
+        EXPECT_NEAR(mags[static_cast<size_t>(i)], 0.0, 0.25)
+            << "delta IR should be flat 0 dB after peak-normalization at i=" << i << " (" << hz << " Hz)";
+    }
+}
+
+TEST(ComputeIRMagnitudeResponseDb, SineIRPeaksAtSineFrequency) {
+    // A pure tone IR (1 kHz sine, integer number of periods) has its spectral
+    // peak at 1 kHz. After peak-normalization 1 kHz should be 0 dB and other
+    // bands should be well below.
+    constexpr double kSineHz = 1000.0;
+    constexpr int kIRLen = 16384;
+    std::vector<float> ir(kIRLen);
+    for (int i = 0; i < kIRLen; ++i) {
+        ir[static_cast<size_t>(i)] =
+            static_cast<float>(std::sin(2.0 * M_PI * kSineHz * i / kSampleRate));
+    }
+
+    const auto grid = makeLogFreqGrid();
+    std::array<double, ToneStage::kFrequencyResponseSize> mags{};
+    computeIRMagnitudeResponseDb(ir.data(), kIRLen, kSampleRate, grid.data(),
+                                  mags.data(), static_cast<int>(grid.size()));
+
+    // Peak normalization invariant.
+    double peak = mags[0];
+    for (double m : mags) {
+        peak = std::max(peak, m);
+    }
+    EXPECT_NEAR(peak, 0.0, 1e-9);
+
+    // 1 kHz should be at or very near the peak; bands far from 1 kHz should
+    // be well below it. The 1/6-octave bandpower smoothing widens the peak
+    // slightly so we check ratios at 100 Hz and 8 kHz (well off the bandwidth).
+    const double dbAt1k = mags[static_cast<size_t>(indexOfFreq(grid, 1000.0))];
+    const double dbAt100 = mags[static_cast<size_t>(indexOfFreq(grid, 100.0))];
+    const double dbAt8k = mags[static_cast<size_t>(indexOfFreq(grid, 8000.0))];
+    EXPECT_GT(dbAt1k, -1.0) << "1 kHz tone IR should put its peak at 1 kHz (got " << dbAt1k << " dB)";
+    EXPECT_LT(dbAt100, -20.0) << "100 Hz should be far below the 1 kHz peak (got " << dbAt100 << " dB)";
+    EXPECT_LT(dbAt8k, -20.0) << "8 kHz should be far below the 1 kHz peak (got " << dbAt8k << " dB)";
+}
+
+TEST(ComputeIRMagnitudeResponseDb, EmptyInputFallsBackToFlat) {
+    // Null pointer / zero length: writer should still leave the caller's buffer
+    // in a defined state (no NaN, no out-of-range writes).
+    const auto grid = makeLogFreqGrid();
+    std::array<double, ToneStage::kFrequencyResponseSize> mags{};
+    mags.fill(123.4);
+
+    computeIRMagnitudeResponseDb(nullptr, 0, kSampleRate, grid.data(), mags.data(),
+                                  static_cast<int>(grid.size()));
+
+    for (double m : mags) {
+        EXPECT_FALSE(std::isnan(m)) << "computeIRMagnitudeResponseDb must not produce NaN on empty input";
+        EXPECT_EQ(m, 0.0) << "empty input must zero-fill the output buffer";
+    }
+}
+
+TEST(ToneStage, RecomputeFrequencyResponse_IRTypeCopiesProvidedMagnitudes) {
+    // Editor flow: caller pre-computes magnitudes via computeIRMagnitudeResponseDb
+    // and hands a pointer in via params.irMagnitudesDb. recomputeFrequencyResponse
+    // should memcpy them through to the LUT verbatim.
+    ToneStage stage;
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    const int n = stage.getFrequencyResponseSize();
+    std::vector<double> source(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        source[static_cast<size_t>(i)] = -3.0 * std::sin(static_cast<double>(i) * 0.01);
+    }
+
+    ToneFrequencyResponseParams params;
+    params.type = ToneStage::Type::ImpulseResponse;
+    params.sampleRate = kSampleRate;
+    params.irMagnitudesDb = source.data();
+    params.irPathFingerprint = "/fake/path.wav";
+    stage.recomputeFrequencyResponse(params);
+
+    const double* lut = stage.getFrequencyResponseLUT();
+    ASSERT_NE(lut, nullptr);
+    for (int i = 0; i < n; ++i) {
+        EXPECT_DOUBLE_EQ(lut[i], source[static_cast<size_t>(i)])
+            << "ImpulseResponse type must memcpy caller-supplied magnitudes verbatim at i=" << i;
+    }
+}
+
+TEST(ToneStage, RecomputeFrequencyResponse_IRTypeNullPointerFallsBackToFlat) {
+    // No IR loaded: irMagnitudesDb stays null. LUT should fall back to flat
+    // 0 dB rather than carrying stale data from a previous strategy.
+    ToneStage stage;
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    // First populate the LUT with a non-flat strategy so we can prove the
+    // IR fallback actually overwrites it.
+    ToneFrequencyResponseParams setup;
+    setup.type = ToneStage::Type::LowShelf;
+    setup.cutoffHz = 200.0;
+    setup.shelfGainDb = 6.0;
+    setup.sampleRate = kSampleRate;
+    stage.recomputeFrequencyResponse(setup);
+
+    ToneFrequencyResponseParams params;
+    params.type = ToneStage::Type::ImpulseResponse;
+    params.sampleRate = kSampleRate;
+    params.irMagnitudesDb = nullptr;
+    stage.recomputeFrequencyResponse(params);
+
+    const double* lut = stage.getFrequencyResponseLUT();
+    ASSERT_NE(lut, nullptr);
+    const int n = stage.getFrequencyResponseSize();
+    for (int i = 0; i < n; ++i) {
+        EXPECT_NEAR(lut[i], 0.0, 1e-9)
+            << "ImpulseResponse with no IR must publish a flat 0 dB trace at i=" << i;
+    }
+}
+

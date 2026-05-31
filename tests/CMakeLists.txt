@@ -376,6 +376,31 @@ endif()
 
 add_test(NAME BellStageTests COMMAND bell_stage_tests)
 
+# ImpulseResponseStrategy tests
+add_executable(impulse_response_strategy_tests
+    ImpulseResponseStrategyTest.cpp
+)
+
+target_include_directories(impulse_response_strategy_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(impulse_response_strategy_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(impulse_response_strategy_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(impulse_response_strategy_tests)
+endif()
+
+add_test(NAME ImpulseResponseStrategyTests COMMAND impulse_response_strategy_tests)
+
 # CurveFeatureDetector tests
 add_executable(curve_feature_detector_tests
     CurveFeatureDetectorTest.cpp

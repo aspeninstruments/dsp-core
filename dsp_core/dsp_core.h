@@ -16,7 +16,7 @@
   license:            proprietary/commercial
   minimumCppStandard: 17
 
-  dependencies:       juce_core, juce_data_structures, juce_audio_processors, juce_dsp
+  dependencies:       juce_core, juce_data_structures, juce_audio_processors, juce_dsp, juce_audio_formats
 
  END_JUCE_MODULE_DECLARATION
 
@@ -76,6 +76,7 @@
 #include "Source/audio_pipeline/HighpassStrategy.h"
 #include "Source/audio_pipeline/LowShelfStrategy.h"
 #include "Source/audio_pipeline/HysteresisStrategy.h"
+#include "Source/audio_pipeline/ImpulseResponseStrategy.h"
 #include "Source/audio_pipeline/SmileStrategy.h"
 #include "Source/audio_pipeline/HighShelfStage.h"
 #include "Source/audio_pipeline/HighShelfStrategy.h"

@@ -5,6 +5,7 @@
 #include "HighShelfStrategy.h"
 #include "HighpassStrategy.h"
 #include "HysteresisStrategy.h"
+#include "ImpulseResponseStrategy.h"
 #include "LowShelfStrategy.h"
 #include "LowpassStrategy.h"
 #include "SmileStrategy.h"
@@ -66,7 +67,8 @@ class ToneStage : public AudioProcessingStage {
         Bell,
         Hysteresis,
         Highpass12dB,
-        Highpass24dB
+        Highpass24dB,
+        ImpulseResponse
     };
 
     ToneStage() = default;
@@ -132,6 +134,15 @@ class ToneStage : public AudioProcessingStage {
         hysteresis_.setRole(role);
     }
 
+    /** Load the .wav file used by the ImpulseResponse strategy. Routes only
+     *  to ir_ (the IR is strategy-specific, unlike Frequency/Gain/etc. which
+     *  are forwarded to all strategies to keep idle ones primed). Must be
+     *  called from the message thread; the convolver hot-swaps the IR
+     *  asynchronously so it is safe while audio is running. */
+    void setImpulseResponseFile(const juce::File& file) {
+        ir_.setImpulseResponseFile(file);
+    }
+
     // ── Frequency-response LUT (UI-thread pull source for the visualizer) ──
     //
     // Sampled magnitude response of the *currently selected* strategy at
@@ -169,6 +180,13 @@ class ToneStage : public AudioProcessingStage {
     int getFrequencyResponseSize() const {
         return kFrequencyResponseSize;
     }
+    /** Log-spaced frequency grid corresponding 1:1 to the LUT entries (Hz).
+     *  Editor uses this as the bin-mapping target when running an FFT of the
+     *  IR — keeps the IR trace on exactly the same x-axis as the analytic
+     *  traces so the visualizer doesn't have to interpolate at paint time. */
+    const double* getFrequencyResponseFrequenciesHz() const {
+        return frequencyResponseHz_.data();
+    }
     double getFrequencyResponseMinHz() const {
         return kFrequencyResponseMinHz;
     }
@@ -198,6 +216,7 @@ class ToneStage : public AudioProcessingStage {
     HysteresisStrategy hysteresis_;
     HighpassStrategy<2> hp12_;
     HighpassStrategy<4> hp24_;
+    ImpulseResponseStrategy ir_;
 
     std::atomic<bool> enabled_{false};
     std::atomic<Type> type_{Type::Off};

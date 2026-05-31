@@ -1,9 +1,13 @@
 #pragma once
 
 #include "ToneStage.h"
+#include <juce_core/juce_core.h>
 #include <juce_dsp/juce_dsp.h>
+#include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstring>
+#include <vector>
 
 namespace dsp_core::audio_pipeline {
 
@@ -34,6 +38,15 @@ struct ToneFrequencyResponseParams {
     double bellQ = 1.0;
     double emphNorm = 0.5;
     double sampleRate = 48000.0;
+
+    // ImpulseResponse type only. Caller (editor) computes the FFT-based
+    // magnitude trace once per IR file and passes a borrowed pointer in.
+    // irPathFingerprint participates in operator== so a file change triggers
+    // recompute via the existing param-fingerprint short-circuit; the raw
+    // pointer alone wouldn't (the cache buffer is reused, so its address is
+    // stable across IR changes).
+    const double* irMagnitudesDb = nullptr;
+    juce::String irPathFingerprint;
 
     // Member-wise equality so the editor can fingerprint and skip recompute
     // when nothing changed since the last timer tick.
@@ -129,6 +142,139 @@ inline double linearToDb(double mag) {
 } // namespace tone_response_detail
 
 /**
+ * Compute the magnitude response of an IR (`monoSamples`, `numSamples` at
+ * `irSampleRate`) on the same log-spaced frequency grid the rest of the tone
+ * visualizer uses. Result is peak-normalized so max(magsDb) == 0.
+ *
+ * FFT size is the next power of two ≥ numSamples, clamped to [4096, 65536].
+ * 4096 keeps low-frequency resolution sensible for short cab IRs; 65536 caps
+ * the cost for long reverb tails. No window — we want the IR's true spectrum,
+ * not a windowed slice. Bandpower averaging over ±1/12 octave (= 1/6 octave
+ * total) smooths the comb ripples a finite-length IR's phase response would
+ * otherwise put on screen.
+ *
+ * UI thread only — allocates an internal FFT scratch and the juce::dsp::FFT
+ * object. Cost is one-shot per IR file change; the editor caches the result.
+ */
+inline void computeIRMagnitudeResponseDb(const float* monoSamples, int numSamples,
+                                         double irSampleRate, const double* freqsHz,
+                                         double* magsDb, int count) {
+    using namespace tone_response_detail;
+
+    if (monoSamples == nullptr || numSamples <= 0 || irSampleRate <= 0.0 ||
+        freqsHz == nullptr || magsDb == nullptr || count <= 0) {
+        if (magsDb != nullptr && count > 0) {
+            std::fill_n(magsDb, count, 0.0);
+        }
+        return;
+    }
+
+    // FFT size: next power of two >= numSamples, clamped to [4096, 65536].
+    constexpr int kMinFftSize = 4096;
+    constexpr int kMaxFftSize = 65536;
+    int fftSize = kMinFftSize;
+    while (fftSize < numSamples && fftSize < kMaxFftSize) {
+        fftSize <<= 1;
+    }
+    fftSize = juce::jlimit(kMinFftSize, kMaxFftSize, fftSize);
+
+    int order = 0;
+    for (int v = fftSize; v > 1; v >>= 1) {
+        ++order;
+    }
+
+    juce::dsp::FFT fft(order);
+
+    // performRealOnlyForwardTransform expects a buffer of size 2*fftSize.
+    std::vector<float> scratch(static_cast<size_t>(fftSize) * 2, 0.0f);
+    const int copyCount = std::min(numSamples, fftSize);
+    std::memcpy(scratch.data(), monoSamples, static_cast<size_t>(copyCount) * sizeof(float));
+
+    fft.performRealOnlyForwardTransform(scratch.data());
+
+    // Real-only forward output is interleaved [re0, im0, re1, im1, ...] for
+    // bins 0..N/2. Convert to power per bin.
+    const int numBins = fftSize / 2 + 1;
+    std::vector<double> power(static_cast<size_t>(numBins), 0.0);
+    for (int k = 0; k < numBins; ++k) {
+        const double re = scratch[static_cast<size_t>(k) * 2];
+        const double im = scratch[static_cast<size_t>(k) * 2 + 1];
+        power[static_cast<size_t>(k)] = re * re + im * im;
+    }
+
+    // Hz per FFT bin.
+    const double binHz = irSampleRate / static_cast<double>(fftSize);
+    const double nyquist = irSampleRate * 0.5;
+
+    // Two-pass smoothing:
+    //  1) per-target log-linear bin lerp — gives a continuous power curve
+    //     even at low frequencies where consecutive LUT entries would
+    //     otherwise read the same FFT bin (the previous stair-step bug).
+    //  2) triangular smoothing across the LUT itself, ±1/12 octave wide
+    //     in log-frequency space. Suppresses the comb ripples a finite-
+    //     length IR's phase response produces at HF without adding the
+    //     LF plateaus that hard-band-edge averaging causes.
+    constexpr double kMinPower = 1e-12; // -120 dB floor pre-normalization.
+
+    std::vector<double> rawDb(static_cast<size_t>(count), -60.0);
+    for (int i = 0; i < count; ++i) {
+        const double f = freqsHz[i];
+        if (f <= 0.0 || f >= nyquist) {
+            continue;
+        }
+        // Log-linear interpolate power between the two FFT bins straddling f.
+        // Skip the DC bin (k=0): for very-low targets just read bin 1 — DC
+        // is not part of the response and would pull the floor down sharply.
+        const double kReal = f / binHz;
+        const int k0 = juce::jlimit(1, numBins - 1, static_cast<int>(std::floor(kReal)));
+        const int k1 = juce::jlimit(1, numBins - 1, k0 + 1);
+        const double frac = juce::jlimit(0.0, 1.0, kReal - std::floor(kReal));
+        const double p = (1.0 - frac) * power[static_cast<size_t>(k0)] +
+                         frac * power[static_cast<size_t>(k1)];
+        rawDb[static_cast<size_t>(i)] = 10.0 * std::log10(std::max(p, kMinPower));
+    }
+
+    // Triangular smoothing kernel half-width = number of LUT bins covering
+    // 1/12 octave. The LUT is log-spaced, so a fixed bin count gives a
+    // fixed octave bandwidth — no need to recompute per target.
+    int kernelHalfWidth = 1;
+    if (count >= 2) {
+        const double octavesPerBin = std::log2(freqsHz[count - 1] / freqsHz[0]) /
+                                     static_cast<double>(count - 1);
+        if (octavesPerBin > 0.0) {
+            kernelHalfWidth = juce::jmax(1, static_cast<int>(std::round((1.0 / 12.0) / octavesPerBin)));
+        }
+    }
+
+    for (int i = 0; i < count; ++i) {
+        const int jMin = juce::jmax(0, i - kernelHalfWidth);
+        const int jMax = juce::jmin(count - 1, i + kernelHalfWidth);
+        double sum = 0.0;
+        double wsum = 0.0;
+        for (int j = jMin; j <= jMax; ++j) {
+            // Triangular: 1 at center, 0 at ±(kernelHalfWidth+1). Smoothing
+            // in dB domain matches how the visualizer reads the LUT (linear
+            // dB axis), so the resulting curve is visually-uniform.
+            const double w = 1.0 - static_cast<double>(std::abs(i - j)) /
+                                       static_cast<double>(kernelHalfWidth + 1);
+            sum += w * rawDb[static_cast<size_t>(j)];
+            wsum += w;
+        }
+        magsDb[i] = (wsum > 0.0) ? sum / wsum : rawDb[static_cast<size_t>(i)];
+    }
+
+    // Peak-normalize so max == 0 dB; floor at -60 dB so the trace stays well
+    // inside the visualizer's ±24 dB display range and log math stays sane.
+    double peak = magsDb[0];
+    for (int i = 1; i < count; ++i) {
+        peak = std::max(peak, magsDb[i]);
+    }
+    for (int i = 0; i < count; ++i) {
+        magsDb[i] = std::max(magsDb[i] - peak, -60.0);
+    }
+}
+
+/**
  * Fill `magnitudesDb` (length `count`) with the strategy's frequency response
  * in dB at each frequency in `freqsHz`. Caller pre-allocates both arrays.
  * Off type writes a flat 0 dB curve.
@@ -143,6 +289,20 @@ inline void computeFrequencyResponseDb(const ToneFrequencyResponseParams& params
     if (params.type == ToneStage::Type::Off) {
         for (int i = 0; i < count; ++i) {
             magnitudesDb[i] = 0.0;
+        }
+        return;
+    }
+
+    if (params.type == ToneStage::Type::ImpulseResponse) {
+        // Editor computes the IR's FFT-based magnitude once per IR file change
+        // and passes a borrowed pointer in via params.irMagnitudesDb. Null
+        // means no IR is loaded — fall back to a flat trace so the overlay
+        // still draws cleanly while the user picks a file.
+        if (params.irMagnitudesDb != nullptr) {
+            std::memcpy(magnitudesDb, params.irMagnitudesDb,
+                        static_cast<std::size_t>(count) * sizeof(double));
+        } else {
+            std::fill_n(magnitudesDb, count, 0.0);
         }
         return;
     }
@@ -236,6 +396,9 @@ inline void computeFrequencyResponseDb(const ToneFrequencyResponseParams& params
             break;
         }
         case ToneStage::Type::Off:
+        case ToneStage::Type::ImpulseResponse:
+            // Handled above by the early return — included here so the switch
+            // covers every enum value (silences -Wswitch).
             break;
     }
 }

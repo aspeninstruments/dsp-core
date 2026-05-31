@@ -7,6 +7,7 @@ juce_add_module(dsp_core
             juce::juce_data_structures
             juce::juce_audio_processors
             juce::juce_dsp
+            juce::juce_audio_formats
 )
 
 target_sources(dsp_core PRIVATE
@@ -94,6 +95,7 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/HighpassStrategy.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/LowShelfStrategy.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/HysteresisStrategy.h"
+    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/ImpulseResponseStrategy.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/SmileStrategy.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/HighShelfStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/HighShelfStage.cpp"

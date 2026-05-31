@@ -23,6 +23,7 @@ void ToneStage::prepareToPlay(double sampleRate, int samplesPerBlock, int numCha
     hysteresis_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     hp12_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     hp24_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
+    ir_.prepareToPlay(sampleRate, samplesPerBlock, numChannels);
     lastType_ = type_.load(std::memory_order_acquire);
 
     cachedSampleRate_.store(sampleRate, std::memory_order_release);
@@ -71,6 +72,8 @@ ToneFilterStrategy* ToneStage::strategyFor(Type t) {
             return &hp12_;
         case Type::Highpass24dB:
             return &hp24_;
+        case Type::ImpulseResponse:
+            return &ir_;
         case Type::Off:
         default:
             return nullptr;
@@ -119,6 +122,7 @@ void ToneStage::reset() {
     hysteresis_.reset();
     hp12_.reset();
     hp24_.reset();
+    ir_.reset();
 }
 
 void ToneStage::setCutoffFrequency(double frequencyHz) {
@@ -131,6 +135,7 @@ void ToneStage::setCutoffFrequency(double frequencyHz) {
     hysteresis_.setFrequency(frequencyHz); // no-op (marker strategy)
     hp12_.setFrequency(frequencyHz);
     hp24_.setFrequency(frequencyHz);
+    ir_.setFrequency(frequencyHz); // no-op (IR is the cabinet character)
     cachedCutoffHz_.store(frequencyHz, std::memory_order_release);
 }
 
@@ -146,6 +151,7 @@ void ToneStage::setResonance(double zeroToOne) {
     hysteresis_.setResonance(r); // no-op (marker strategy)
     hp12_.setResonance(r);
     hp24_.setResonance(r);
+    ir_.setResonance(r); // no-op
     cachedResonanceNorm_.store(clamped, std::memory_order_release);
 }
 
@@ -159,6 +165,7 @@ void ToneStage::setShelfGainDb(double gainDb) {
     hysteresis_.setShelfGainDb(gainDb); // no-op (marker strategy)
     hp12_.setShelfGainDb(gainDb); // no-op
     hp24_.setShelfGainDb(gainDb); // no-op
+    ir_.setShelfGainDb(gainDb); // no-op
     cachedShelfGainDb_.store(gainDb, std::memory_order_release);
 }
 
@@ -172,6 +179,7 @@ void ToneStage::setFat(double percent) {
     hysteresis_.setFat(percent); // no-op (marker strategy)
     hp12_.setFat(percent); // no-op (HPF has no Fat sub-stage)
     hp24_.setFat(percent); // no-op
+    ir_.setFat(percent); // no-op
     cachedFatPercent_.store(percent, std::memory_order_release);
 }
 
@@ -191,6 +199,7 @@ void ToneStage::setLowShelfRatio(double ratio) {
     hysteresis_.setLowShelfRatio(ratio); // no-op (marker strategy)
     hp12_.setLowShelfRatio(ratio); // no-op
     hp24_.setLowShelfRatio(ratio); // no-op
+    ir_.setLowShelfRatio(ratio); // no-op
     cachedLowShelfRatio_.store(ratio, std::memory_order_release);
 }
 
@@ -204,6 +213,7 @@ void ToneStage::setQ(double q) {
     hysteresis_.setQ(q); // no-op (marker strategy)
     hp12_.setQ(q); // no-op
     hp24_.setQ(q); // no-op
+    ir_.setQ(q); // no-op
     cachedBellQ_.store(q, std::memory_order_release);
 }
 
@@ -217,6 +227,7 @@ void ToneStage::setEmph(double zeroToOne) {
     hysteresis_.setEmph(zeroToOne); // applied here (Hysteresis pre/de-emph shelf gain)
     hp12_.setEmph(zeroToOne); // no-op
     hp24_.setEmph(zeroToOne); // no-op
+    ir_.setEmph(zeroToOne); // no-op
     cachedEmphNorm_.store(zeroToOne, std::memory_order_release);
 }
 
