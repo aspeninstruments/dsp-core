@@ -1589,10 +1589,11 @@ TEST(ComputeIRMagnitudeResponseDb, EmptyInputFallsBackToFlat) {
     }
 }
 
-TEST(ToneStage, RecomputeFrequencyResponse_IRTypeCopiesProvidedMagnitudes) {
+TEST(ToneStage, RecomputeFrequencyResponse_IRTypeFullyWetReproducesMagnitudes) {
     // Editor flow: caller pre-computes magnitudes via computeIRMagnitudeResponseDb
-    // and hands a pointer in via params.irMagnitudesDb. recomputeFrequencyResponse
-    // should memcpy them through to the LUT verbatim.
+    // and hands a pointer in via params.irMagnitudesDb. At irMix=1 (fully wet) the
+    // dry/wet blend reproduces the IR curve (round-tripped through linear domain,
+    // hence NEAR not exact).
     ToneStage stage;
     stage.prepareToPlay(kSampleRate, kBlockSize, 1);
 
@@ -1606,15 +1607,69 @@ TEST(ToneStage, RecomputeFrequencyResponse_IRTypeCopiesProvidedMagnitudes) {
     params.type = ToneStage::Type::ImpulseResponse;
     params.sampleRate = kSampleRate;
     params.irMagnitudesDb = source.data();
+    params.irMix = 1.0; // fully wet
     params.irPathFingerprint = "/fake/path.wav";
     stage.recomputeFrequencyResponse(params);
 
     const double* lut = stage.getFrequencyResponseLUT();
     ASSERT_NE(lut, nullptr);
     for (int i = 0; i < n; ++i) {
-        EXPECT_DOUBLE_EQ(lut[i], source[static_cast<size_t>(i)])
-            << "ImpulseResponse type must memcpy caller-supplied magnitudes verbatim at i=" << i;
+        EXPECT_NEAR(lut[i], source[static_cast<size_t>(i)], 1e-9)
+            << "ImpulseResponse at full wet must reproduce caller-supplied magnitudes at i=" << i;
     }
+}
+
+TEST(ToneStage, RecomputeFrequencyResponse_IRTypeMixZeroIsFlat) {
+    // irMix=0 (fully dry) — the dry path is unity, so the blended trace must be
+    // flat 0 dB regardless of the IR's shape.
+    ToneStage stage;
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    const int n = stage.getFrequencyResponseSize();
+    std::vector<double> source(static_cast<size_t>(n), -12.0); // arbitrary non-flat IR
+    source[100] = -40.0;
+
+    ToneFrequencyResponseParams params;
+    params.type = ToneStage::Type::ImpulseResponse;
+    params.sampleRate = kSampleRate;
+    params.irMagnitudesDb = source.data();
+    params.irMix = 0.0; // fully dry
+    params.irPathFingerprint = "/fake/path.wav";
+    stage.recomputeFrequencyResponse(params);
+
+    const double* lut = stage.getFrequencyResponseLUT();
+    ASSERT_NE(lut, nullptr);
+    for (int i = 0; i < n; ++i) {
+        EXPECT_NEAR(lut[i], 0.0, 1e-9) << "ImpulseResponse at mix=0 must be flat 0 dB at i=" << i;
+    }
+}
+
+TEST(ToneStage, RecomputeFrequencyResponse_IRTypeMixHalfFillsNotch) {
+    // A parallel dry path fills the IR's notches. At mix=0.5 a deep -40 dB notch
+    // should rise well above -40 dB (dry energy fills it), while a 0 dB bin (peak)
+    // stays at 0 dB (dry + wet both unity there).
+    ToneStage stage;
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    const int n = stage.getFrequencyResponseSize();
+    std::vector<double> source(static_cast<size_t>(n), 0.0); // 0 dB everywhere...
+    source[200] = -40.0;                                     // ...except a deep notch
+
+    ToneFrequencyResponseParams params;
+    params.type = ToneStage::Type::ImpulseResponse;
+    params.sampleRate = kSampleRate;
+    params.irMagnitudesDb = source.data();
+    params.irMix = 0.5;
+    params.irPathFingerprint = "/fake/path.wav";
+    stage.recomputeFrequencyResponse(params);
+
+    const double* lut = stage.getFrequencyResponseLUT();
+    ASSERT_NE(lut, nullptr);
+    // 0 dB bins stay at 0 dB: 0.5*1 + 0.5*1 = 1.0 → 0 dB.
+    EXPECT_NEAR(lut[0], 0.0, 1e-9);
+    // The notch fills: 0.5*1 + 0.5*10^(-40/20) = 0.505 → ~-5.9 dB, far above -40.
+    EXPECT_GT(lut[200], -10.0) << "mix=0.5 must fill the -40 dB notch toward the dry reference";
+    EXPECT_LT(lut[200], 0.0) << "the notch is still partly present at mix=0.5";
 }
 
 TEST(ToneStage, RecomputeFrequencyResponse_IRTypeNullPointerFallsBackToFlat) {

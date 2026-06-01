@@ -131,6 +131,13 @@ class ToneStage : public AudioProcessingStage {
         ir_.setImpulseResponseFile(file);
     }
 
+    /** Dry↔wet blend for the ImpulseResponse strategy, [0, 1]. Routes only to
+     *  ir_ (IR-specific, like the file itself — not forwarded to the other
+     *  strategies). 1.0 = 100% wet, 0.0 = dry passthrough. */
+    void setImpulseResponseMix(double zeroToOne) {
+        ir_.setMix(zeroToOne);
+    }
+
     // ── Frequency-response LUT (UI-thread pull source for the visualizer) ──
     //
     // Sampled magnitude response of the *currently selected* strategy at

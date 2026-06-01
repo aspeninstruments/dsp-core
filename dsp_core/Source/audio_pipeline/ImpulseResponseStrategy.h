@@ -21,6 +21,12 @@ namespace dsp_core::audio_pipeline {
  * All ToneFilterStrategy parameter setters (frequency/resonance/gain/Q/etc.)
  * are no-ops — the IR file itself is the cabinet/space character, configured
  * out-of-band via setImpulseResponseFile().
+ *
+ * Mix: setMix() blends the convolved (wet) signal with the dry input. 1.0 =
+ * 100% wet (the convolver's full output), 0.0 = dry passthrough. The blend is
+ * phase-coherent: juce::dsp::Convolution is a zero-latency engine here, but we
+ * query getLatency() and delay the dry path by that many samples if it is ever
+ * non-zero (e.g. a future fixed-latency mode) so the parallel sum doesn't comb.
  */
 class ImpulseResponseStrategy : public ToneFilterStrategy {
   public:
@@ -42,6 +48,19 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
         scratch_.setSize(currentNumChannels_, samplesPerBlock, false, false, true);
         scratch_.clear();
 
+        // Mix smoothing: ~10 ms ramp so dialing/modulating the blend is click-free.
+        mixSmoothed_.reset(sampleRate, 0.01);
+        mixSmoothed_.setCurrentAndTargetValue(mix_.load(std::memory_order_acquire));
+
+        // Phase-coherent dry path: if the convolver reports a latency, delay the
+        // dry signal by the same amount before blending. NonUniform is zero-
+        // latency, so in practice this stays 0 and the direct-blend path runs.
+        irLatencySamples_ = juce::jmax(0, convolution_.getLatency());
+        dryDelay_.prepare(spec);
+        dryDelay_.setMaximumDelayInSamples(juce::jmax(1, irLatencySamples_));
+        dryDelay_.setDelay(static_cast<double>(irLatencySamples_));
+        dryDelay_.reset();
+
         prepared_ = true;
 
         // If a file was queued before prepareToPlay (e.g. restored from state),
@@ -54,7 +73,8 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
     void process(juce::AudioBuffer<double>& buffer) override {
         if (!prepared_ || !hasImpulseResponse_.load(std::memory_order_acquire)) {
             // No IR loaded — pass audio through unchanged so the user hears
-            // raw signal while picking a file, rather than silence.
+            // raw signal while picking a file, rather than silence. Mix is
+            // irrelevant here (the "wet" convolver has nothing to contribute).
             return;
         }
 
@@ -64,7 +84,10 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
             return;
         }
 
-        // Down-cast to float.
+        mixSmoothed_.setTargetValue(mix_.load(std::memory_order_acquire));
+
+        // Down-cast to float (dry copy for the convolver). The buffer still
+        // holds the dry signal until the up-cast/blend loop overwrites it.
         for (int ch = 0; ch < numChannels; ++ch) {
             const auto* src = buffer.getReadPointer(ch);
             auto* dst = scratch_.getWritePointer(ch);
@@ -79,18 +102,28 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
         juce::dsp::ProcessContextReplacing<float> context(block);
         convolution_.process(context);
 
-        // Up-cast back to double.
-        for (int ch = 0; ch < numChannels; ++ch) {
-            const auto* src = scratch_.getReadPointer(ch);
-            auto* dst = buffer.getWritePointer(ch);
-            for (int i = 0; i < numSamples; ++i) {
-                dst[i] = static_cast<double>(src[i]);
+        // Up-cast wet back to double and blend with the (latency-matched) dry.
+        // The smoothed mix is advanced once per frame and applied to all
+        // channels so the L/R blend stays phase-aligned.
+        for (int i = 0; i < numSamples; ++i) {
+            const double g = mixSmoothed_.getNextValue();
+            for (int ch = 0; ch < numChannels; ++ch) {
+                const double dry = buffer.getReadPointer(ch)[i];
+                double delayedDry = dry;
+                if (irLatencySamples_ > 0) {
+                    dryDelay_.pushSample(ch, dry);
+                    delayedDry = dryDelay_.popSample(ch);
+                }
+                const double wet = static_cast<double>(scratch_.getReadPointer(ch)[i]);
+                buffer.getWritePointer(ch)[i] = g * wet + (1.0 - g) * delayedDry;
             }
         }
     }
 
     void reset() override {
         convolution_.reset();
+        dryDelay_.reset();
+        mixSmoothed_.setCurrentAndTargetValue(mix_.load(std::memory_order_acquire));
     }
 
     juce::String getName() const override {
@@ -105,6 +138,12 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
     void setFat(double /*percent*/) override {}
     void setLowShelfRatio(double /*ratio*/) override {}
     void setQ(double /*q*/) override {}
+
+    /** Dry↔wet blend, [0, 1]. 1.0 = 100% wet (full convolver output), 0.0 =
+     *  dry passthrough. Thread-safe; the audio thread smooths toward it. */
+    void setMix(double zeroToOne) {
+        mix_.store(juce::jlimit(0.0, 1.0, zeroToOne), std::memory_order_release);
+    }
 
     /** Load an IR from disk. Must be called from the message thread.
      *  juce::dsp::Convolution::loadImpulseResponse loads on a background thread
@@ -150,6 +189,17 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
     bool prepared_ = false;
     juce::File queuedFile_;
     std::atomic<bool> hasImpulseResponse_{false};
+
+    // Dry↔wet blend. mix_ is the UI/automation target; mixSmoothed_ ramps the
+    // audio thread toward it (click-free). Default 1.0 = 100% wet.
+    std::atomic<double> mix_{1.0};
+    juce::LinearSmoothedValue<double> mixSmoothed_{1.0};
+
+    // Dry-path latency compensation for a phase-coherent parallel blend. 0 for
+    // the zero-latency NonUniform convolver; the delay line is only walked when
+    // irLatencySamples_ > 0.
+    int irLatencySamples_ = 0;
+    juce::dsp::DelayLine<double, juce::dsp::DelayLineInterpolationTypes::None> dryDelay_{1};
 };
 
 } // namespace dsp_core::audio_pipeline

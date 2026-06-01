@@ -21,14 +21,14 @@ juce::File writeImpulseWav(const juce::String& nameStem,
     auto file = tmpDir.getNonexistentChildFile(nameStem, ".wav", false);
 
     juce::WavAudioFormat wav;
-    juce::FileOutputStream raw(file);
-    EXPECT_TRUE(raw.openedOk());
-
-    auto* stream = new juce::FileOutputStream(file);
-    EXPECT_TRUE(stream->openedOk());
-    std::unique_ptr<juce::AudioFormatWriter> writer(
-        wav.createWriterFor(stream, kSampleRate, /*numChannels=*/1, /*bitsPerSample=*/24,
-                            /*metadataValues=*/{}, /*qualityOptionIndex=*/0));
+    auto fileStream = std::make_unique<juce::FileOutputStream>(file);
+    EXPECT_TRUE(fileStream->openedOk());
+    std::unique_ptr<juce::OutputStream> stream = std::move(fileStream);
+    auto writer = wav.createWriterFor(stream,
+        juce::AudioFormatWriterOptions{}
+            .withSampleRate(kSampleRate)
+            .withNumChannels(1)
+            .withBitsPerSample(24));
     EXPECT_NE(writer, nullptr);
 
     juce::AudioBuffer<float> buf(1, static_cast<int>(impulse.size()));
@@ -115,6 +115,90 @@ TEST(ImpulseResponseStrategy, IdentityIRApproximatesInput) {
     EXPECT_GT(maxAbs(buffer), 0.1);
     EXPECT_LE(maxAbs(buffer), 1.5 * maxAbs(input));
 
+    file.deleteFile();
+}
+
+// Load a (coloring) IR and pump blocks until the convolver has published it,
+// detected by the wet output diverging from the dry input. Returns true once
+// active. Leaves mix at its default (1.0 = fully wet).
+bool warmUpUntilIRActive(ImpulseResponseStrategy& strategy) {
+    juce::AudioBuffer<double> probe(kNumChannels, kBlockSize);
+    juce::AudioBuffer<double> dry(kNumChannels, kBlockSize);
+    for (int i = 0; i < 100; ++i) {
+        fillSineBlock(probe, 1000.0, kSampleRate);
+        dry.makeCopyOf(probe);
+        strategy.process(probe);
+        double diff = 0.0;
+        for (int ch = 0; ch < probe.getNumChannels(); ++ch) {
+            for (int n = 0; n < probe.getNumSamples(); ++n) {
+                diff = std::max(diff, std::abs(probe.getSample(ch, n) - dry.getSample(ch, n)));
+            }
+        }
+        if (diff > 0.01) {
+            return true;
+        }
+        juce::Thread::sleep(5);
+    }
+    return false;
+}
+
+TEST(ImpulseResponseStrategy, MixZeroIsDryPassthrough) {
+    // A multi-tap IR that colors the signal — at mix=0 none of that color may
+    // reach the output; it must equal the dry input bit-for-bit (the convolver
+    // is zero-latency, so no dry delay compensation kicks in).
+    auto file = writeImpulseWav("ir_mix0_", {1.0f, 0.5f, -0.3f, 0.2f});
+
+    ImpulseResponseStrategy strategy;
+    strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
+    strategy.setImpulseResponseFile(file);
+    ASSERT_TRUE(warmUpUntilIRActive(strategy));
+
+    // Settle the mix ramp to 0 (10 ms ≈ 480 samples; pump well past that).
+    strategy.setMix(0.0);
+    juce::AudioBuffer<double> settle(kNumChannels, kBlockSize);
+    for (int i = 0; i < 10; ++i) {
+        fillSineBlock(settle, 1000.0, kSampleRate);
+        strategy.process(settle);
+    }
+
+    juce::AudioBuffer<double> buffer(kNumChannels, kBlockSize);
+    fillSineBlock(buffer, 1000.0, kSampleRate);
+    juce::AudioBuffer<double> input;
+    input.makeCopyOf(buffer);
+    strategy.process(buffer);
+
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+        for (int n = 0; n < buffer.getNumSamples(); ++n) {
+            EXPECT_DOUBLE_EQ(buffer.getSample(ch, n), input.getSample(ch, n));
+        }
+    }
+    file.deleteFile();
+}
+
+TEST(ImpulseResponseStrategy, MixOneColorsSignal) {
+    auto file = writeImpulseWav("ir_mix1_", {1.0f, 0.5f, -0.3f, 0.2f});
+
+    ImpulseResponseStrategy strategy;
+    strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
+    strategy.setImpulseResponseFile(file);
+    ASSERT_TRUE(warmUpUntilIRActive(strategy)); // default mix = 1.0 (fully wet)
+
+    juce::AudioBuffer<double> buffer(kNumChannels, kBlockSize);
+    fillSineBlock(buffer, 1000.0, kSampleRate);
+    juce::AudioBuffer<double> input;
+    input.makeCopyOf(buffer);
+    strategy.process(buffer);
+
+    // Fully wet must diverge from the dry input (the IR shapes it) yet stay
+    // bounded (Normalise=yes keeps levels sane).
+    double diff = 0.0;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+        for (int n = 0; n < buffer.getNumSamples(); ++n) {
+            diff = std::max(diff, std::abs(buffer.getSample(ch, n) - input.getSample(ch, n)));
+        }
+    }
+    EXPECT_GT(diff, 0.01);
+    EXPECT_LE(maxAbs(buffer), 1.5 * maxAbs(input));
     file.deleteFile();
 }
 

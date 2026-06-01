@@ -36,6 +36,7 @@ struct ToneFrequencyResponseParams {
     double fatPercent = 0.0;
     double lowShelfRatio = 0.0625;
     double bellQ = 1.0;
+    double irMix = 1.0; // [0, 1] dry↔wet blend — ImpulseResponse type only
     double sampleRate = 48000.0;
 
     // ImpulseResponse type only. Caller (editor) computes the FFT-based
@@ -269,11 +270,23 @@ inline void computeFrequencyResponseDb(const ToneFrequencyResponseParams& params
         // and passes a borrowed pointer in via params.irMagnitudesDb. Null
         // means no IR is loaded — fall back to a flat trace so the overlay
         // still draws cleanly while the user picks a file.
-        if (params.irMagnitudesDb != nullptr) {
-            std::memcpy(magnitudesDb, params.irMagnitudesDb,
-                        static_cast<std::size_t>(count) * sizeof(double));
-        } else {
+        if (params.irMagnitudesDb == nullptr) {
             std::fill_n(magnitudesDb, count, 0.0);
+            return;
+        }
+        // Blend the IR curve against a 0 dB dry reference. The dry path is unity
+        // (0 dB, flat), so in the linear domain the blended magnitude is
+        //   |H| = (1 - mix)·1 + mix·10^(irDb/20)
+        // a phase-aligned sum: at mix=1 it reproduces the pure-IR trace, at
+        // mix=0 it is flat 0 dB, and partial mixes fill the IR's notches the
+        // way a parallel dry path does. Magnitude-only (the cached IR trace is
+        // peak-normalized, phase discarded) — the in-phase sum is the intuitive
+        // best-case fill and the right visualization for a dry/wet blend.
+        const double mix = juce::jlimit(0.0, 1.0, params.irMix);
+        for (int i = 0; i < count; ++i) {
+            const double irLinear = std::pow(10.0, params.irMagnitudesDb[i] / 20.0);
+            const double blended = (1.0 - mix) + mix * irLinear;
+            magnitudesDb[i] = linearToDb(blended);
         }
         return;
     }
