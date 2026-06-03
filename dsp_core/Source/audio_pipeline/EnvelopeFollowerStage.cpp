@@ -136,6 +136,7 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
 
     double envDb = envDb_;
     double ms2 = ms2_;
+    double ms2b = ms2b_;
 
     for (int i = 0; i < numSamples; ++i) {
         // 1. Per-channel RMS — read-only on the buffer; HPF operates on a side
@@ -149,8 +150,16 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
             sumSq += x * x;
         }
         const double meanSq = sumSq / std::max(1, numChannels);
+        // Two cascaded one-pole leaky integrators on the mean-square. A single
+        // pole leaves a strong 2f ripple (cos(2ωt) term of x²) that the
+        // downstream attack/release smoother can't remove without a punishingly
+        // slow attack — fast attack snaps straight to each ripple peak. The
+        // second pole rolls the 2f term off at 12 dB/oct instead of 6, turning
+        // the visible "teeth" into a smooth envelope, at the cost of ~one extra
+        // RMS time-constant of group delay. Both poles share rmsCoef.
         ms2 += rmsCoef * (meanSq - ms2);
-        const double detect = std::sqrt(std::max(ms2, 0.0));
+        ms2b += rmsCoef * (ms2 - ms2b);
+        const double detect = std::sqrt(std::max(ms2b, 0.0));
 
         // 2. Apply pre-detection sensitivity, clamp to unity.
         const double targetLin = std::min(detect * sens, 1.0);
@@ -188,6 +197,7 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
 
     envDb_ = envDb;
     ms2_ = ms2;
+    ms2b_ = ms2b;
 
     // Publish linear envelope. decibelsToGain returns 0 when envDb hits the
     // floor, so silence reads as exactly 0 downstream.
@@ -206,6 +216,7 @@ void EnvelopeFollowerStage::process(juce::AudioBuffer<double>& buffer) {
 void EnvelopeFollowerStage::reset() {
     envDb_ = kEnvDbFloor_;
     ms2_ = 0.0;
+    ms2b_ = 0.0;
     for (auto& f : hpfFilters_)
         f.reset();
     envelopeStorage_.store(0.0, std::memory_order_release);

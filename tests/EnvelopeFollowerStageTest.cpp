@@ -193,7 +193,10 @@ TEST_F(EnvelopeFollowerStageTest, ResetClearsState) {
     stage_->setEnabled(true);
     stage_->setSensitivityLinear(1.0);
 
-    const int chargeSamples = static_cast<int>(kSampleRate * 10.0 * kAttackSec);
+    // Charge long enough to clear the two-pole RMS cascade's group delay
+    // (~2× the 15 ms RMS τ) plus the dB-domain attack smoother — 150 ms is many
+    // time constants, so the envelope sits near unity before we test reset.
+    const int chargeSamples = static_cast<int>(kSampleRate * 0.15);
     (void)driveDC(1.0, chargeSamples);
     ASSERT_GT(envelopeValue_.load(), 0.9) << "precondition: charged";
 
