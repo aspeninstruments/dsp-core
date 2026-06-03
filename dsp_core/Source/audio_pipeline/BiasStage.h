@@ -13,11 +13,14 @@ namespace dsp_core::audio_pipeline {
  * to every sample, ramped over ~10 ms to eliminate audible clicks on
  * parameter changes or fast automation.
  *
- * Pipeline position: between Surge and the LUT/Hysteresis consumer. The
- * downstream DC blocking filter cancels the resulting DC at the output, so
- * the audible effect is purely the asymmetric distortion the bias induces
- * in the nonlinear shaper. Callers should gate enabled_ on the DC-blocking
- * filter being on, otherwise bias would leak DC out of the plugin.
+ * Pipeline position: immediately before the Surge stage and the LUT/Hysteresis
+ * consumer, so surge and the shaper both act on the biased (post-offset) signal.
+ * When the
+ * downstream DC blocking filter is on it cancels the resulting DC at the
+ * output, so the audible effect is purely the asymmetric distortion the bias
+ * induces in the nonlinear shaper. The caller leaves the DC-blocking decision
+ * to the user: if they turn the DC blocker off, bias-introduced DC is allowed
+ * to pass through (a deliberate edge case, potentially an artistic choice).
  *
  * Thread Safety:
  *   - enabled_, bias_: atomic (UI writes, audio reads)

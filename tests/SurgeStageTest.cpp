@@ -329,3 +329,66 @@ TEST(SurgeHysteresisIntegration, DCOvershootShowsTransientHumpNotFlatTop) {
                                    << "peak=" << humpPeak << " ss=" << ss
                                    << " — if these are ~equal, we have flat-top, which is the pre-migration bug.";
 }
+
+// =============================================================================
+// Regression — Surge must run AFTER Bias so bias-induced overshoot engages it.
+// =============================================================================
+//
+// SurgeStage only acts on samples where |x| > 1. When the overshoot is produced
+// by the bias DC offset (not by drive), surge must see the POST-bias signal,
+// otherwise w never ramps and Surge collapses to plain Linear extrapolation.
+// The plugin pipeline therefore orders Bias → Surge → LUT. This test pins that
+// contract at the dsp-core level by composing the two stages both ways.
+
+TEST(SurgeBiasOrdering, BiasInducedOvershootEngagesSurgeOnlyAfterBias) {
+    constexpr double sr = 48000.0;
+    constexpr double surgeDur = 0.001;     // 1ms window
+    constexpr double inRange = 0.5;        // |x| <= 1: surge is a no-op on its own
+    constexpr double bias = 0.7;           // pushes post-bias signal to 1.2 (> 1)
+    const int samples = static_cast<int>(sr * 2.0 * surgeDur); // 2× window → saturate
+
+    auto makeBias = [&] {
+        auto b = std::make_unique<BiasStage>();
+        b->setBias(bias);
+        b->setEnabled(true);
+        b->prepareToPlay(sr, 512, 1); // setBias before prepare → smoother starts settled, no ramp
+        return b;
+    };
+    auto makeSurge = [&] {
+        auto s = std::make_unique<SurgeStage>();
+        s->prepareToPlay(sr, 512, 1);
+        s->setSurgeDurationSec(surgeDur);
+        s->setEnabled(true);
+        return s;
+    };
+    auto fill = [&](juce::AudioBuffer<double>& buf) {
+        auto* d = buf.getWritePointer(0);
+        for (int i = 0; i < buf.getNumSamples(); ++i)
+            d[i] = inRange;
+    };
+
+    // New (correct) order: Bias → Surge. Surge sees 1.2 and clamps over the window.
+    {
+        auto biasStage = makeBias();
+        auto surgeStage = makeSurge();
+        juce::AudioBuffer<double> buf(1, samples);
+        fill(buf);
+        biasStage->process(buf);
+        surgeStage->process(buf);
+        EXPECT_NEAR(buf.getSample(0, samples - 1), 1.0, 1e-3)
+            << "Bias→Surge: sustained bias-induced overshoot must decay to the clamp value";
+    }
+
+    // Old (buggy) order: Surge → Bias. Surge sees 0.5 (in-range, no-op); bias then
+    // lifts it to 1.2 with no surge applied — i.e. identical to plain Linear extrap.
+    {
+        auto biasStage = makeBias();
+        auto surgeStage = makeSurge();
+        juce::AudioBuffer<double> buf(1, samples);
+        fill(buf);
+        surgeStage->process(buf);
+        biasStage->process(buf);
+        EXPECT_NEAR(buf.getSample(0, samples - 1), inRange + bias, 1e-12)
+            << "Surge→Bias: surge never sees the overshoot, so output is the raw linear 1.2";
+    }
+}
