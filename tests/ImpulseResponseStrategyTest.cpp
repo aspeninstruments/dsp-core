@@ -60,6 +60,47 @@ double maxAbs(const juce::AudioBuffer<double>& buffer) {
     return m;
 }
 
+// Makeup gain in dB for an IR given as a sample vector (mono), via the
+// production analysis (makeupGainForIR). Deterministic — no async convolver.
+double makeupDbFor(const std::vector<float>& ir, double sr) {
+    juce::AudioBuffer<float> buf(1, static_cast<int>(ir.size()));
+    for (int i = 0; i < static_cast<int>(ir.size()); ++i) {
+        buf.setSample(0, i, ir[static_cast<size_t>(i)]);
+    }
+    return juce::Decibels::gainToDecibels(
+        ImpulseResponseStrategy::makeupGainForIR(buf, sr));
+}
+
+// Pump steady-state sine blocks so a load-time makeup ramp (~20 ms) settles.
+void settle(ImpulseResponseStrategy& strategy, int blocks, double freqHz = 1000.0) {
+    juce::AudioBuffer<double> b(kNumChannels, kBlockSize);
+    for (int i = 0; i < blocks; ++i) {
+        fillSineBlock(b, freqHz, kSampleRate);
+        strategy.process(b);
+    }
+}
+
+// A Hann-windowed sinc lowpass IR — a genuinely band-limited "cabinet-like" IR
+// long enough for the makeup analysis to resolve in-band content. A ~6 kHz
+// cutoff spreads energy across [0, 6 kHz] so the in-band [80, 5 kHz] band is a
+// proper, denser subset of the spectrum (in-band/broadband RMS ≈ 2), the same
+// property that lands the shipped cabs at ~+12 dB of makeup.
+std::vector<float> makeLowpassIR(double cutoffHz, int length, double sr) {
+    std::vector<float> h(static_cast<size_t>(length), 0.0f);
+    const double mid = (length - 1) / 2.0;
+    const double fc = cutoffHz / sr; // normalised cutoff
+    const double twoPi = 2.0 * juce::MathConstants<double>::pi;
+    for (int n = 0; n < length; ++n) {
+        const double x = n - mid;
+        const double sinc = (std::abs(x) < 1e-9)
+                                ? 2.0 * fc
+                                : std::sin(twoPi * fc * x) / (juce::MathConstants<double>::pi * x);
+        const double hann = 0.5 - 0.5 * std::cos(twoPi * n / (length - 1));
+        h[static_cast<size_t>(n)] = static_cast<float>(sinc * hann);
+    }
+    return h;
+}
+
 TEST(ImpulseResponseStrategy, PassThroughWhenNoIRLoaded) {
     ImpulseResponseStrategy strategy;
     strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
@@ -109,9 +150,10 @@ TEST(ImpulseResponseStrategy, IdentityIRApproximatesInput) {
 
     strategy.process(buffer);
 
-    // Output should at least be non-zero and roughly bounded by the input
-    // peak — exact identity would require disabling Normalise=yes, which the
-    // production code keeps on to prevent loud surprises with high-energy IRs.
+    // A single-sample IR is too short for the makeup analysis to have any
+    // in-band FFT bins, so it falls back to no compensation and the output sits
+    // at JUCE's normalised level — non-zero and bounded by the input. Makeup for
+    // real (multi-sample, band-limited) IRs is covered by MakeupRestoresInBandLevel.
     EXPECT_GT(maxAbs(buffer), 0.1);
     EXPECT_LE(maxAbs(buffer), 1.5 * maxAbs(input));
 
@@ -199,6 +241,117 @@ TEST(ImpulseResponseStrategy, MixOneColorsSignal) {
     }
     EXPECT_GT(diff, 0.01);
     EXPECT_LE(maxAbs(buffer), 1.5 * maxAbs(input));
+    file.deleteFile();
+}
+
+// --- Makeup analysis (deterministic; tests the pure makeupGainForIR math, not
+//     JUCE's async convolver, which does not reliably finish loading in a
+//     headless gtest run). End-to-end level restoration is verified by ear in a
+//     DAW per the change's verification steps. ---
+
+TEST(ImpulseResponseStrategy, DISABLED_EndToEndRealCabWithMakeup) {
+    // TEMP: load real cabs, let the async IR finish loading, measure gain WITH
+    // makeup engaged. Expect the ~12 dB systematic drop gone (centered ~0 dB,
+    // with the cab's natural ±few-dB voicing).
+    const char* base = "/Users/johnjaniczek/Code/black-diamond-distortion/impulse-responses/";
+    for (const juce::String name : {juce::String("Guitar Cab/Guitar Cab 1.wav"),
+                                    juce::String("Guitar Cab/Guitar Cab 3.wav"),
+                                    juce::String("Bass Cab/Bass Cab 2.wav")}) {
+        juce::File f(juce::String(base) + name);
+        if (!f.existsAsFile()) continue;
+        ImpulseResponseStrategy strategy;
+        strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
+        strategy.setImpulseResponseFile(f);
+        juce::AudioBuffer<double> warm(kNumChannels, kBlockSize);
+        for (int i = 0; i < 200; ++i) { fillSineBlock(warm, 1000.0, kSampleRate); strategy.process(warm); juce::Thread::sleep(10); }
+        for (double hz : {110.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0}) {
+            settle(strategy, 110, hz);
+            juce::AudioBuffer<double> b(kNumChannels, kBlockSize);
+            fillSineBlock(b, hz, kSampleRate);
+            const double in = maxAbs(b);
+            strategy.process(b);
+            (void) fprintf(stderr, "[E2E] %-20s %5.0fHz gain=%.3f (%+.1f dB)\n",
+                f.getFileName().toRawUTF8(), hz, maxAbs(b) / in, 20.0 * std::log10(maxAbs(b) / in + 1e-20));
+        }
+    }
+}
+
+TEST(ImpulseResponseStrategy, MakeupRestoresBandLimitedIRLevel) {
+    // A band-limited lowpass IR sits ~12 dB low under JUCE's Normalise=yes. The
+    // makeup analysis must compute ~+12 dB to restore unity in-band loudness.
+    // (Cross-checked against the live convolver: real cabs measure −8…−12 dB and
+    //  this synthetic IR yields +12.0 dB.)
+    const double db = makeupDbFor(makeLowpassIR(6000.0, 257, kSampleRate), kSampleRate);
+    EXPECT_NEAR(db, 12.0, 1.0);
+}
+
+TEST(ImpulseResponseStrategy, MakeupClampedForPathologicalIR) {
+    // An IR with no energy in [80, 5000] Hz (alternating taps = all energy at
+    // Nyquist) would drive the makeup to infinity; it must clamp at +18 dB.
+    std::vector<float> alternating(128);
+    for (size_t i = 0; i < alternating.size(); ++i) {
+        alternating[i] = (i % 2 == 0) ? 1.0f : -1.0f;
+    }
+    EXPECT_NEAR(makeupDbFor(alternating, kSampleRate), 18.0, 0.01);
+}
+
+TEST(ImpulseResponseStrategy, MakeupUnityForSilentIR) {
+    // A silent IR carries no compensation (mirrors JUCE's own < 1e-8 guard).
+    EXPECT_DOUBLE_EQ(makeupDbFor(std::vector<float>(256, 0.0f), kSampleRate), 0.0);
+}
+
+TEST(ImpulseResponseStrategy, MakeupAppliesToWetOnly) {
+    // makeupGainForIR yields a non-unity makeup for this IR, stored synchronously
+    // on load. At mix=0 the output must STILL be a bit-exact dry passthrough —
+    // proving the makeup multiplies the wet path only, never the dry.
+    auto file = writeImpulseWav("ir_wetonly_", makeLowpassIR(6000.0, 257, kSampleRate));
+
+    ImpulseResponseStrategy strategy;
+    strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
+    strategy.setImpulseResponseFile(file);
+    ASSERT_TRUE(warmUpUntilIRActive(strategy));
+    settle(strategy, 15); // makeup ramp settles to its (non-unity) target
+
+    strategy.setMix(0.0);
+    settle(strategy, 10); // mix ramp settles to exactly 0
+
+    juce::AudioBuffer<double> buffer(kNumChannels, kBlockSize);
+    fillSineBlock(buffer, 1000.0, kSampleRate);
+    juce::AudioBuffer<double> input;
+    input.makeCopyOf(buffer);
+    strategy.process(buffer);
+
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+        for (int n = 0; n < buffer.getNumSamples(); ++n) {
+            EXPECT_DOUBLE_EQ(buffer.getSample(ch, n), input.getSample(ch, n));
+        }
+    }
+    file.deleteFile();
+}
+
+TEST(ImpulseResponseStrategy, UnloadReturnsToPassthrough) {
+    // After unloading the IR the strategy bypasses (and clears its makeup) so
+    // audio passes through bit-exact again.
+    auto file = writeImpulseWav("ir_unload_", makeLowpassIR(6000.0, 257, kSampleRate));
+
+    ImpulseResponseStrategy strategy;
+    strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
+    strategy.setImpulseResponseFile(file);
+    ASSERT_TRUE(warmUpUntilIRActive(strategy));
+
+    strategy.setImpulseResponseFile(juce::File{}); // unload
+
+    juce::AudioBuffer<double> buffer(kNumChannels, kBlockSize);
+    fillSineBlock(buffer, 1000.0, kSampleRate);
+    juce::AudioBuffer<double> input;
+    input.makeCopyOf(buffer);
+    strategy.process(buffer);
+
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+        for (int n = 0; n < buffer.getNumSamples(); ++n) {
+            EXPECT_DOUBLE_EQ(buffer.getSample(ch, n), input.getSample(ch, n));
+        }
+    }
     file.deleteFile();
 }
 
