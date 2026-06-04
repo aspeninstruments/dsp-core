@@ -66,6 +66,10 @@ class HighpassStrategy : public ToneFilterStrategy {
         // No-op. Bell Q is a Bell-strategy concept; ladder resonance has its own knob.
     }
 
+    void setChoke(double choke) override {
+        ladder_.setChoke(choke);
+    }
+
   private:
     LadderHighpassTPTStage<N> ladder_;
 };

@@ -1702,3 +1702,98 @@ TEST(ToneStage, RecomputeFrequencyResponse_IRTypeNullPointerFallsBackToFlat) {
     }
 }
 
+// --------------------------------------------------------------------------
+// Choke is gain-compensated: out = ladder(in × choke) × (1/choke). At small
+// signal the tanh feedback is ~linear, so the ×/÷ cancels exactly and the
+// output level is independent of choke. Drive a low-level passband sine through
+// LP24 and HP24 at choke 0.1 / 1.0 / 10.0 and assert settled RMS matches —
+// pins the inverse compensation (a stale or missing 1/choke would shift level).
+// --------------------------------------------------------------------------
+namespace {
+double settledRmsAtChoke(ToneStage::Type type, double sineHz, double choke) {
+    ToneStage s;
+    s.setType(type);
+    s.setEnabled(true);
+    s.setCutoffFrequency(2000.0);
+    s.setResonance(0.5);
+    s.setChoke(choke); // before prepare so the smoother starts at target (no ramp)
+    s.prepareToPlay(kSampleRate, kBlockSize, 2);
+
+    juce::AudioBuffer<double> buf(2, kBlockSize);
+    double sumSq = 0.0;
+    int count = 0;
+    constexpr int kBlocks = 16;
+    for (int block = 0; block < kBlocks; ++block) {
+        fillSineBlock(buf, sineHz, block * kBlockSize, 1.0e-3);
+        s.process(buf);
+        if (block >= 12) { // measure only after the filter state has settled
+            for (int ch = 0; ch < buf.getNumChannels(); ++ch) {
+                for (int i = 0; i < buf.getNumSamples(); ++i) {
+                    const double v = buf.getSample(ch, i);
+                    sumSq += v * v;
+                    ++count;
+                }
+            }
+        }
+    }
+    return std::sqrt(sumSq / std::max(1, count));
+}
+} // namespace
+
+TEST(ToneStage, Choke_VolumeNeutralSmallSignal) {
+    // Lowpass 24: 200 Hz sits well inside the passband (cutoff 2 kHz).
+    const double lpUnity = settledRmsAtChoke(ToneStage::Type::Lowpass24dB, 200.0, 1.0);
+    ASSERT_GT(lpUnity, 0.0);
+    EXPECT_NEAR(settledRmsAtChoke(ToneStage::Type::Lowpass24dB, 200.0, 0.1), lpUnity, lpUnity * 0.02);
+    EXPECT_NEAR(settledRmsAtChoke(ToneStage::Type::Lowpass24dB, 200.0, 10.0), lpUnity, lpUnity * 0.02);
+
+    // Highpass 24: 8 kHz sits well inside the passband (cutoff 2 kHz).
+    const double hpUnity = settledRmsAtChoke(ToneStage::Type::Highpass24dB, 8000.0, 1.0);
+    ASSERT_GT(hpUnity, 0.0);
+    EXPECT_NEAR(settledRmsAtChoke(ToneStage::Type::Highpass24dB, 8000.0, 0.1), hpUnity, hpUnity * 0.02);
+    EXPECT_NEAR(settledRmsAtChoke(ToneStage::Type::Highpass24dB, 8000.0, 10.0), hpUnity, hpUnity * 0.02);
+}
+
+// --------------------------------------------------------------------------
+// At hot signal the tanh feedback saturates, so Choke is NOT a no-op: it
+// changes the resonance character. Feed a loud sine at the cutoff (where the
+// resonance lives) with high resonance and compare RMS at choke 0.1 vs 10 —
+// they must differ materially. Guards against a regression that cancels Choke
+// at all levels (e.g. dividing by the wrong factor turning it into a no-op).
+// --------------------------------------------------------------------------
+TEST(ToneStage, Choke_EngagesAtHotSignal) {
+    auto hotRms = [](double choke) {
+        ToneStage s;
+        s.setType(ToneStage::Type::Lowpass24dB);
+        s.setEnabled(true);
+        s.setCutoffFrequency(1000.0);
+        s.setResonance(0.8); // → R = 2.8, strong resonant peak
+        s.setChoke(choke);
+        s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+        juce::AudioBuffer<double> buf(1, kBlockSize);
+        double sumSq = 0.0;
+        int count = 0;
+        for (int block = 0; block < 16; ++block) {
+            fillSineBlock(buf, 1000.0, block * kBlockSize, 0.7); // loud, at the cutoff
+            s.process(buf);
+            if (block >= 12) {
+                for (int i = 0; i < buf.getNumSamples(); ++i) {
+                    const double v = buf.getSample(0, i);
+                    sumSq += v * v;
+                    ++count;
+                }
+            }
+        }
+        return std::sqrt(sumSq / std::max(1, count));
+    };
+
+    const double rmsOpen = hotRms(0.1);  // resonance rings free
+    const double rmsChoked = hotRms(10.0); // resonance tanh-compressed
+    ASSERT_GT(rmsOpen, 0.0);
+    ASSERT_GT(rmsChoked, 0.0);
+    EXPECT_GT(std::abs(rmsOpen - rmsChoked), 0.05 * std::max(rmsOpen, rmsChoked))
+        << "Choke had ~no effect at hot signal (open=" << rmsOpen << ", choked=" << rmsChoked
+        << ") — the saturating feedback path may be bypassed.";
+}
+

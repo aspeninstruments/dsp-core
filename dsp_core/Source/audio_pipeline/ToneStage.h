@@ -122,6 +122,13 @@ class ToneStage : public AudioProcessingStage {
      *  strategies ignore. */
     void setQ(double q);
 
+    /** Choke: gain-compensated "operating point" multiplier into the ladder
+     *  filters' tanh feedback. Clamped to [0.1, 10] inside the ladders; 1.0 =
+     *  unity (no-op). Forwarded to all strategies but only the LP/HP ladders act
+     *  on it (the rest inherit the base no-op). Low = open/screaming resonance,
+     *  high = choked/tamed + warmth, level-neutral. LP/HP only. */
+    void setChoke(double choke);
+
     /** Load the .wav file used by the ImpulseResponse strategy. Routes only
      *  to ir_ (the IR is strategy-specific, unlike Frequency/Gain/etc. which
      *  are forwarded to all strategies to keep idle ones primed). Must be
@@ -236,6 +243,11 @@ class ToneStage : public AudioProcessingStage {
     std::atomic<double> cachedFatPercent_{0.0};
     std::atomic<double> cachedLowShelfRatio_{0.0625};
     std::atomic<double> cachedBellQ_{1.0};
+    // Choke is intentionally NOT consumed by the frequency-response LUT: it is
+    // gain-compensated (linear-neutral), so it does not change the analytic
+    // magnitude curve — same reason the ladder's tanh nonlinearity isn't drawn.
+    // Cached here only for parity with the other parameter setters.
+    std::atomic<double> cachedChoke_{1.0};
     std::atomic<double> cachedSampleRate_{48000.0};
 
     // Single-buffered frequency-response LUT. The only writer is the editor's

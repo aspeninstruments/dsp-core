@@ -407,6 +407,41 @@ TEST(LadderTPTStage, NewtonStableAtNearSelfOscillation_24dB) {
 }
 
 // --------------------------------------------------------------------------
+// Choke at max (10x) drives the pre-tanh level to ~45x at full resonance
+// (bassMakeup 1+R = 4.5 at R=3.5, times choke 10). Newton must stay finite and
+// bounded at that hot internal operating point; the gain-compensated output
+// (x1/10) stays small. Regression guard for the Choke feedback drive.
+// --------------------------------------------------------------------------
+TEST(LadderTPTStage, NewtonStableWithMaxChoke_24dB) {
+    LadderTPT24dBStage s;
+    s.setCutoffFrequency(1000.0);
+    s.setResonance(100.0); // clamped to kMaxResonance
+    s.setChoke(100.0);     // clamped to kMaxChoke (10x)
+    EXPECT_DOUBLE_EQ(s.getChoke(), 10.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+
+    constexpr int kNumBlocks = 50;
+    for (int b = 0; b < kNumBlocks; ++b) {
+        for (int i = 0; i < kBlockSize; ++i) {
+            const int n = b * kBlockSize + i;
+            const double t = n / kSampleRate;
+            const double freq = 200.0 + 4000.0 * (n / static_cast<double>(kNumBlocks * kBlockSize));
+            buf.getWritePointer(0)[i] = 0.5 * std::sin(2.0 * M_PI * freq * t);
+        }
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getReadPointer(0)[i];
+            ASSERT_TRUE(std::isfinite(v))
+                << "Non-finite output at block " << b << " sample " << i << " with max choke.";
+            ASSERT_LT(std::abs(v), 10.0)
+                << "Runaway at block " << b << " sample " << i << " val=" << v << " with max choke.";
+        }
+    }
+}
+
+// --------------------------------------------------------------------------
 // Bass compensation tests (TDD for resonance-induced volume drop).
 //
 // Without compensation, the textbook 4-pole Moog ladder has small-signal

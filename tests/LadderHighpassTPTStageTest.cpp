@@ -312,6 +312,39 @@ TEST(LadderHighpassTPTStage, NewtonStableAtNearSelfOscillation_24dB) {
 }
 
 // --------------------------------------------------------------------------
+// Choke at max (10x) stacks on the (1+R)≈4.5× pre-amp, driving the pre-tanh
+// level to ~45× at full resonance. Newton must stay finite/bounded; the
+// gain-compensated output (×1/10) stays small. Mirrors the LP choke guard.
+// --------------------------------------------------------------------------
+TEST(LadderHighpassTPTStage, NewtonStableWithMaxChoke_24dB) {
+    LadderHPTPT24dBStage s;
+    s.setCutoffFrequency(1000.0);
+    s.setResonance(100.0); // clamps to kMaxResonance
+    s.setChoke(100.0);     // clamps to kMaxChoke (10x)
+    EXPECT_DOUBLE_EQ(s.getChoke(), 10.0);
+    s.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    juce::AudioBuffer<double> buf(1, kBlockSize);
+    constexpr int kNumBlocks = 50;
+    for (int b = 0; b < kNumBlocks; ++b) {
+        for (int i = 0; i < kBlockSize; ++i) {
+            const int n = b * kBlockSize + i;
+            const double t = n / kSampleRate;
+            const double freq = 200.0 + 4000.0 * (n / static_cast<double>(kNumBlocks * kBlockSize));
+            buf.getWritePointer(0)[i] = 0.5 * std::sin(2.0 * M_PI * freq * t);
+        }
+        s.process(buf);
+        for (int i = 0; i < kBlockSize; ++i) {
+            const double v = buf.getReadPointer(0)[i];
+            ASSERT_TRUE(std::isfinite(v))
+                << "HPF non-finite output at block " << b << " sample " << i << " with max choke";
+            ASSERT_LT(std::abs(v), 10.0)
+                << "HPF runaway at block " << b << " sample " << i << " val=" << v << " with max choke";
+        }
+    }
+}
+
+// --------------------------------------------------------------------------
 // Stability with hot input at max R: pre-amp (1+R)≈4.5× drives tanh deep
 // into saturation. Must remain bounded.
 // --------------------------------------------------------------------------

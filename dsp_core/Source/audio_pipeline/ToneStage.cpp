@@ -217,4 +217,18 @@ void ToneStage::setQ(double q) {
     cachedBellQ_.store(q, std::memory_order_release);
 }
 
+void ToneStage::setChoke(double choke) {
+    lp12_.setChoke(choke);
+    lp24_.setChoke(choke);
+    lowShelf_.setChoke(choke);  // no-op (base default)
+    highShelf_.setChoke(choke); // no-op (base default)
+    smile_.setChoke(choke);     // no-op (base default)
+    bell_.setChoke(choke);      // no-op (base default)
+    hysteresis_.setChoke(choke); // no-op (marker strategy)
+    hp12_.setChoke(choke);
+    hp24_.setChoke(choke);
+    ir_.setChoke(choke); // no-op (base default)
+    cachedChoke_.store(choke, std::memory_order_release);
+}
+
 } // namespace dsp_core::audio_pipeline

@@ -69,10 +69,13 @@ class LadderTPTStage : public AudioProcessingStage {
 
         smoothCutoff_.reset(sampleRate, kSmoothingTimeSec);
         smoothResonance_.reset(sampleRate, kSmoothingTimeSec);
+        smoothChoke_.reset(sampleRate, kSmoothingTimeSec);
         smoothCutoff_.setCurrentAndTargetValue(clampedCutoff);
         smoothResonance_.setCurrentAndTargetValue(resonance_.load(std::memory_order_acquire));
+        smoothChoke_.setCurrentAndTargetValue(choke_.load(std::memory_order_acquire));
         lastCutoffTarget_ = clampedCutoff;
         lastResonanceTarget_ = resonance_.load(std::memory_order_acquire);
+        lastChokeTarget_ = choke_.load(std::memory_order_acquire);
     }
 
     void process(juce::AudioBuffer<double>& buffer) override {
@@ -97,6 +100,11 @@ class LadderTPTStage : public AudioProcessingStage {
             smoothResonance_.setTargetValue(resTarget);
             lastResonanceTarget_ = resTarget;
         }
+        const double chokeTarget = choke_.load(std::memory_order_acquire);
+        if (chokeTarget != lastChokeTarget_) {
+            smoothChoke_.setTargetValue(chokeTarget);
+            lastChokeTarget_ = chokeTarget;
+        }
 
         const int numChannels =
             std::min(buffer.getNumChannels(), static_cast<int>(channels_.size()));
@@ -105,6 +113,14 @@ class LadderTPTStage : public AudioProcessingStage {
         for (int i = 0; i < numSamples; ++i) {
             const double cutoff = smoothCutoff_.getNextValue();
             const double R = smoothResonance_.getNextValue();
+
+            // Choke: pre-filter "operating point" gain into the tanh feedback,
+            // gain-compensated by its inverse on the way out so it changes the
+            // resonance's saturation character, not the level. Hoisted above the
+            // channel loop so both channels share one ramp value (advancing the
+            // smoother per channel would double the ramp rate and desync L/R).
+            const double choke = smoothChoke_.getNextValue();
+            const double invChoke = 1.0 / choke;
 
             const double g = std::tan(piOverFs_ * cutoff);
             const double alpha = 1.0 / (1.0 + g); // = 1 - G
@@ -134,7 +150,7 @@ class LadderTPTStage : public AudioProcessingStage {
 
             for (int ch = 0; ch < numChannels; ++ch) {
                 auto& st = channels_[static_cast<std::size_t>(ch)];
-                const double x = buffer.getWritePointer(ch)[i] * bassMakeup;
+                const double x = buffer.getWritePointer(ch)[i] * bassMakeup * choke;
 
                 double S;
                 if constexpr (N == 2) {
@@ -175,7 +191,7 @@ class LadderTPTStage : public AudioProcessingStage {
                     u = y;
                 }
 
-                buffer.getWritePointer(ch)[i] = u;
+                buffer.getWritePointer(ch)[i] = u * invChoke;
             }
         }
     }
@@ -228,6 +244,18 @@ class LadderTPTStage : public AudioProcessingStage {
         return resonance_.load(std::memory_order_acquire);
     }
 
+    /** Choke: gain-compensated pre-filter "operating point" multiplier into the
+     *  tanh feedback, clamped to [0.1, 10]. 1.0 = unity (no-op). Low values keep
+     *  the feedback linear (resonance rings/"screams"); high values saturate it
+     *  (resonance tamed/compressed + warmth). Level-neutral by construction. */
+    void setChoke(double c) {
+        c = juce::jlimit(kMinChoke, kMaxChoke, c);
+        choke_.store(c, std::memory_order_release);
+    }
+    double getChoke() const {
+        return choke_.load(std::memory_order_acquire);
+    }
+
   private:
     static constexpr double kMinCutoffHz = 20.0;
     static constexpr double kNyquistMargin = 0.45;
@@ -236,6 +264,12 @@ class LadderTPTStage : public AudioProcessingStage {
     // is R=4 — the textbook 4-pole Moog loop gain. Cap below that so the knob
     // top can't sustain oscillation; user does not want self-osc.
     static constexpr double kMaxResonance = 3.9;
+
+    // Choke operating-point multiplier range. 0.1 (open / screaming) … 10 (choked
+    // / tamed), 1.0 = unity no-op. The 0.1 floor keeps the Multiplicative smoother
+    // and the 1/choke compensation away from zero.
+    static constexpr double kMinChoke = 0.1;
+    static constexpr double kMaxChoke = 10.0;
 
     // Newton step magnitude below this triggers early exit. F' >= 1 (proven
     // earlier) means the step size is an upper bound on the residual; 1e-9 is
@@ -252,17 +286,22 @@ class LadderTPTStage : public AudioProcessingStage {
     std::atomic<bool> enabled_{true};
     std::atomic<double> cutoffHz_{20000.0};
     std::atomic<double> resonance_{0.0};
+    std::atomic<double> choke_{1.0};
 
     double sampleRate_ = 48000.0;
     double piOverFs_ = juce::MathConstants<double>::pi / 48000.0;
     double lastCutoffTarget_ = -1.0;
     double lastResonanceTarget_ = -1.0;
+    double lastChokeTarget_ = -1.0;
 
     // Cutoff uses Multiplicative (exponential / log-in-Hz) — pitch perception
     // is logarithmic, so equal-time steps cover equal musical distance. Resonance
     // stays Linear: no analogous log scale, and Multiplicative can't cross zero.
+    // Choke is a log-perceived gain (0.1…10) like cutoff, so it uses Multiplicative
+    // too — and the 0.1 floor guarantees it never crosses zero.
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothCutoff_;
     juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothResonance_;
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothChoke_;
 
     std::vector<ChannelState> channels_;
 };

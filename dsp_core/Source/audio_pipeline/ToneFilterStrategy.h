@@ -68,6 +68,14 @@ class ToneFilterStrategy : public AudioProcessingStage {
     /** Bell Q (bandwidth). Bell-only; other strategies should make this
      *  a no-op. Lower Q = broader bell; higher Q = narrower bell. */
     virtual void setQ(double q) = 0;
+
+    /** Choke: gain-compensated "operating point" multiplier into the ladder's
+     *  tanh feedback ([0.1, 10], 1.0 = unity). Ladder LP/HP only — there is no
+     *  analogous nonlinear-feedback concept in the shelf / Bell / Smile / IR /
+     *  Hysteresis strategies, so this is intentionally a non-pure virtual with a
+     *  default no-op (not `= 0`): only LowpassStrategy and HighpassStrategy
+     *  override it, sparing the other strategies six boilerplate no-op bodies. */
+    virtual void setChoke(double /*choke*/) {}
 };
 
 } // namespace dsp_core::audio_pipeline
