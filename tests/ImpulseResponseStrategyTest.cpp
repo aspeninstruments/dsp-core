@@ -249,33 +249,6 @@ TEST(ImpulseResponseStrategy, MixOneColorsSignal) {
 //     headless gtest run). End-to-end level restoration is verified by ear in a
 //     DAW per the change's verification steps. ---
 
-TEST(ImpulseResponseStrategy, DISABLED_EndToEndRealCabWithMakeup) {
-    // TEMP: load real cabs, let the async IR finish loading, measure gain WITH
-    // makeup engaged. Expect the ~12 dB systematic drop gone (centered ~0 dB,
-    // with the cab's natural ±few-dB voicing).
-    const char* base = "/Users/johnjaniczek/Code/black-diamond-distortion/impulse-responses/";
-    for (const juce::String name : {juce::String("Guitar Cab/Guitar Cab 1.wav"),
-                                    juce::String("Guitar Cab/Guitar Cab 3.wav"),
-                                    juce::String("Bass Cab/Bass Cab 2.wav")}) {
-        juce::File f(juce::String(base) + name);
-        if (!f.existsAsFile()) continue;
-        ImpulseResponseStrategy strategy;
-        strategy.prepareToPlay(kSampleRate, kBlockSize, kNumChannels);
-        strategy.setImpulseResponseFile(f);
-        juce::AudioBuffer<double> warm(kNumChannels, kBlockSize);
-        for (int i = 0; i < 200; ++i) { fillSineBlock(warm, 1000.0, kSampleRate); strategy.process(warm); juce::Thread::sleep(10); }
-        for (double hz : {110.0, 220.0, 440.0, 1000.0, 2000.0, 3000.0}) {
-            settle(strategy, 110, hz);
-            juce::AudioBuffer<double> b(kNumChannels, kBlockSize);
-            fillSineBlock(b, hz, kSampleRate);
-            const double in = maxAbs(b);
-            strategy.process(b);
-            (void) fprintf(stderr, "[E2E] %-20s %5.0fHz gain=%.3f (%+.1f dB)\n",
-                f.getFileName().toRawUTF8(), hz, maxAbs(b) / in, 20.0 * std::log10(maxAbs(b) / in + 1e-20));
-        }
-    }
-}
-
 TEST(ImpulseResponseStrategy, MakeupRestoresBandLimitedIRLevel) {
     // A band-limited lowpass IR sits ~12 dB low under JUCE's Normalise=yes. The
     // makeup analysis must compute ~+12 dB to restore unity in-band loudness.
