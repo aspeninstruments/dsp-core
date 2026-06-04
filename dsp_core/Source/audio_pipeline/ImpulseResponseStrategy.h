@@ -317,8 +317,15 @@ class ImpulseResponseStrategy : public ToneFilterStrategy {
         }
 
         const int numCh = juce::jmax(1, static_cast<int>(reader->numChannels));
+        // NB: no explicit <juce::int64> here. juce_dsp injects a jmin overload for
+        // SIMDRegister<Type> into namespace juce; an explicit template arg forces the
+        // compiler to substitute it into that overload too, instantiating
+        // SIMDRegister<long long>. On Linux x86_64 int64_t == long (not long long), so
+        // SIMDNativeOps<long long> is unspecialised → hard compile error. Plain jmin
+        // lets argument deduction SFINAE-reject the SIMD overload. Both args are
+        // already juce::int64, so deduction is unambiguous.
         const int len = static_cast<int>(
-            juce::jmin<juce::int64>(reader->lengthInSamples, kMaxAnalysisSamples));
+            juce::jmin(reader->lengthInSamples, kMaxAnalysisSamples));
         if (len <= 0) {
             return 1.0;
         }
