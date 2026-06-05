@@ -211,6 +211,74 @@ TEST_F(AudioPipelineBuilderTest, StageParametersCanBeModified) {
     EXPECT_GT(buffer.getSample(0, 511), 0.9);
 }
 
+// =============================================================================
+// Interior Oversampled Group Tests
+// =============================================================================
+
+TEST_F(AudioPipelineBuilderTest, InteriorOversampledGroupWiresHandles) {
+    auto [pipeline, stages] = AudioPipelineBuilder()
+                                  .withDryWetMix()
+                                  .addStage<GainStage>(StageTag::InputGain)
+                                  .beginOversampledGroup(StageTag::Oversampling, 2) // 4x
+                                  .addStage<DCBlockingFilter>(StageTag::DCBlock)
+                                  .endOversampledGroup()
+                                  .addStage<GainStage>(StageTag::OutputGain)
+                                  .build();
+
+    // The oversampling handle points at the interior wrapper with the right order.
+    auto* os = stages.getOversampling();
+    ASSERT_NE(os, nullptr);
+    EXPECT_EQ(os->getOversamplingOrder(), 2);
+    EXPECT_EQ(stages.get<OversamplingWrapper>(StageTag::Oversampling), os);
+
+    // Stages before, inside, and after the group are all retrievable — the
+    // StageHandles map is flat, unaffected by the nesting.
+    ASSERT_NE(stages.get<GainStage>(StageTag::InputGain), nullptr);
+    ASSERT_NE(stages.get<DCBlockingFilter>(StageTag::DCBlock), nullptr);
+    ASSERT_NE(stages.get<GainStage>(StageTag::OutputGain), nullptr);
+    ASSERT_NE(stages.getDryWetMix(), nullptr);
+    ASSERT_NE(stages.getEffectsPipeline(), nullptr);
+}
+
+TEST_F(AudioPipelineBuilderTest, InteriorOversampledGroupProcessesAudio) {
+    auto [pipeline, stages] = AudioPipelineBuilder()
+                                  .withDryWetMix()
+                                  .addStage<GainStage>(StageTag::InputGain)
+                                  .beginOversampledGroup(StageTag::Oversampling, 0) // 1x core
+                                  .addStage<DCBlockingFilter>(StageTag::DCBlock)
+                                  .endOversampledGroup()
+                                  .addStage<GainStage>(StageTag::OutputGain)
+                                  .build();
+
+    pipeline->prepareToPlay(44100.0, 512, 2);
+
+    auto* inputGain = stages.get<GainStage>(StageTag::InputGain);
+    auto* outputGain = stages.get<GainStage>(StageTag::OutputGain);
+    ASSERT_NE(inputGain, nullptr);
+    ASSERT_NE(outputGain, nullptr);
+    inputGain->setGainDB(0.0);
+    outputGain->setGainDB(0.0);
+
+    juce::AudioBuffer<double> settle(2, 512);
+    settle.clear();
+    pipeline->process(settle); // settle gain smoothers
+
+    juce::AudioBuffer<double> buffer(2, 512);
+    for (int i = 0; i < 512; ++i) {
+        double const sample = std::sin(2.0 * M_PI * 440.0 * i / 44100.0);
+        buffer.setSample(0, i, sample);
+        buffer.setSample(1, i, sample);
+    }
+
+    pipeline->process(buffer);
+
+    double maxSample = 0.0;
+    for (int i = 0; i < 512; ++i) {
+        maxSample = std::max(maxSample, std::abs(buffer.getSample(0, i)));
+    }
+    EXPECT_GT(maxSample, 0.0);
+}
+
 TEST_F(AudioPipelineBuilderTest, DryWetMixCanBeModified) {
     auto [pipeline, stages] = AudioPipelineBuilder().withDryWetMix().addStage<GainStage>(StageTag::InputGain).build();
 

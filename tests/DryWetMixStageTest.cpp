@@ -1,11 +1,87 @@
 #include <gtest/gtest.h>
 #include "../dsp_core/Source/audio_pipeline/DryWetMixStage.h"
 #include "../dsp_core/Source/audio_pipeline/AudioPipeline.h"
+#include "../dsp_core/Source/audio_pipeline/AudioProcessingStage.h"
 #include "../dsp_core/Source/audio_pipeline/GainStage.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
+#include <memory>
 
 using namespace dsp_core::audio_pipeline;
+
+namespace {
+// Test stub: delays the buffer by a fixed number of samples and reports that
+// many samples of latency. Stands in for any latent wet-path stage (e.g. an
+// interior oversampler) so we can verify dry-path latency compensation.
+class FixedDelayStage : public AudioProcessingStage {
+  public:
+    explicit FixedDelayStage(int delaySamples) : delay_(delaySamples) {}
+
+    void prepareToPlay(double /*sampleRate*/, int samplesPerBlock, int numChannels) override {
+        capacity_ = 1;
+        while (capacity_ < delay_ + samplesPerBlock + 1) {
+            capacity_ <<= 1;
+        }
+        ring_.setSize(numChannels, capacity_, false, true, true);
+        ring_.clear();
+        writePos_ = 0;
+    }
+
+    void process(juce::AudioBuffer<double>& buffer) override {
+        const int numChannels = buffer.getNumChannels();
+        const int numSamples = buffer.getNumSamples();
+        const int mask = capacity_ - 1;
+        int writePos = writePos_;
+        for (int i = 0; i < numSamples; ++i) {
+            const int readPos = (writePos - delay_ + capacity_) & mask;
+            for (int ch = 0; ch < numChannels; ++ch) {
+                double* ring = ring_.getWritePointer(ch);
+                ring[writePos] = buffer.getSample(ch, i);
+                buffer.setSample(ch, i, ring[readPos]);
+            }
+            writePos = (writePos + 1) & mask;
+        }
+        writePos_ = writePos;
+    }
+
+    void reset() override {
+        ring_.clear();
+        writePos_ = 0;
+    }
+
+    juce::String getName() const override {
+        return "FixedDelay";
+    }
+
+    int getLatencySamples() const override {
+        return delay_;
+    }
+
+  private:
+    int delay_;
+    int capacity_ = 1;
+    int writePos_ = 0;
+    juce::AudioBuffer<double> ring_;
+};
+
+// Build a DryWetMixStage whose wet path is a FixedDelayStage, settle the mix
+// smoother to `mix`, and return the prepared stage.
+std::unique_ptr<DryWetMixStage> makeDelayedDryWet(int delaySamples, double mix, int blockSize) {
+    auto pipeline = std::make_unique<AudioPipeline>();
+    pipeline->addStage(std::make_unique<FixedDelayStage>(delaySamples), "delay");
+    auto stage = std::make_unique<DryWetMixStage>(std::move(pipeline));
+    stage->prepareToPlay(44100.0, blockSize, 1);
+    stage->setMixAmount(mix);
+
+    // Settle the 10ms mix ramp (~441 samples @ 44.1k) with silent blocks.
+    juce::AudioBuffer<double> settle(1, blockSize);
+    settle.clear();
+    for (int b = 0; b < 16; ++b) {
+        stage->process(settle);
+    }
+    return stage;
+}
+} // namespace
 
 class DryWetMixStageTest : public ::testing::Test {
   protected:
@@ -318,6 +394,73 @@ TEST_F(DryWetMixStageTest, MixChange_NoInstantJump) {
     const double firstTransitionSample = transitionBuffer.getSample(0, 0);
     EXPECT_NEAR(firstTransitionSample, lastWetSample, 1e-3)
         << "Mix change must ramp smoothly — no discontinuous jump at block boundary";
+}
+
+// =============================================================================
+// Latency Compensation Tests
+// =============================================================================
+
+TEST(DryWetMixLatencyTest, ReportsWetPathLatency) {
+    // getLatencySamples() must surface the effects-pipeline latency so the host
+    // (and the dry-path compensation) know the wet delay.
+    auto stage = makeDelayedDryWet(/*delaySamples=*/7, /*mix=*/1.0, /*blockSize=*/64);
+    EXPECT_EQ(stage->getLatencySamples(), 7);
+}
+
+TEST(DryWetMixLatencyTest, DryAlignsWithWetUnderLatency) {
+    // With a latent wet path, the dry path must be delayed by the same amount so
+    // an impulse blends in-phase. At 50/50 the dry and wet impulses land on the
+    // SAME sample (kDelay) and sum to ~1.0 there — not two half-impulses at 0 and
+    // kDelay (which is what an uncompensated blend would produce).
+    constexpr int kDelay = 5;
+    constexpr int kBlock = 64;
+    auto stage = makeDelayedDryWet(kDelay, /*mix=*/0.5, kBlock);
+
+    juce::AudioBuffer<double> buffer(1, kBlock);
+    buffer.clear();
+    buffer.setSample(0, 0, 1.0); // impulse at sample 0
+
+    stage->process(buffer);
+
+    EXPECT_NEAR(buffer.getSample(0, kDelay), 1.0, 1e-9) << "dry+wet impulse must align at the delayed sample";
+    EXPECT_NEAR(buffer.getSample(0, 0), 0.0, 1e-9) << "no early (uncompensated) dry impulse at sample 0";
+    for (int i = 0; i < kBlock; ++i) {
+        if (i != kDelay) {
+            EXPECT_NEAR(buffer.getSample(0, i), 0.0, 1e-9) << "stray energy at sample " << i;
+        }
+    }
+}
+
+TEST(DryWetMixLatencyTest, ZeroLatencyWetPathIsBitIdentical) {
+    // A zero-latency wet path must take the direct-copy fast path: 50/50 of a
+    // unity-gain pipeline reproduces the input exactly (no delay artifacts).
+    auto pipeline = std::make_unique<AudioPipeline>();
+    auto gain = std::make_unique<GainStage>();
+    auto* gainPtr = gain.get();
+    pipeline->addStage(std::move(gain), "gain");
+    DryWetMixStage stage(std::move(pipeline));
+    stage.prepareToPlay(44100.0, 512, 1);
+    gainPtr->setGainDB(0.0);
+    EXPECT_EQ(stage.getLatencySamples(), 0);
+
+    juce::AudioBuffer<double> settle(1, 512);
+    settle.clear();
+    for (int b = 0; b < 4; ++b) {
+        stage.process(settle); // settle gain + mix smoothers
+    }
+    stage.setMixAmount(0.5);
+    for (int b = 0; b < 4; ++b) {
+        stage.process(settle);
+    }
+
+    juce::AudioBuffer<double> buffer(1, 512);
+    for (int i = 0; i < 512; ++i) {
+        buffer.setSample(0, i, static_cast<double>(i) / 512.0);
+    }
+    stage.process(buffer);
+    for (int i = 0; i < 512; ++i) {
+        EXPECT_NEAR(buffer.getSample(0, i), static_cast<double>(i) / 512.0, 1e-10) << "sample " << i;
+    }
 }
 
 TEST_F(DryWetMixStageTest, ZeroLatency_NoDelayNeeded) {
