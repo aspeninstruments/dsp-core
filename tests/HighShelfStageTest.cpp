@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "../dsp_core/Source/audio_pipeline/HighShelfStage.h"
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <array>
 #include <cmath>
+#include <vector>
 
 using namespace dsp_core::audio_pipeline;
 
@@ -293,6 +295,10 @@ TEST_F(HighShelfStageTest, ResetClearsState) {
     fresh.prepareToPlay(kSampleRate, kBlockSize, 1);
     fresh.setCutoffFrequency(2000.0);
     fresh.setGainDb(12.0);
+    // reset() snaps the parameter smoothers to their targets, so the impulse runs
+    // with converged coefficients (no first-block ramp) — the apples-to-apples
+    // baseline for the reset-after-warmup case below.
+    fresh.reset();
     const double freshPeak = impulseTail(fresh);
 
     // Run our filter, drive it with arbitrary signal, then reset and remeasure.
@@ -369,4 +375,98 @@ TEST_F(HighShelfStageTest, StabilityUnderSweep) {
                 << ", sample=" << s;
         }
     }
+}
+
+// The in-place writeCoefficients() RBJ math must match juce::dsp's makeHighShelf
+// bit-for-bit (Butterworth Q). Params set BEFORE prepareToPlay start the
+// smoothers converged (no ramp), so the stage's steady-state output equals a
+// reference JUCE high-shelf biquad sample-for-sample.
+TEST_F(HighShelfStageTest, SteadyStateMatchesJuceReference) {
+    constexpr double kButterworthQ = 0.7071067811865476; // 1 / sqrt(2)
+    struct Case {
+        double f, g;
+    };
+    const std::array<Case, 6> cases = {{
+        {2000.0, 12.0},
+        {8000.0, -12.0},
+        {1000.0, 6.0},
+        {500.0, 24.0},
+        {12000.0, -24.0},
+        {4000.0, 0.0},
+    }};
+
+    for (const auto& c : cases) {
+        HighShelfStage stage;
+        stage.setCutoffFrequency(c.f);
+        stage.setGainDb(c.g);
+        stage.prepareToPlay(kSampleRate, kBlockSize, 1); // smoothers start converged
+
+        juce::dsp::IIR::Filter<double> ref;
+        ref.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(
+            kSampleRate, c.f, kButterworthQ, juce::Decibels::decibelsToGain(c.g));
+        ref.reset();
+
+        constexpr int kN = 2048;
+        juce::Random rng(0x5E11u);
+        juce::AudioBuffer<double> buf(1, kN);
+        std::vector<double> refOut(static_cast<size_t>(kN));
+        for (int i = 0; i < kN; ++i) {
+            const double x = rng.nextDouble() * 2.0 - 1.0;
+            buf.setSample(0, i, x);
+            refOut[static_cast<size_t>(i)] = ref.processSample(x);
+        }
+
+        stage.process(buf);
+
+        for (int i = 0; i < kN; ++i) {
+            ASSERT_NEAR(buf.getSample(0, i), refOut[static_cast<size_t>(i)], 1e-7)
+                << "Coefficient mismatch vs JUCE at sample " << i << " (f=" << c.f << ", g=" << c.g
+                << ")";
+        }
+    }
+}
+
+// A gain step ramps in over the smoothing window instead of switching instantly
+// — the regression guard for the click/pop the smoothing fixes. Probe sits in
+// the boosted band (well above the corner).
+TEST_F(HighShelfStageTest, GainStepIsSmoothedNotInstant) {
+    constexpr double cutoff = 1000.0;
+    constexpr double probe = 4000.0; // ~2 octaves above corner: near full shelf gain
+    constexpr double amp = 0.25;
+
+    HighShelfStage stage;
+    stage.setCutoffFrequency(cutoff);
+    stage.setGainDb(0.0);
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    const double phase = warmupSine(stage, probe, kSampleRate, amp, 1, 8000);
+
+    stage.setGainDb(24.0);
+
+    constexpr int kN = 2048;
+    juce::AudioBuffer<double> buf(1, kN);
+    for (int i = 0; i < kN; ++i) {
+        const double p = phase + 2.0 * M_PI * probe * i / kSampleRate;
+        buf.setSample(0, i, amp * std::sin(p));
+    }
+    stage.process(buf);
+
+    auto rms = [&](int start, int len) {
+        double sumSq = 0.0;
+        for (int i = start; i < start + len; ++i) {
+            const double v = buf.getSample(0, i);
+            sumSq += v * v;
+        }
+        return std::sqrt(sumSq / len);
+    };
+
+    const double earlyRms = rms(0, 32);
+    const double lateRms = rms(kN - 512, 512);
+    const double transparentRms = amp / std::sqrt(2.0);
+
+    EXPECT_LT(earlyRms, 0.5 * lateRms)
+        << "Gain step not smoothed (instant swap?): early RMS " << earlyRms << " vs late RMS "
+        << lateRms;
+    EXPECT_GT(lateRms, 2.0 * transparentRms)
+        << "Late window should reflect the applied boost. lateRms=" << lateRms;
 }

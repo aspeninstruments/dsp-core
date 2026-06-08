@@ -2,6 +2,7 @@
 #include "../dsp_core/Source/audio_pipeline/DryWetMixStage.h"
 #include "../dsp_core/Source/audio_pipeline/AudioPipeline.h"
 #include "../dsp_core/Source/audio_pipeline/AudioProcessingStage.h"
+#include "../dsp_core/Source/audio_pipeline/OversamplingWrapper.h"
 #include "../dsp_core/Source/audio_pipeline/GainStage.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
@@ -428,6 +429,60 @@ TEST(DryWetMixLatencyTest, DryAlignsWithWetUnderLatency) {
         if (i != kDelay) {
             EXPECT_NEAR(buffer.getSample(0, i), 0.0, 1e-9) << "stray energy at sample " << i;
         }
+    }
+}
+
+TEST(DryWetMixLatencyTest, MatchedDryOversamplingMakesDryEqualWet) {
+    // The crux of the phase-coherence requirement: when the wet path's core runs
+    // through a half-band up/down, the dry path must run through the SAME up/down
+    // (matched order), not a flat delay. We prove it by making the wet path a
+    // pure oversampled passthrough at order N and matching the dry order to N —
+    // dry and wet then carry identical IIR phase, so 100%-dry output == 100%-wet
+    // output sample-for-sample (an uncompensated dry would diverge at HF).
+    constexpr int kOrder = 2; // 4x
+    constexpr int kBlock = 256;
+
+    auto build = [kOrder, kBlock](double mix) {
+        auto wet = std::make_unique<AudioPipeline>();
+        // FixedDelayStage(0) is an exact passthrough, so the wrapper is pure up/down.
+        wet->addStage(std::make_unique<OversamplingWrapper>(std::make_unique<FixedDelayStage>(0), kOrder), "os");
+        auto stage = std::make_unique<DryWetMixStage>(std::move(wet));
+        stage->prepareToPlay(44100.0, kBlock, 1);
+        stage->setDryOversamplingOrder(kOrder); // match dry to wet core
+        stage->setMixAmount(mix);
+        return stage;
+    };
+
+    auto dryStage = build(0.0); // 100% dry  → output = input through dry up/down
+    auto wetStage = build(1.0); // 100% wet  → output = input through wet up/down
+
+    auto fillSine = [](juce::AudioBuffer<double>& b, int startSample) {
+        for (int i = 0; i < b.getNumSamples(); ++i) {
+            b.setSample(0, i, std::sin(2.0 * M_PI * 1000.0 * (startSample + i) / 44100.0));
+        }
+    };
+
+    // Identical input history to both stages; settles the (dry) mix smoother.
+    int n = 0;
+    for (int blk = 0; blk < 8; ++blk, n += kBlock) {
+        juce::AudioBuffer<double> a(1, kBlock);
+        juce::AudioBuffer<double> b(1, kBlock);
+        fillSine(a, n);
+        fillSine(b, n);
+        dryStage->process(a);
+        wetStage->process(b);
+    }
+
+    juce::AudioBuffer<double> da(1, kBlock);
+    juce::AudioBuffer<double> wb(1, kBlock);
+    fillSine(da, n);
+    fillSine(wb, n);
+    dryStage->process(da);
+    wetStage->process(wb);
+
+    for (int i = 0; i < kBlock; ++i) {
+        EXPECT_NEAR(da.getSample(0, i), wb.getSample(0, i), 1e-9)
+            << "dry and wet must carry identical up/down phase at sample " << i;
     }
 }
 

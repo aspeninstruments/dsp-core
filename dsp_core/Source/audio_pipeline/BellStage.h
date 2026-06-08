@@ -49,7 +49,7 @@ class BellStage : public AudioProcessingStage {
 
     /**
      * Set bell centre frequency in Hz. Clamped to [20, 20000].
-     * Thread Safety: UI thread only (allocates new coefficients).
+     * Thread-safe: stores the target; the audio thread smooths toward it.
      */
     void setCutoffFrequency(double frequencyHz);
 
@@ -59,7 +59,7 @@ class BellStage : public AudioProcessingStage {
 
     /**
      * Set bell peak gain in dB. Clamped to [-24, +24]. 0 dB = transparent.
-     * Thread Safety: UI thread only (allocates new coefficients).
+     * Thread-safe: stores the target; the audio thread smooths toward it.
      */
     void setGainDb(double gainDb);
 
@@ -70,13 +70,18 @@ class BellStage : public AudioProcessingStage {
     /**
      * Set bell Q (bandwidth). Clamped to [0.1, 10]. Lower Q broadens the
      * bell; higher Q narrows it.
-     * Thread Safety: UI thread only (allocates new coefficients).
+     * Thread-safe: stores the target; the audio thread smooths toward it.
      */
     void setQ(double q);
 
     double getQ() const {
         return q_.load(std::memory_order_acquire);
     }
+
+    // Smoothing ramp time for centre/gain/Q. Matches the Ladder filters' 2 ms —
+    // long enough that per-sample coefficient updates are click-free, short
+    // enough not to smear cutoff/gain modulation. Public for tests.
+    static constexpr double kSmoothingTimeSec = 0.002;
 
   private:
     std::atomic<bool> enabled_{true};
@@ -88,9 +93,26 @@ class BellStage : public AudioProcessingStage {
     std::vector<juce::dsp::IIR::Filter<double>> filters_;
     double sampleRate_ = 48000.0;
 
-    // Update all filter coefficients (call after sampleRate, centre, gain, or Q changes).
-    // UI thread only — allocates via makePeakFilter.
+    // Per-sample parameter smoothing (audio thread only). Centre frequency uses
+    // Multiplicative (log/pitch) smoothing; gain (dB) and Q use Linear. The
+    // smoothers chase the atomic targets so coefficients move continuously
+    // instead of jumping each block — that discontinuity was the click source.
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothCutoff_;
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothGainDb_;
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> smoothQ_;
+    double lastCutoffTarget_ = -1.0;
+    double lastGainTarget_ = -1000.0;
+    double lastQTarget_ = -1.0;
+
+    // Allocating coefficient sizer — used only in prepareToPlay and the
+    // channel-count-change path. Sizes each filter's coefficient array to a
+    // 2nd-order biquad so writeCoefficients() can update it in place afterwards.
     void updateFilterCoefficients();
+
+    // Recompute the peaking-biquad coefficients in place from explicit
+    // (already-smoothed) parameters. No allocation — audio-thread safe. Matches
+    // juce::dsp::IIR::Coefficients<double>::makePeakFilter exactly.
+    void writeCoefficients(double centreHz, double gainDb, double q);
 };
 
 } // namespace dsp_core::audio_pipeline

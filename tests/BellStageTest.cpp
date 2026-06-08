@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "../dsp_core/Source/audio_pipeline/BellStage.h"
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <array>
 #include <cmath>
+#include <vector>
 
 using namespace dsp_core::audio_pipeline;
 
@@ -310,6 +312,10 @@ TEST_F(BellStageTest, ResetClearsState) {
     fresh.setCutoffFrequency(1000.0);
     fresh.setGainDb(12.0);
     fresh.setQ(2.0);
+    // reset() snaps the parameter smoothers to their targets, so the impulse runs
+    // with converged coefficients (no first-block ramp) — the apples-to-apples
+    // baseline for the reset-after-warmup case below.
+    fresh.reset();
     const double freshPeak = impulseTail(fresh);
 
     filter_.reset();
@@ -384,4 +390,103 @@ TEST_F(BellStageTest, StabilityUnderSweep) {
                 << ", sample=" << s;
         }
     }
+}
+
+// (14) The in-place writeCoefficients() RBJ math must match juce::dsp's
+// makePeakFilter bit-for-bit. Params set BEFORE prepareToPlay start the
+// smoothers converged (no ramp), so the stage's steady-state output equals a
+// reference JUCE peaking biquad sample-for-sample. Guards against drift between
+// the hand-rolled coefficients and JUCE's formula.
+TEST_F(BellStageTest, SteadyStateMatchesJuceReference) {
+    struct Case {
+        double f, g, q;
+    };
+    const std::array<Case, 6> cases = {{
+        {1000.0, 12.0, 1.0},
+        {100.0, -12.0, 5.0},
+        {5000.0, 6.0, 0.5},
+        {8000.0, 24.0, 10.0},
+        {50.0, -6.0, 2.0},
+        {2000.0, 0.0, 1.0},
+    }};
+
+    for (const auto& c : cases) {
+        BellStage stage;
+        stage.setCutoffFrequency(c.f);
+        stage.setGainDb(c.g);
+        stage.setQ(c.q);
+        stage.prepareToPlay(kSampleRate, kBlockSize, 1); // smoothers start converged
+
+        juce::dsp::IIR::Filter<double> ref;
+        ref.coefficients = juce::dsp::IIR::Coefficients<double>::makePeakFilter(
+            kSampleRate, c.f, c.q, juce::Decibels::decibelsToGain(c.g));
+        ref.reset();
+
+        constexpr int kN = 2048;
+        juce::Random rng(0x5E11u);
+        juce::AudioBuffer<double> buf(1, kN);
+        std::vector<double> refOut(static_cast<size_t>(kN));
+        for (int i = 0; i < kN; ++i) {
+            const double x = rng.nextDouble() * 2.0 - 1.0;
+            buf.setSample(0, i, x);
+            refOut[static_cast<size_t>(i)] = ref.processSample(x);
+        }
+
+        stage.process(buf);
+
+        for (int i = 0; i < kN; ++i) {
+            ASSERT_NEAR(buf.getSample(0, i), refOut[static_cast<size_t>(i)], 1e-7)
+                << "Coefficient mismatch vs JUCE at sample " << i << " (f=" << c.f << ", g=" << c.g
+                << ", q=" << c.q << ")";
+        }
+    }
+}
+
+// (15) A gain step ramps in over the smoothing window instead of switching
+// instantly — the regression guard for the click/pop the smoothing fixes. With
+// an instant coefficient swap the boost would be fully present from the first
+// sample after the step; smoothing keeps the early window well below the
+// converged level.
+TEST_F(BellStageTest, GainStepIsSmoothedNotInstant) {
+    constexpr double centre = 1000.0;
+    constexpr double amp = 0.25;
+
+    BellStage stage;
+    stage.setCutoffFrequency(centre);
+    stage.setGainDb(0.0);
+    stage.setQ(1.0);
+    stage.prepareToPlay(kSampleRate, kBlockSize, 1);
+
+    // Converge at 0 dB (transparent) with a continuous centre-frequency sine.
+    const double phase = warmupSine(stage, centre, kSampleRate, amp, 1, 8000);
+
+    // Step the gain target to +24 dB, then process one block of the same sine.
+    stage.setGainDb(24.0);
+
+    constexpr int kN = 2048;
+    juce::AudioBuffer<double> buf(1, kN);
+    for (int i = 0; i < kN; ++i) {
+        const double p = phase + 2.0 * M_PI * centre * i / kSampleRate;
+        buf.setSample(0, i, amp * std::sin(p));
+    }
+    stage.process(buf);
+
+    auto rms = [&](int start, int len) {
+        double sumSq = 0.0;
+        for (int i = start; i < start + len; ++i) {
+            const double v = buf.getSample(0, i);
+            sumSq += v * v;
+        }
+        return std::sqrt(sumSq / len);
+    };
+
+    const double earlyRms = rms(0, 32);              // ~0.7 ms in — mid-ramp
+    const double lateRms = rms(kN - 512, 512);       // fully at +24 dB (~x15.85)
+    const double transparentRms = amp / std::sqrt(2.0);
+
+    EXPECT_LT(earlyRms, 0.5 * lateRms)
+        << "Gain step not smoothed (instant swap?): early RMS " << earlyRms << " vs late RMS "
+        << lateRms;
+    EXPECT_GT(lateRms, 2.0 * transparentRms)
+        << "Late window should reflect the applied boost. lateRms=" << lateRms;
 }
