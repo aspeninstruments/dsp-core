@@ -753,7 +753,10 @@ void VisualizerUpdateDispatcher::forceUpdate() {
 
 #ifndef BDD_PROFILE_DISPATCHER
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage) - used via #if for profiling toggle.
-#define BDD_PROFILE_DISPATCHER 1
+// Default OFF: dev-only dispatcher tick timing/stats. Opt in per-build with
+// -DBDD_PROFILE_DISPATCHER=1. (DBG output already compiles out in Release; this
+// also drops the per-update timing + stats accumulation entirely.)
+#define BDD_PROFILE_DISPATCHER 0
 #endif
 
 #if BDD_PROFILE_DISPATCHER
