@@ -479,11 +479,13 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     void timerCallback() override;
 
     /** Pull-source accessors. The dispatcher snapshots the renderer's 16k LUT
-     *  into sourceBuffer_ each tick, then bumps sourceVersion_ with release-
-     *  ordering. Visualizers in LUT-source mode hold these pointers and read
-     *  at paint time, gated by the version. The dispatcher and visualizer
-     *  both run on the message thread, so the atomic is over-strict in
-     *  practice but documents the publication contract.
+     *  into sourceBuffer_ each tick, bracketed by a seqlock on sourceVersion_
+     *  (ODD before the write, EVEN after — see runUpdate()/publishSource()).
+     *  Visualizers in LUT-source mode hold these pointers and read at paint
+     *  time, gated by the version. The component paint path is MM-lock-
+     *  serialized with the producer; the GL render thread (Phase 2 Step 5)
+     *  reads the buffer WITHOUT the MM lock, so the seqlock is load-bearing
+     *  there — it lets that reader detect and reject a torn read.
      *
      *  Lifetime: the dispatcher is a member of SeamlessTransferFunction (a
      *  value member of PluginAudioProcessor); the visualizer is editor-owned
@@ -509,8 +511,10 @@ class VisualizerUpdateDispatcher : public juce::AsyncUpdater, public juce::Timer
     int lastSeenSelectedLane{-1};
 
     // Pull-source state — 16k snapshot the visualizer reads at paint time.
-    // sourceVersion_ is release-stored after sourceBuffer_ is fully written;
-    // the visualizer acquire-loads it and rebuilds its path only on change.
+    // sourceVersion_ is a seqlock: ODD while sourceBuffer_ is being written,
+    // EVEN when stable (so a quiescent version is always even). The visualizer
+    // acquire-loads it and rebuilds its path only on change; the lock-free
+    // GL-thread reader additionally rejects odd / straddled reads.
     std::array<double, LaneMixer::TABLE_SIZE> sourceBuffer_{};
     std::atomic<uint64_t> sourceVersion_{0};
 

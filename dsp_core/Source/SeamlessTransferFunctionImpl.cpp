@@ -665,8 +665,12 @@ void VisualizerUpdateDispatcher::setVisualizerCallback(std::function<void()> cal
 }
 
 void VisualizerUpdateDispatcher::publishSource(const std::array<double, LaneMixer::TABLE_SIZE>& buffer) {
+    // Seqlock publication — see runUpdate() for the full rationale. ODD before
+    // the write, EVEN after, so the lock-free GL-thread reader never sees a
+    // partially-copied buffer.
+    sourceVersion_.fetch_add(1, std::memory_order_release); // -> ODD (write begins)
     sourceBuffer_ = buffer;
-    sourceVersion_.fetch_add(1, std::memory_order_release);
+    sourceVersion_.fetch_add(1, std::memory_order_release); // -> EVEN (write done)
 
     // Suppress any pending async/timer tick that was queued by an earlier mixer
     // mutation. Without this, runUpdate() would fire after this publish and pull
@@ -806,6 +810,16 @@ void VisualizerUpdateDispatcher::runUpdate(bool forceMixerRecompute) {
     // renderer cache is skipped entirely. `lastRenderedSum_` is filled async by
     // the worker thread, so on those low-frequency, correctness-critical paths
     // we recompute from the LaneMixer to guarantee the current curve is shown.
+    //
+    // Seqlock publication (Phase 2 Step 5): bump to ODD before any write to
+    // sourceBuffer_ ("write in progress"), bump to EVEN after ("done"). A reader
+    // that runs WITHOUT the MessageManager lock — the GL render thread in
+    // WaveformVisualizer::renderGlInterior — loads the version, copies the
+    // buffer, re-loads the version, and rejects the frame if it saw an odd value
+    // or a changed version, so it never observes a half-written buffer.
+    // MM-lock-serialized readers (the component paint path) never see the odd
+    // state and are unaffected.
+    sourceVersion_.fetch_add(1, std::memory_order_release); // -> ODD (write begins)
     bool haveSnapshot = (!forceMixerRecompute && sourceRenderer_ != nullptr)
                             ? sourceRenderer_->copyLastRenderedSum(sourceBuffer_)
                             : false;
@@ -819,7 +833,7 @@ void VisualizerUpdateDispatcher::runUpdate(bool forceMixerRecompute) {
             laneMixer.computeSum(sourceBuffer_.data(), LaneMixer::TABLE_SIZE);
         }
     }
-    sourceVersion_.fetch_add(1, std::memory_order_release);
+    sourceVersion_.fetch_add(1, std::memory_order_release); // -> EVEN (write done)
 
     // Compute selected lane's raw curve for secondary visualizer overlay
     if (laneLUTPtr_ != nullptr && selectedLanePtr_ != nullptr) {
