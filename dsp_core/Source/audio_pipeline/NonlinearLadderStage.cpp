@@ -61,14 +61,35 @@ void NonlinearLadderStage::prepareToPlay(double sampleRate, int samplesPerBlock,
     sampleRate_ = sampleRate;
     numChannels_ = std::max(1, numChannels);
 
-    // Forward to all 5 STFs so their LUT crossfade tracks wall time at this
+    // Collect the DISTINCT non-null STF pointers among the 5 slots ONCE. The
+    // three global lifecycle pumps (prepareToPlay-forward here, plus beginBlock
+    // and advanceCrossfadeSample in process()) must fire exactly once per
+    // underlying STF; when the plugin aliases one STF across several slots
+    // (a single linked curve), iterating nls_ directly would over-trigger them.
+    numUniqueSlots_ = 0;
+    for (const auto* nl : nls_) {
+        if (nl == nullptr) {
+            continue;
+        }
+        bool alreadySeen = false;
+        for (int j = 0; j < numUniqueSlots_; ++j) {
+            if (uniqueSlots_[static_cast<std::size_t>(j)] == nl) {
+                alreadySeen = true;
+                break;
+            }
+        }
+        if (!alreadySeen) {
+            uniqueSlots_[static_cast<std::size_t>(numUniqueSlots_++)] = nl;
+        }
+    }
+
+    // Forward to each DISTINCT STF so its LUT crossfade tracks wall time at this
     // (possibly oversampled) rate. prepareToPlay mutates; our slots are const
     // views (the audio-thread API applyTransferFunction/begin/advance is const),
     // so const_cast here on the UI thread is safe and intentional.
-    for (const auto* nl : nls_) {
-        if (nl != nullptr) {
-            const_cast<SeamlessTransferFunction*>(nl)->prepareToPlay(sampleRate, samplesPerBlock);
-        }
+    for (int i = 0; i < numUniqueSlots_; ++i) {
+        const_cast<SeamlessTransferFunction*>(uniqueSlots_[static_cast<std::size_t>(i)])
+            ->prepareToPlay(sampleRate, samplesPerBlock);
     }
 
     for (auto& solver : solvers_) {
@@ -121,11 +142,11 @@ void NonlinearLadderStage::process(juce::AudioBuffer<double>& buffer) {
     const LadderTopologySnapshot topo =
         unpackTopology(topology_.load(std::memory_order_acquire));
 
-    // beginBlock() once per block on all 5 STFs (picks up any newly rendered LUT).
-    for (const auto* nl : nls_) {
-        if (nl != nullptr) {
-            nl->beginBlock();
-        }
+    // beginBlock() once per block on each DISTINCT STF (picks up any newly
+    // rendered LUT). Deduplicated so aliased slots don't rotate the shared LUT
+    // more than once per block.
+    for (int s = 0; s < numUniqueSlots_; ++s) {
+        uniqueSlots_[static_cast<std::size_t>(s)]->beginBlock();
     }
 
     const int numChannels = std::min(buffer.getNumChannels(), numChannels_);
@@ -145,11 +166,11 @@ void NonlinearLadderStage::process(juce::AudioBuffer<double>& buffer) {
         }
 
         // advanceCrossfadeSample() once per SAMPLE, GLOBALLY (after all channels),
-        // on all 5 STFs — the crossfade position is shared across channels.
-        for (const auto* nl : nls_) {
-            if (nl != nullptr) {
-                nl->advanceCrossfadeSample();
-            }
+        // on each DISTINCT STF — the crossfade position is shared across channels.
+        // Deduplicated so aliased slots don't advance the shared crossfade N×
+        // too fast per sample.
+        for (int s = 0; s < numUniqueSlots_; ++s) {
+            uniqueSlots_[static_cast<std::size_t>(s)]->advanceCrossfadeSample();
         }
     }
 

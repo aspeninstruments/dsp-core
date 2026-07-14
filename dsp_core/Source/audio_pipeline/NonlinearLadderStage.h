@@ -128,6 +128,18 @@ class NonlinearLadderStage : public AudioProcessingStage {
     // Non-owning nonlinearity views (slot 0 = FB, 1..4 = FF).
     std::array<const SeamlessTransferFunction*, kNumSlots> nls_{};
 
+    // DISTINCT non-null STF pointers among nls_, built once in prepareToPlay.
+    // The three global lifecycle calls (prepareToPlay-forward, beginBlock,
+    // advanceCrossfadeSample) must fire EXACTLY ONCE per underlying STF per
+    // block/sample — when the plugin aliases the same STF into multiple slots
+    // (one linked curve driving the whole filter), iterating nls_ directly
+    // would over-trigger them (e.g. advance the shared crossfade N× too fast).
+    // The per-eval applyTransferFunction reads in the solver stay keyed by the
+    // original 5-slot indices (aliased reads are correct); only the lifecycle
+    // pumps are deduplicated. Harmless when the 5 slots are distinct.
+    std::array<const SeamlessTransferFunction*, kNumSlots> uniqueSlots_{};
+    int numUniqueSlots_ = 0;
+
     std::atomic<bool> enabled_{true};
     std::atomic<double> cutoffHz_{20000.0};
     std::atomic<double> resonance_{0.0};
