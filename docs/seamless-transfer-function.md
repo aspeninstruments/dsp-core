@@ -12,67 +12,68 @@ Transfer function updates require milliseconds (spline evaluation, 40-harmonic s
 
 ## The Solution
 
-**Three-thread architecture** with lock-free communication and **two-timer design**:
+**Three-thread architecture** with lock-free communication and **event-driven rendering**:
 
 ```
                      SeamlessTransferFunction (self-contained)
                     ┌─────────────────────────────────────────┐
                     │                                         │
-VisualizerUpdateTimer (60Hz)              LUTRenderTimer (20Hz)
-    │                                          │
-    └─→ Version changed?                       ├─→ Track lastSeenVersion
-        └─→ Sample editingModel directly       ├─→ Track lastRenderedVersion
-            (1024 points, ~0.5ms)              │
-            └─→ visualizerCallback             └─→ lastRendered != lastSeen?
-                                                   └─→ Enqueue RenderJob (DSP only)
-                                                            │
-                                               LUTRendererThread (Worker)
-                                                   └─→ renderDSPLUT() only (16K)
-                                                       └─→ newLUTReady.store(true)
-                                                                │
-                                                       Audio Thread
-                                                           └─→ Check flag, rotate buffers
-                                                               └─→ 50ms crossfade
+    EventDrivenRenderer (Worker)          VisualizerUpdateDispatcher (Message)
+    (High-priority thread)                 (Rate-limited 60Hz)
+    │                                      │
+    ├─→ Version changed?                   ├─→ Triggered by LaneMixer version
+    │   (via requestRender or timer)       │   or triggerAsyncUpdate
+    │                                      ├─→ Rate-gate: 60Hz (16.7ms)
+    ├─→ Rate-gate: 120Hz (8.33ms)         │
+    │                                      └─→ Downsample 16K→1K
+    ├─→ Render DSP LUT (16K samples)      └─→ visualizerCallback (paint)
+    │   (~5-15ms)
+    │
+    └─→ Write to AudioEngine triple-buffer
+        └─→ newLUTReady.store(true)
+                       │
+                Audio Thread
+                   └─→ Check flag, rotate buffers
+                       └─→ 5ms crossfade
 ```
 
-**Key Design: Two-Timer Architecture**
-- **VisualizerUpdateTimer (120Hz)**: Direct model reads for responsive UI (~0.5ms per update)
-- **LUTRenderTimer (20Hz)**: DSP LUT updates with guaranteed delivery via two-version tracking
+**Key Design: Event-Driven with Rate Gates**
+- **EventDrivenRenderer (Worker, 120Hz rate gate)**: Direct version-tracking renders, worker wakes via requestRender() or fallback timers
+- **VisualizerUpdateDispatcher (Message, 60Hz rate gate)**: Async updates with downsampling from DSP LUT or direct LaneMixer reads
 
 **Benefits**:
 - Audio thread never blocks (wait-free reads)
-- UI stays responsive (120Hz visualizer, decoupled from DSP)
-- DSP renders ~6x less often (20Hz vs 120Hz), saving CPU
-- Guaranteed final delivery via two-version tracking
+- UI stays responsive (60Hz visualizer, decoupled from DSP)
+- DSP renders at 120Hz rate gate (varies by version changes, save CPU via rate limiting)
+- Guaranteed final delivery via event-driven wake pattern
 - Crossfades mask discontinuities
 - Lock-free communication via atomics
 
-### Timer Configuration Constants (SeamlessConfig)
+### Configuration Constants (SeamlessConfig)
 
-**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L19-L30)
+**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L24-L31)
 
 All timing configuration is centralized in `SeamlessConfig` struct:
 
 ```cpp
 struct SeamlessConfig {
-    static constexpr int DSP_LUT_SIZE = 16384;           // 16K samples for audio processing
-    static constexpr int VISUALIZER_LUT_SIZE = 1024;     // 1K samples for UI rendering
+    static constexpr int DSP_LUT_SIZE = LaneMixer::TABLE_SIZE;  // 16384 samples (sourced from TABLE_SIZE)
+    static constexpr int VISUALIZER_LUT_SIZE = 1024;            // 1K samples for UI rendering
     static constexpr double MIN_VALUE = -1.0;
     static constexpr double MAX_VALUE = 1.0;
-    static constexpr double CROSSFADE_DURATION_MS = 50.0; // 50ms S-curve crossfade
-    static constexpr int DSP_TIMER_HZ = 20;              // DSP LUT updates at 20Hz
-    static constexpr int VISUALIZER_TIMER_HZ = 120;      // Visualizer updates at 120Hz
+    static constexpr double CROSSFADE_DURATION_MS = 5.0;        // 5ms S-curve crossfade
+    static constexpr int DSP_TIMER_HZ = 20;                     // Rate gate: 20 Hz (DSP only)
 };
 ```
 
-**Why Separate Timer Rates?**
+**Why Event-Driven with Rate Gates?**
 
-| Timer | Rate | Workload | Rationale |
-|-------|------|----------|-----------|
-| **LUTRenderTimer (DSP)** | 20 Hz (50ms) | Render 16K-sample LUT via worker thread | Expensive (~5-15ms), matches crossfade timing, coalesces rapid edits |
-| **VisualizerUpdateTimer** | 120 Hz (~8.3ms) | Direct model reads, ~1K samples | Cheap (~0.5ms), responsive to user drags, independent from DSP rate |
+| Component | Rate Gate | Workload | Rationale |
+|-----------|-----------|----------|-----------|
+| **EventDrivenRenderer (Worker)** | 120 Hz (8.33ms) | Render 16K-sample LUT via worker thread | Expensive (~5-15ms), high rate gate ensures responsive modulation, coalesces rapid edits, worker wakes via event not timer |
+| **VisualizerUpdateDispatcher (Message)** | 60 Hz (16.7ms) | Downsample 16K→1K via message thread or read from renderer cache | Cheap (~0.5ms), responsive to UI drags, independent from DSP rate, decouples visualizer from DSP wake frequency |
 
-**CPU Efficiency**: 20Hz DSP rate saves ~85% CPU vs 120Hz (workers renders only 1/6 as often), while visualizer stays responsive at 120Hz direct reads.
+**CPU Efficiency**: Event-driven workers wake only on changes (no idle polling), rate gates prevent overload (120Hz DSP, 60Hz visualizer). Worker applies the actual rate limit, not message-thread timers.
 
 ---
 
@@ -97,88 +98,77 @@ LUTBuffer lutBuffers[3];
 - No data races - worker never touches crossfade buffers
 
 **Key Methods**:
-- `prepareToPlay()` - Calculate sample-rate-adaptive crossfade duration (50ms)
+- `prepareToPlay()` - Calculate sample-rate-adaptive crossfade duration (5ms)
 - `processBuffer()` - Unified multi-channel processing with shared crossfade state
 - `checkForNewLUT()` - Atomic flag check + buffer rotation (called once per buffer)
 
-**Crossfade**: 50ms S-curve fade using smoothstep (cubic Hermite) interpolation (2205 samples @ 44.1kHz). Uses ease-in/ease-out curve with zero derivative at endpoints for perceptually smooth transitions. Duration increased from 10ms to handle DC offset transitions smoothly (DC blocking filter has ~32ms time constant).
+**Crossfade**: 5ms S-curve fade using smoothstep (cubic Hermite) interpolation (220 samples @ 44.1kHz). Uses ease-in/ease-out curve with zero derivative at endpoints for perceptually smooth transitions. Duration matches DSP poll rate for seamless updates.
 
-### 2. LUTRendererThread (Worker Thread)
+### 2. EventDrivenRenderer Details (see #3 for full description)
 
-**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L286-L399)
+### 3. EventDrivenRenderer (Worker Thread, 120Hz rate gate)
 
-**DSP LUT Only** - Visualizer is handled separately by VisualizerUpdateTimer.
+**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L287-L426)
 
-**Job Queue**:
+**Event-Driven Worker with Priority Isolation**:
+- High-priority worker thread wakes via `requestRender()` (direct WaitableEvent signal)
+- No message-thread hop: audio thread, UI thread, or 5Hz fallback timer can wake the worker directly
+- Worker owns the 120Hz rate gate via `RENDER_MIN_INTERVAL_MS = 8.33ms` — limits renders to 120Hz max
+- Applies version tracking (full + mix versions) for skip-optimization when unchanged
+
+**Worker Algorithm**:
 ```cpp
-juce::AbstractFifo jobQueue{4};  // Lock-free FIFO, 4 slots
-RenderJob jobSlots[4];           // Job storage (~524KB total)
-```
+void EventDrivenRenderer::run() override {
+    while (!threadShouldExit()) {
+        // Apply 120 Hz rate gate
+        double remainingMs = nextAllowedRenderTimeMs - currentTimeMs;
+        if (remainingMs > 0) {
+            wait(remainingMs);  // Block until minimum interval elapsed
+        }
 
-**Job Coalescing**: Drains entire queue, renders only the **latest** job. Critical for performance - rapid UI edits generate many jobs, but we only care about the final state.
-
-**Rendering Workflow**:
-1. Dequeue all pending jobs → keep latest
-2. Restore state into worker-owned `LayeredTransferFunction`
-3. Render 16K samples via `evaluateForRendering()` (~5-15ms)
-4. Copy to `lutBuffers[workerTargetIndex]`
-5. Set `newLUTReady = true` (release ordering)
-
-### 3. LUTRenderTimer (Message Thread, 20Hz)
-
-**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L441-L535)
-
-**Two-Version Tracking for Guaranteed Delivery**:
-```cpp
-uint64_t lastSeenVersion{0};      // What version we last observed
-uint64_t lastRenderedVersion{0};  // What version we last sent to worker
-```
-
-**Invariant**: Eventually `lastRenderedVersion == lastSeenVersion`. This ensures the final change is never skipped.
-
-**Timer Algorithm (20Hz)**:
-```cpp
-void timerCallback() override {
-    uint64_t currentVersion = ltf.getVersion();
-
-    // Track version changes
-    if (currentVersion != lastSeenVersion) {
-        lastSeenVersion = currentVersion;
-    }
-
-    // Render if we're behind - handles BOTH intermediate AND final
-    if (lastRenderedVersion != lastSeenVersion) {
-        RenderJob job = captureRenderJob();
-        renderer.enqueueJob(job);
-        lastRenderedVersion = lastSeenVersion;
+        renderIfNeeded();       // Check version, then doRender() if changed
+        nextAllowedRenderTimeMs = currentTimeMs + RENDER_MIN_INTERVAL_MS;  // 8.33ms
     }
 }
 ```
 
-**Why 20Hz?** Matches crossfade timing (50ms). Renders ~3x less often than previous 60Hz approach while guaranteeing no changes are lost.
+**Why 120Hz Rate Gate?** 
+- Provides 6 samples per cycle for 20Hz LFO targets (above "perceptually smooth" 4-sample floor)
+- 5ms crossfade smooths remaining stair-stepping
+- Prevents worker from hammering audio buffers during rapid modulation
 
-### 4. VisualizerUpdateTimer (Message Thread, 60Hz)
+**Wakeup Paths**:
+- `requestRender()`: Audio thread modulation or UI thread drag → direct worker signal
+- `handleAsyncUpdate()`: Message thread mutation (fallback forward)
+- 5Hz safety timer: Catches edges missed by event path
 
-**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L537-L592)
+### 4. VisualizerUpdateDispatcher (Message Thread, 60Hz rate gate)
 
-**Direct Model Sampling** - No worker thread, no job queue. Samples the editing model directly on the message thread for responsive UI.
+**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L428-L528)
 
-**Timer Algorithm (60Hz)**:
+**Event-Driven Visualizer with Downsampling** - AsyncUpdater dispatches curve/lane compute on message thread in response to LaneMixer version changes, rate-limited to 60Hz.
+
+**Dispatcher Algorithm (60Hz)**:
 ```cpp
-void timerCallback() override {
-    uint64_t currentVersion = editingModel.getVersion();
+void VisualizerUpdateDispatcher::runUpdate(bool forceMixerRecompute) {
+    uint64_t currentVersion = laneMixer.getVersion();
 
     if (currentVersion != lastSeenVersion) {
         lastSeenVersion = currentVersion;
 
-        // Get normalization scalar and sample model directly
-        const double normScalar = editingModel.getNormalizationScalar();
-
-        for (int i = 0; i < VISUALIZER_LUT_SIZE; ++i) {  // 1024 points
-            const double x = MIN_VALUE + (i / 1023.0) * (MAX_VALUE - MIN_VALUE);
-            (*visualizerLUTPtr)[i] = editingModel.evaluateForRendering(x, normScalar);
+        // Two paths:
+        // 1. Fast: Read renderer's cached 16K LUT (updated by EventDrivenRenderer)
+        // 2. Slow: Recompute 16K directly from LaneMixer (for forceUpdate at init)
+        
+        if (!forceMixerRecompute && sourceRenderer_) {
+            sourceRenderer_->copyLastRenderedSum(sourceBuffer_);
+        } else {
+            laneMixer.computeFullSum(sourceBuffer_);  // Full 16K compute
         }
 
+        // Downsample 16K → 1K for UI rendering
+        downsampleForVisualization();
+        
         if (onVisualizerUpdate) {
             onVisualizerUpdate();  // Triggers UI repaint
         }
@@ -186,11 +176,11 @@ void timerCallback() override {
 }
 ```
 
-**Why 60Hz with Direct Reads?**
-- Decoupled from DSP render rate (20Hz)
-- ~0.5ms per update (1024 points vs 16K for DSP)
-- User sees their edit immediately (no worker thread latency)
-- Visual/audio discrepancy during crossfade is acceptable (audio catches up within 50ms)
+**Why 60Hz Rate Gate?**
+- Decoupled from DSP render rate (120Hz)
+- 16.7ms is one frame at 60Hz — below human discrimination for continuous knob drag
+- Reduces message-thread queue depth and prevents starving DSP renders on slow hardware
+- Reads renderer's cached buffer instead of recomputing (if available)
 
 ### 5. Version Tracking System
 
@@ -441,35 +431,6 @@ onSplineLayerStateChanged(true);  // UI sync
 - `controller.enterSplineTool()`: Undoable wrapper (calls setEditingTool + creates undo entry)
 - `enterSplineToolInternal()`: Model state only (called by perform(), no side effects)
 
-### 7. RenderJob (Data Structure)
-
-**File**: [`modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h`](../../modules/dsp-core/dsp_core/Source/SeamlessTransferFunctionImpl.h#L209-L235)
-
-Self-contained snapshot of LayeredTransferFunction state. **NO ContentStore dependency** (preserves dsp-core module purity).
-
-```cpp
-struct RenderJob {
-    std::array<double, TABLE_SIZE> baseLayerData;  // Full 128KB memcpy
-    std::array<double, 41> coefficients;           // WT mix + 40 harmonics
-    std::vector<SplineAnchor> splineAnchors;
-
-    bool splineLayerEnabled;
-    bool normalizationEnabled;
-    bool paintStrokeActive;                         // CRITICAL flag
-    double frozenNormalizationScalar;
-
-    LayeredTransferFunction::InterpolationMode interpolationMode;
-    LayeredTransferFunction::ExtrapolationMode extrapolationMode;
-
-    uint64_t version;
-};
-```
-
-**Paint Stroke Active**: Critical for Paint Mode. When true, uses `frozenNormalizationScalar` directly to prevent flicker during paint strokes. This flag is set via `setPaintStrokeActive(true)` at the start of a paint stroke after calling `updateNormalizationScalar()` to cache the current scalar. See [snapshot-system.md](../../transfer_function_editor/docs/snapshot-system.md).
-
-**Memory Cost**: ~130KB per job × 4 queue slots = ~524KB (acceptable)
-
----
 
 ## Lifecycle Management
 
@@ -487,7 +448,7 @@ TotalHarmonicControlAudioProcessor::TotalHarmonicControlAudioProcessor() {
 ```cpp
 void prepareToPlay(double sampleRate, int samplesPerBlock) override {
     transferFunction->prepareToPlay(sampleRate, samplesPerBlock);
-    // Calculates sample-rate-adaptive crossfade duration (50ms)
+    // Calculates sample-rate-adaptive crossfade duration (5ms)
 }
 ```
 
@@ -638,7 +599,7 @@ void onUserPaint(double x, double y) {
     editingModel.setSplineAnchor(index, {x, y});
     // Version change detected by internal timers:
     // - Visualizer: within ~17ms (60Hz)
-    // - DSP: within ~50ms (20Hz)
+    // - DSP: within ~55ms (20Hz: 50ms worst-case + 5ms render)
 }
 ```
 
@@ -723,8 +684,8 @@ controller.onSomeCallback = [this]() {
 
 **Latency**:
 - UI-to-Visualizer: <17ms (60Hz timer, worst-case ~17ms to detect change)
-- UI-to-Audio: <65ms (20Hz timer worst-case 50ms + worker render 5-15ms)
-- Audio crossfade: 50ms (matches DSP poll rate)
+- UI-to-Audio: <55ms (20Hz timer worst-case 50ms + worker render 5-15ms, crossfade 5ms)
+- Audio crossfade: 5ms (seamless update duration)
 
 ---
 
