@@ -33,6 +33,7 @@ enum class StageTag {
     Modulator2,
     TonePre,
     TonePost,
+    NonlinearLadder,
 };
 
 /**
@@ -76,6 +77,8 @@ inline std::string stageTagToString(StageTag tag) {
         return "tonePre";
     case StageTag::TonePost:
         return "tonePost";
+    case StageTag::NonlinearLadder:
+        return "nonlinearLadder";
     }
     return "unknown";
 }

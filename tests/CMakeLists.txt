@@ -1401,3 +1401,28 @@ endif()
 
 add_test(NAME OversamplingWrapperTests COMMAND oversampling_wrapper_tests)
 
+# NonlinearLadderStage tests (generalized RK4 ladder with user-LUT nonlinearities)
+add_executable(nonlinear_ladder_stage_tests
+    NonlinearLadderStageTest.cpp
+)
+
+target_include_directories(nonlinear_ladder_stage_tests
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(nonlinear_ladder_stage_tests
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
+
+if(CMAKE_GENERATOR STREQUAL Xcode)
+  gtest_discover_tests(nonlinear_ladder_stage_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(nonlinear_ladder_stage_tests)
+endif()
+
+add_test(NAME NonlinearLadderStageTests COMMAND nonlinear_ladder_stage_tests)
+

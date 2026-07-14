@@ -41,6 +41,8 @@
 #include "Source/audio_pipeline/DCBlockingFilter.cpp"
 #include "Source/audio_pipeline/LowpassStage.cpp"
 #include "Source/audio_pipeline/VirtualAnalogFilterStage.cpp"
+#include "Source/audio_pipeline/LadderRk4Solver.cpp"
+#include "Source/audio_pipeline/NonlinearLadderStage.cpp"
 #include "Source/audio_pipeline/LowShelfStage.cpp"
 #include "Source/audio_pipeline/FirstOrderShelfStage.cpp"
 #include "Source/audio_pipeline/FatStage.cpp"
