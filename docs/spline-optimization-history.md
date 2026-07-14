@@ -1,4 +1,12 @@
+---
+verified: 2026-07-13
+verified_modules: { dsp-core: 45f7854 }
+status: historical
+---
+
 # Spline Curve Fitting - Optimization History
+
+> Historical record (2025-12). Several features tuned here (inflection detection, anchor pruning, the tuning scripts) were later removed; for current behavior see [spline-curve-fitting.md](spline-curve-fitting.md).
 
 **Status**: 🗄️ Historical reference
 **Last Updated**: 2025-12-03

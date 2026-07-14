@@ -191,7 +191,7 @@ ltf.setPaintStrokeActive(true);    // Freeze it during the stroke
 // ... computeCompositeAt() uses frozen cached scalar ...
 
 // After paint stroke
-ltf.setPaintStrokeActive(false);   // Unfreeze (renderer will recompute at 25Hz)
+ltf.setPaintStrokeActive(false);   // Unfreeze (renderer will recompute at 120Hz rate gate)
 ```
 
 **Why This Matters**:

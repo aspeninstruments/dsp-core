@@ -1,4 +1,12 @@
+---
+verified: 2026-07-13
+verified_modules: { dsp-core: 45f7854 }
+status: historical
+---
+
 # Curve Fitting Algorithm Enhancements - Summary
+
+> Historical record (2025-11). Symmetric fitting (Phases 2-4) shipped and remains current; the Phase 1 zero-crossing check and the `smooth()` preset were later removed. For current behavior see [spline-curve-fitting.md](spline-curve-fitting.md).
 
 **Status**: 📚 Reference - Enhancements completed 2025-11-10
 **Last Updated**: 2025-11-10

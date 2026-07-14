@@ -1,4 +1,12 @@
+---
+verified: 2026-07-13
+verified_modules: { dsp-core: 45f7854 }
+status: historical
+---
+
 # Spline Layer Architecture Refactoring
+
+> Historical record (2025-11). The `LayeredTransferFunction` architecture described here was later superseded by `LaneMixer`; for current behavior see [layered-transfer-function.md](layered-transfer-function.md) and [spline-curve-fitting.md](spline-curve-fitting.md).
 
 **Status**: 🗄️ Historical - Refactoring completed 2025-11-01
 **Date**: 2025-11-01
