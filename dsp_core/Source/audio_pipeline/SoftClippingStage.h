@@ -32,6 +32,11 @@ namespace dsp_core::audio_pipeline {
  *   Signal must reach +0.25 dBFS input for output to hit 0 dBFS
  *
  * All constants are precomputed at construction for minimal audio thread overhead.
+ *
+ * Note: production code uses SoftClippingSolver inside SeamlessTransferFunction's
+ * LUT evaluation (softClipper_ member); SoftClippingStage is the stage wrapper for
+ * standalone use. Neither runs as a tagged AudioPipeline stage — there is no
+ * StageTag for them.
  */
 class SoftClippingSolver {
   public:
