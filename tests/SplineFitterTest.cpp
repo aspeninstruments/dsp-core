@@ -367,13 +367,13 @@ TEST_F(SplineFitterTest, FitCurve_NonMonotonicCurve_WithoutEnforcement) {
 // SplineEvaluator Tests
 // ============================================================================
 
-TEST(SplineEvaluatorTest, Evaluate_EmptyAnchors_ReturnsZero) {
+TEST(SplineFitterEvaluatorTest, Evaluate_EmptyAnchors_ReturnsZero) {
     std::vector<dsp_core::SplineAnchor> const anchors;
     double const result = dsp_core::Services::SplineEvaluator::evaluate(anchors, 0.5);
     EXPECT_DOUBLE_EQ(result, 0.0);
 }
 
-TEST(SplineEvaluatorTest, Evaluate_SingleAnchor_ReturnsAnchorValue) {
+TEST(SplineFitterEvaluatorTest, Evaluate_SingleAnchor_ReturnsAnchorValue) {
     std::vector<dsp_core::SplineAnchor> const anchors = {{0.0, 0.5, false, 0.0}};
     double result = dsp_core::Services::SplineEvaluator::evaluate(anchors, 0.0);
     EXPECT_DOUBLE_EQ(result, 0.5);
@@ -383,7 +383,7 @@ TEST(SplineEvaluatorTest, Evaluate_SingleAnchor_ReturnsAnchorValue) {
     EXPECT_DOUBLE_EQ(result, 0.5);
 }
 
-TEST(SplineEvaluatorTest, Evaluate_AtAnchorPositions_ReturnsExactValues) {
+TEST(SplineFitterEvaluatorTest, Evaluate_AtAnchorPositions_ReturnsExactValues) {
     std::vector<dsp_core::SplineAnchor> const anchors = {
         {-1.0, -1.0, false, 1.0}, {0.0, 0.0, false, 1.0}, {1.0, 1.0, false, 1.0}};
 
@@ -393,7 +393,7 @@ TEST(SplineEvaluatorTest, Evaluate_AtAnchorPositions_ReturnsExactValues) {
     EXPECT_NEAR(dsp_core::Services::SplineEvaluator::evaluate(anchors, 1.0), 1.0, 1e-10);
 }
 
-TEST(SplineEvaluatorTest, Evaluate_LinearInterpolation) {
+TEST(SplineFitterEvaluatorTest, Evaluate_LinearInterpolation) {
     // Two anchors with slope = 1 (identity line)
     std::vector<dsp_core::SplineAnchor> const anchors = {
         {-1.0, -1.0, false, 1.0}, // tangent = 1
@@ -405,7 +405,7 @@ TEST(SplineEvaluatorTest, Evaluate_LinearInterpolation) {
     EXPECT_NEAR(midpoint, 0.0, 0.01); // Allow small deviation for Hermite
 }
 
-TEST(SplineEvaluatorTest, Evaluate_BeforeFirstAnchor_Clamps) {
+TEST(SplineFitterEvaluatorTest, Evaluate_BeforeFirstAnchor_Clamps) {
     std::vector<dsp_core::SplineAnchor> const anchors = {{0.0, 0.5, false, 0.0}, {1.0, 1.0, false, 0.0}};
 
     // Evaluate before first anchor
@@ -413,7 +413,7 @@ TEST(SplineEvaluatorTest, Evaluate_BeforeFirstAnchor_Clamps) {
     EXPECT_DOUBLE_EQ(result, 0.5); // Should return first anchor's y value
 }
 
-TEST(SplineEvaluatorTest, Evaluate_AfterLastAnchor_Clamps) {
+TEST(SplineFitterEvaluatorTest, Evaluate_AfterLastAnchor_Clamps) {
     std::vector<dsp_core::SplineAnchor> const anchors = {{0.0, 0.0, false, 0.0}, {1.0, 0.5, false, 0.0}};
 
     // Evaluate after last anchor
@@ -421,7 +421,7 @@ TEST(SplineEvaluatorTest, Evaluate_AfterLastAnchor_Clamps) {
     EXPECT_DOUBLE_EQ(result, 0.5); // Should return last anchor's y value
 }
 
-TEST(SplineEvaluatorTest, Evaluate_MonotonicSpline) {
+TEST(SplineFitterEvaluatorTest, Evaluate_MonotonicSpline) {
     // Create monotonic anchors
     std::vector<dsp_core::SplineAnchor> const anchors = {{-1.0, -0.8, false, 0.5},
                                                          {-0.5, -0.3, false, 0.6},
@@ -440,7 +440,7 @@ TEST(SplineEvaluatorTest, Evaluate_MonotonicSpline) {
     }
 }
 
-TEST(SplineEvaluatorTest, EvaluateDerivative_AtAnchors) {
+TEST(SplineFitterEvaluatorTest, EvaluateDerivative_AtAnchors) {
     std::vector<dsp_core::SplineAnchor> const anchors = {
         {-1.0, -1.0, false, 1.0}, // tangent = 1
         {0.0, 0.0, false, 0.0},   // tangent = 0 (extremum)
@@ -452,7 +452,7 @@ TEST(SplineEvaluatorTest, EvaluateDerivative_AtAnchors) {
     EXPECT_NEAR(deriv, 0.0, 0.1);
 }
 
-TEST(SplineEvaluatorTest, FindSegment_BinarySearch) {
+TEST(SplineFitterEvaluatorTest, FindSegment_BinarySearch) {
     std::vector<dsp_core::SplineAnchor> const anchors = {{-1.0, 0.0, false, 0.0},
                                                          {-0.5, 0.0, false, 0.0},
                                                          {0.0, 0.0, false, 0.0},
@@ -1163,7 +1163,7 @@ TEST_F(FeatureBasedFittingTest, TangentAlgorithmComparison_TanhQualityVsSpeed) {
  *   - Even harmonics: cos(n * acos(x))
  */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-void setHarmonicCurve(dsp_core::LayeredTransferFunction& ltf, int harmonicNumber, double amplitude = 1.0) {
+static void setHarmonicCurve(dsp_core::LayeredTransferFunction& ltf, int harmonicNumber, double amplitude = 1.0) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double x = ltf.normalizeIndex(i);
         x = std::max(-1.0, std::min(1.0, x)); // Clamp for trig safety

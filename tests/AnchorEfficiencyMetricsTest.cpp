@@ -36,7 +36,7 @@ class AnchorEfficiencyMetrics : public ::testing::Test {
 // Helper: Set curve types
 //==============================================================================
 
-void setTanhCurve(dsp_core::LayeredTransferFunction& ltf, double steepness = 2.0) {
+static void setTanhCurve(dsp_core::LayeredTransferFunction& ltf, double steepness = 2.0) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double const x = ltf.normalizeIndex(i);
         double const y = std::tanh(steepness * x);
@@ -44,7 +44,7 @@ void setTanhCurve(dsp_core::LayeredTransferFunction& ltf, double steepness = 2.0
     }
 }
 
-void setSinCurve(dsp_core::LayeredTransferFunction& ltf, double frequency = 1.0) {
+static void setSinCurve(dsp_core::LayeredTransferFunction& ltf, double frequency = 1.0) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double const x = ltf.normalizeIndex(i);
         double const y = std::sin(frequency * M_PI * x);
@@ -52,7 +52,7 @@ void setSinCurve(dsp_core::LayeredTransferFunction& ltf, double frequency = 1.0)
     }
 }
 
-void setHarmonicCurve(dsp_core::LayeredTransferFunction& ltf, int harmonicNumber) {
+static void setHarmonicCurve(dsp_core::LayeredTransferFunction& ltf, int harmonicNumber) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double x = ltf.normalizeIndex(i);
         x = std::max(-1.0, std::min(1.0, x)); // Clamp

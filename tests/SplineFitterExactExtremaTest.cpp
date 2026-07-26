@@ -138,7 +138,7 @@ double computeAveragePositionError(const std::vector<dsp_core::SplineAnchor>& an
  * Domain: x ∈ [-1, 1]
  * Range: y ∈ [-1, 1]
  */
-void setSinCurve(dsp_core::LayeredTransferFunction& ltf, double frequency) {
+static void setSinCurve(dsp_core::LayeredTransferFunction& ltf, double frequency) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double const x = ltf.normalizeIndex(i);
         double const y = std::sin(frequency * M_PI * x);
@@ -154,7 +154,7 @@ void setSinCurve(dsp_core::LayeredTransferFunction& ltf, double frequency) {
  * - Odd harmonics: sin(n * asin(x))
  */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-void setHarmonicCurve(dsp_core::LayeredTransferFunction& ltf, int harmonicNumber, double amplitude = 1.0) {
+static void setHarmonicCurve(dsp_core::LayeredTransferFunction& ltf, int harmonicNumber, double amplitude = 1.0) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double x = ltf.normalizeIndex(i);
         x = std::max(-1.0, std::min(1.0, x)); // Clamp for trig safety
@@ -186,7 +186,7 @@ void setCubicCurve(dsp_core::LayeredTransferFunction& ltf) {
 /**
  * Helper: Set base layer to tanh curve
  */
-void setTanhCurve(dsp_core::LayeredTransferFunction& ltf, double steepness = 2.0) {
+static void setTanhCurve(dsp_core::LayeredTransferFunction& ltf, double steepness = 2.0) {
     for (int i = 0; i < ltf.getTableSize(); ++i) {
         double const x = ltf.normalizeIndex(i);
         double const y = std::tanh(steepness * x);
