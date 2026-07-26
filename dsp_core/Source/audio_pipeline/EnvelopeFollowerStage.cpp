@@ -57,6 +57,13 @@ void EnvelopeFollowerStage::prepareToPlay(double sampleRate, int /*samplesPerBlo
 }
 
 void EnvelopeFollowerStage::setAttackReleaseSec(double attackSec, double releaseSec) {
+    // Called every block from updatePipelineParameters with values recomputed
+    // from the same APVTS floats, so exact-compare guards the 3x std::exp in
+    // recomputeCoefficients(). Sample-rate changes still recompute: prepareToPlay
+    // calls recomputeCoefficients() directly, not through this setter.
+    if (attackSec == attackSec_ && releaseSec == releaseSec_) {
+        return;
+    }
     attackSec_ = attackSec;
     releaseSec_ = releaseSec;
     recomputeCoefficients();
@@ -64,6 +71,11 @@ void EnvelopeFollowerStage::setAttackReleaseSec(double attackSec, double release
 
 void EnvelopeFollowerStage::setSidechainHpfCutoffHz(double cutoffHz) {
     cutoffHz = juce::jlimit(kMinHpfHz, kMaxHpfHz, cutoffHz);
+    // Same per-block caller pattern: skip the std::tan in updateHpfCoefficients()
+    // when the cutoff is unchanged. prepareToPlay rebuilds coefficients directly.
+    if (cutoffHz == hpfCutoffHz_.load(std::memory_order_acquire)) {
+        return;
+    }
     hpfCutoffHz_.store(cutoffHz, std::memory_order_release);
     updateHpfCoefficients();
 }
