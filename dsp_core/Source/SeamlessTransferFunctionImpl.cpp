@@ -75,6 +75,11 @@ void AudioEngine::processBuffer(juce::AudioBuffer<double>& buffer) const {
     const int numChannels = buffer.getNumChannels();
     const int numSamples = buffer.getNumSamples();
 
+    // primaryIndex only stores inside checkForNewLUT() above, so it is
+    // invariant for the rest of the block — hoist the acquire-load out of the
+    // per-sample loop (ldar stalls the pipeline and blocks vectorization).
+    const int primaryIdx = primaryIndex.load(std::memory_order_acquire);
+
     // Crossfade position advances once per sample (not per channel)
     for (int i = 0; i < numSamples; ++i) {
         if (crossfading) {
@@ -92,11 +97,9 @@ void AudioEngine::processBuffer(juce::AudioBuffer<double>& buffer) const {
                 crossfading = false;
             }
         } else {
-            const int idx = primaryIndex.load(std::memory_order_acquire);
-
             for (int ch = 0; ch < numChannels; ++ch) {
                 double* channelData = buffer.getWritePointer(ch);
-                channelData[i] = evaluateLUT(&lutBuffers[idx], channelData[i]);
+                channelData[i] = evaluateLUT(&lutBuffers[primaryIdx], channelData[i]);
             }
         }
     }
