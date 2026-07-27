@@ -5,6 +5,14 @@
 // std::function nonlinearity dispatch against the direct
 // SeamlessTransferFunction pointer path.
 //
+// MEASURED RESULT (2026-07, Apple Silicon, Release): replacing the
+// std::function members with a direct SeamlessTransferFunction* call was
+// ~1.9% SLOWER (6 interleaved A/B pairs, baseline median 78.1 vs 79.6
+// ns/channel-sample; bit-identical output). The monomorphic std::function
+// call site is effectively free next to the RK4 math, so the refactor was
+// not landed. Re-measure here before re-attempting (especially on x86_64 —
+// this null result is ARM-only evidence).
+//
 // Dev-only: not registered with ctest (timing output is meaningless on shared
 // CI runners). Run locally, Release build:
 //   ./build-release/modules/dsp-core/tests/hysteresis_stage_benchmark
