@@ -129,3 +129,23 @@ target_link_libraries(seamless_transfer_function_performance_tests
     dsp_core
     GTest::gtest_main
 )
+
+# HysteresisStage throughput benchmark (code-cleanse DSP-001). Not registered
+# with ctest — prints timing for local before/after comparison of the RK4
+# nonlinearity dispatch. Run locally, Release build:
+#   ./build-release/modules/dsp-core/tests/hysteresis_stage_benchmark
+add_executable(hysteresis_stage_benchmark
+    HysteresisStageBenchmark.cpp
+)
+
+target_include_directories(hysteresis_stage_benchmark
+    PRIVATE
+    ${GOOGLETEST_SOURCE_DIR}/googletest/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(hysteresis_stage_benchmark
+    PRIVATE
+    dsp_core
+    GTest::gtest_main
+)
