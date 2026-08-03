@@ -119,8 +119,6 @@ target_sources(dsp_core PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/ToneStage.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/ToneStage.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/ToneFrequencyResponse.h"
-    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AudioInputBuffer.h"
-    "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AudioInputWriter.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/SignalRangeTap.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AutoGainState.h"
     "${CMAKE_CURRENT_LIST_DIR}/dsp_core/Source/audio_pipeline/AutoSquashStage.h"

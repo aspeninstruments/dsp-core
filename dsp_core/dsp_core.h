@@ -91,8 +91,6 @@
 #include "Source/audio_pipeline/HysteresisStage.h"
 #include "Source/audio_pipeline/ToneStage.h"
 #include "Source/audio_pipeline/ToneFrequencyResponse.h"
-#include "Source/audio_pipeline/AudioInputBuffer.h"
-#include "Source/audio_pipeline/AudioInputWriter.h"
 #include "Source/audio_pipeline/SignalRangeTap.h"
 #include "Source/audio_pipeline/AutoGainState.h"
 #include "Source/audio_pipeline/AutoSquashStage.h"
