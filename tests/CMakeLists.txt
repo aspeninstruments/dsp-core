@@ -71,6 +71,7 @@ add_executable(dsp_core_tests
     HysteresisStageTest.cpp
     SurgeStageTest.cpp
     BiasStageTest.cpp
+    SignalRangeTapTest.cpp
     SlotVisualizerPublisherTest.cpp
     EnvelopeFollowerStageTest.cpp
     AutoGainStageTest.cpp

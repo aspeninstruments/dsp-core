@@ -25,6 +25,7 @@ enum class StageTag {
     Hysteresis,
     Surge,
     Bias,
+    SignalRangeTap,
     AutoSquash,
     AutoRestore,
     Modulator1,
@@ -59,6 +60,8 @@ inline std::string stageTagToString(StageTag tag) {
         return "surge";
     case StageTag::Bias:
         return "bias";
+    case StageTag::SignalRangeTap:
+        return "signalRangeTap";
     case StageTag::AutoSquash:
         return "autoSquash";
     case StageTag::AutoRestore:

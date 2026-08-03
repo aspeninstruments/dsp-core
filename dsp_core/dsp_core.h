@@ -93,6 +93,7 @@
 #include "Source/audio_pipeline/ToneFrequencyResponse.h"
 #include "Source/audio_pipeline/AudioInputBuffer.h"
 #include "Source/audio_pipeline/AudioInputWriter.h"
+#include "Source/audio_pipeline/SignalRangeTap.h"
 #include "Source/audio_pipeline/AutoGainState.h"
 #include "Source/audio_pipeline/AutoSquashStage.h"
 #include "Source/audio_pipeline/AutoRestoreStage.h"
