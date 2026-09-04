@@ -801,3 +801,82 @@ TEST_F(HysteresisStageTest, MakeupGain_HysteresisDisabled_NoMakeup) {
 // SurgeRateForwarding test removed — surge is no longer inside the LUT.
 // Wall-time accuracy across oversampling rates is verified by
 // SurgeStageTest::DurationTracksWallTimeAcrossSampleRates.
+
+// =============================================================================
+// Oversampling flip tolerance (preset-switch crash fix)
+// =============================================================================
+
+// An oversampling-order flip re-prepares HysteresisStage at the new rate on
+// the audio thread, which cold-starts the ODE state. The flip's smoothstep
+// crossfade must mask that transient: the discontinuity across the flip block
+// stays within a small multiple of the steady-state slew at high drive. If
+// this fails, HysteresisProcessor needs a prepare-without-reset path that
+// updates rate scalars while preserving M_n1_/H_n1_.
+TEST(HysteresisFlipToleranceTest, HysteresisFlipTolerance) {
+    constexpr double sampleRate = 44100.0;
+    constexpr int blockSize = 512;
+    constexpr double sineHz = 220.0;
+    constexpr double amp = 0.9; // high drive
+
+    dsp_core::SeamlessTransferFunction tf;
+    tf.prepareToPlay(sampleRate, blockSize);
+    tf.renderLUTImmediate(); // publish the identity LUT
+
+    auto wrapper = std::make_unique<OversamplingWrapper>(std::make_unique<HysteresisStage>(tf), 1);
+    wrapper->prepareToPlay(sampleRate, blockSize, 2);
+
+    juce::AudioBuffer<double> buffer(2, blockSize);
+    long globalSample = 0;
+    auto fillNext = [&] {
+        for (int ch = 0; ch < 2; ++ch) {
+            auto* data = buffer.getWritePointer(ch);
+            for (int i = 0; i < blockSize; ++i) {
+                data[i] = amp * std::sin(2.0 * juce::MathConstants<double>::pi * sineHz *
+                                         static_cast<double>(globalSample + i) / sampleRate);
+            }
+        }
+        globalSample += blockSize;
+    };
+
+    for (int b = 0; b < 8; ++b) { // warmup: hysteresis warm-up phases + filters
+        fillNext();
+        wrapper->process(buffer);
+    }
+
+    // Measure the steady-state per-sample slew of the nonlinear output.
+    double lastSample = buffer.getSample(0, blockSize - 1);
+    double steadyMaxDelta = 0.0;
+    for (int b = 0; b < 4; ++b) {
+        fillNext();
+        wrapper->process(buffer);
+        const auto* data = buffer.getReadPointer(0);
+        double prev = lastSample;
+        for (int i = 0; i < blockSize; ++i) {
+            ASSERT_TRUE(std::isfinite(data[i]));
+            steadyMaxDelta = std::max(steadyMaxDelta, std::abs(data[i] - prev));
+            prev = data[i];
+        }
+        lastSample = prev;
+    }
+
+    wrapper->setOversamplingOrder(2);
+
+    double flipMaxDelta = 0.0;
+    for (int b = 0; b < 4; ++b) {
+        fillNext();
+        wrapper->process(buffer);
+        const auto* data = buffer.getReadPointer(0);
+        double prev = lastSample;
+        for (int i = 0; i < blockSize; ++i) {
+            ASSERT_TRUE(std::isfinite(data[i]));
+            flipMaxDelta = std::max(flipMaxDelta, std::abs(data[i] - prev));
+            prev = data[i];
+        }
+        lastSample = prev;
+    }
+
+    EXPECT_EQ(wrapper->getOversamplingOrder(), 2);
+    EXPECT_LE(flipMaxDelta, std::max(3.0 * steadyMaxDelta, 0.15))
+        << "hysteresis cold-start transient not masked by the flip crossfade "
+        << "(steady=" << steadyMaxDelta << ", flip=" << flipMaxDelta << ")";
+}

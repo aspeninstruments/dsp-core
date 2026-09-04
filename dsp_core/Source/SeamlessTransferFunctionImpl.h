@@ -349,13 +349,27 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
      *  triggerAsyncUpdate() is cross-thread-safe by JUCE contract, so this
      *  is callable from the worker thread. */
     void setVisualizerDispatcher(juce::AsyncUpdater* dispatcher) {
-        visualizerDispatcher_ = dispatcher;
+        // Atomic: the message thread clears this during teardown while the
+        // worker may be reading it at the end of a render.
+        visualizerDispatcher_.store(dispatcher, std::memory_order_release);
     }
 
     /** Copy the most recent worker-rendered full-resolution sum into `dest`
      *  under a mutex (worker may be writing concurrently). Returns false if
      *  no render has ever completed. Thread-safe. */
     bool copyLastRenderedSum(std::array<double, TABLE_SIZE>& dest) const;
+
+    /** Acquire the render lock from the message thread. LaneMixer's
+     *  structural mutators take this (via the mutation-guard provider wired
+     *  in SeamlessTransferFunction::startSeamlessUpdates) so freeing or
+     *  reallocating lane curve storage can never overlap a worker render
+     *  that is iterating it — the AU fast-preset-switch crash. Recursive so
+     *  nested mutators (fromValueTree → removeLane → …) re-enter safely.
+     *  NEVER call from the audio thread (it only reads the triple-buffer
+     *  atomics and must not block on the worker). */
+    std::unique_lock<std::recursive_mutex> acquireRenderLock() const {
+        return std::unique_lock<std::recursive_mutex>(renderMutex_);
+    }
 
   private:
     /** Worker-thread loop (juce::Thread::run override). */
@@ -378,16 +392,19 @@ class EventDrivenRenderer : public juce::AsyncUpdater,
 
     LaneMixer& laneMixer;
     AudioEngine& audioEngine;
-    juce::AsyncUpdater* visualizerDispatcher_ = nullptr;
+    std::atomic<juce::AsyncUpdater*> visualizerDispatcher_{nullptr};
 
-    // Serializes forceRender (caller's thread) with the worker's
-    // renderIfNeeded path. Both write to the audio engine's worker-target
-    // buffer and to the worker-local lastRendered* state below; without
-    // this lock, a forceRender call during a preset restore could race
-    // with an in-flight worker render and corrupt the LUT. Held only for
-    // the duration of one render (~5-10 ms on slow hardware), so message-
-    // thread contention is negligible.
-    mutable std::mutex renderMutex_;
+    // Serializes the worker's renderIfNeeded path with every message-thread
+    // writer/mutator of the state it reads: forceRender, renderLUTImmediate
+    // (both write the worker-target buffer), and — via acquireRenderLock and
+    // LaneMixer's mutation-guard provider — every structural LaneMixer
+    // mutator (which free/reallocate the lane curve vectors the worker's
+    // computeSum iterates). Recursive: message-thread mutators nest
+    // (fromValueTree → removeLane, guarded scope → renderLUTImmediate); the
+    // worker itself never recurses. Held for at most one render (~5-10 ms on
+    // slow hardware), so message-thread contention is negligible. The AUDIO
+    // thread never touches this mutex — it reads only triple-buffer atomics.
+    mutable std::recursive_mutex renderMutex_;
 
     // Worker-thread state — read/written only by the worker (or by
     // forceRender on the calling thread). Always accessed under

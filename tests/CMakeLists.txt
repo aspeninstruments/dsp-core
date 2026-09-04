@@ -83,6 +83,7 @@ add_executable(dsp_core_tests
     FilterTopologyBenchmarkTest.cpp
     OversamplingWrapperTest.cpp
     NonlinearLadderStageTest.cpp
+    SeamlessConcurrencyTest.cpp
 )
 
 target_include_directories(dsp_core_tests

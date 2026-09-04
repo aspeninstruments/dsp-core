@@ -69,8 +69,10 @@ SeamlessTransferFunction::SeamlessTransferFunction() : pimpl(std::make_unique<Im
 SeamlessTransferFunction::~SeamlessTransferFunction() {
     // Stop async operations before destruction
 
-    // Clear the version change callback first to prevent dangling references
-    // during subsequent teardown
+    // Clear the callbacks first to prevent dangling references during
+    // subsequent teardown (the mutation-guard provider locks the renderer's
+    // mutex, so it must not outlive the renderer).
+    pimpl->laneMixer.setMutationGuardProvider(nullptr);
     pimpl->laneMixer.setOnVersionChanged(nullptr);
 
     // Disconnect renderer → visualizer link before destroying the dispatcher
@@ -155,6 +157,15 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
     // Create event-driven renderer (writes directly to triple buffer, no worker thread)
     pimpl->eventRenderer = std::make_unique<EventDrivenRenderer>(pimpl->laneMixer, pimpl->audioEngine);
 
+    // Serialize structural LaneMixer mutation with the worker: mutators that
+    // free/reallocate lane curve storage (fromValueTree, resetToDefaults,
+    // removeLane, setLaneCurveData, resynthesizeMorphableLanes) take the
+    // renderer's lock so they can never overlap a worker render iterating
+    // that storage (the AU fast-preset-switch crash). Cleared in
+    // stopSeamlessUpdates BEFORE the renderer is destroyed.
+    pimpl->laneMixer.setMutationGuardProvider(
+        [this]() { return pimpl->eventRenderer->acquireRenderLock(); });
+
     // Create visualizer dispatcher so the version-changed callback can wake it
     pimpl->visualizerDispatcher = std::make_unique<VisualizerUpdateDispatcher>(pimpl->laneMixer);
     pimpl->visualizerDispatcher->setVisualizerCallback(pimpl->visualizerCallback);
@@ -190,7 +201,10 @@ void SeamlessTransferFunction::startSeamlessUpdates() {
 void SeamlessTransferFunction::stopSeamlessUpdates() {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    // Clear callback first (prevent triggering after renderer destroyed)
+    // Clear callbacks first (prevent triggering after renderer destroyed).
+    // The mutation-guard provider locks the renderer's mutex — it must go
+    // before the renderer does.
+    pimpl->laneMixer.setMutationGuardProvider(nullptr);
     pimpl->laneMixer.setOnVersionChanged(nullptr);
 
     // Disconnect renderer → visualizer link before destroying the dispatcher
@@ -269,6 +283,14 @@ IRenderTrigger* SeamlessTransferFunction::getRenderTrigger() const {
 void SeamlessTransferFunction::renderLUTImmediate() {
     // VERIFY: Called on message thread
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    // Serialize with the worker for the WHOLE body: both this path and the
+    // worker's doRender write the same worker-target LUT buffer (and read
+    // lane storage). Pre-fix this path took neither the render mutex nor the
+    // newLUTReady gate — two unsynchronized writers into one buffer during
+    // every preset load.
+    auto renderLock = pimpl->eventRenderer ? pimpl->eventRenderer->acquireRenderLock()
+                                           : std::unique_lock<std::recursive_mutex>{};
 
     auto& mixer = pimpl->laneMixer;
 

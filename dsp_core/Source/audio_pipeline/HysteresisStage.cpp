@@ -12,13 +12,23 @@ void HysteresisStage::prepareToPlay(double sampleRate, int samplesPerBlock, int 
     for (int ch = 0; ch < 2; ++ch) {
         processors_[ch].prepareToPlay(sampleRate);
         processors_[ch].setOperatingPoint(1.0); // Audio-range: LUT sees raw signal
-        // LUT is now a pure memoryless function (Surge lives upstream as its own
-        // pipeline stage). RK4's 4× intra-sample NL evaluations are safe to route
-        // through applyTransferFunction directly.
-        processors_[ch].setNonlinearity(
-            [this, ch](double x) { return transferFunction_->applyTransferFunction(x, ch); });
-        processors_[ch].setNonlinearityDerivative(
-            [this, ch](double x) { return transferFunction_->applyTransferFunctionDerivative(x, ch); });
+    }
+
+    // Bind the nonlinearity callbacks ONCE. They are invariant across
+    // re-prepares, and prepareToPlay must stay allocation-free after the first
+    // call: an oversampling-order flip re-runs it on the AUDIO thread, and a
+    // std::function assignment may heap-allocate.
+    if (!nonlinearityBound_) {
+        for (int ch = 0; ch < 2; ++ch) {
+            // LUT is now a pure memoryless function (Surge lives upstream as its own
+            // pipeline stage). RK4's 4× intra-sample NL evaluations are safe to route
+            // through applyTransferFunction directly.
+            processors_[ch].setNonlinearity(
+                [this, ch](double x) { return transferFunction_->applyTransferFunction(x, ch); });
+            processors_[ch].setNonlinearityDerivative(
+                [this, ch](double x) { return transferFunction_->applyTransferFunctionDerivative(x, ch); });
+        }
+        nonlinearityBound_ = true;
     }
 
     smoothedMakeupGain_.reset(sampleRate, 0.01); // 10ms ramp

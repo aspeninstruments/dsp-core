@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 
 namespace dsp_core {
 
@@ -382,6 +383,26 @@ class LaneMixer {
         onVersionChanged_ = std::move(callback);
     }
 
+    /**
+     * RAII guard serializing structural mutation with the LUT-render worker.
+     * Provided by SeamlessTransferFunction::startSeamlessUpdates (it returns
+     * the EventDrivenRenderer's render lock); empty when no worker exists
+     * (construction, tests, headless use).
+     */
+    using MutationGuard = std::unique_lock<std::recursive_mutex>;
+
+    /**
+     * Install/clear the provider the structural mutators call to serialize
+     * with the worker thread. Without it, fromValueTree / resetToDefaults /
+     * removeLane / setLaneCurveData free or reallocate the very curve vectors
+     * the worker's computeSum/computeScan/computeSeries iterates — the AU
+     * fast-preset-switch crash. Message thread only; clear BEFORE destroying
+     * the renderer the provider locks.
+     */
+    void setMutationGuardProvider(std::function<MutationGuard()> provider) {
+        mutationGuardProvider_ = std::move(provider);
+    }
+
     void beginBatchUpdate();
     void endBatchUpdate();
 
@@ -496,6 +517,14 @@ class LaneMixer {
     bool batchUpdateActive_ = false;
     bool batchHasMixChange_ = false;         // Track if batch contains amplitude/scan changes
     std::function<void()> onVersionChanged_; // Callback for event-driven rendering
+
+    // Serializes structural mutation with the LUT-render worker (see
+    // setMutationGuardProvider). Empty provider → empty guard, zero cost.
+    std::function<MutationGuard()> mutationGuardProvider_;
+
+    MutationGuard acquireMutationGuard() const {
+        return mutationGuardProvider_ ? mutationGuardProvider_() : MutationGuard{};
+    }
 
     void incrementVersionIfNotBatching() {
         if (!batchUpdateActive_) {

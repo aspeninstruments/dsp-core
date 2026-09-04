@@ -420,7 +420,7 @@ void EventDrivenRenderer::forceRender() {
     // worker via renderMutex_ — preset-load paths call this while the
     // worker may already be mid-render in response to a separate trigger,
     // so the lock is required for correctness, not just a contract.
-    std::lock_guard<std::mutex> lk(renderMutex_);
+    std::lock_guard<std::recursive_mutex> lk(renderMutex_);
     doRender();
 }
 
@@ -480,9 +480,11 @@ void EventDrivenRenderer::run() {
 }
 
 void EventDrivenRenderer::renderIfNeeded() {
-    // Serialize against forceRender from the message thread. Cheap when
-    // uncontended; brief block (one render's worth) when forceRender wins.
-    std::lock_guard<std::mutex> lk(renderMutex_);
+    // Serialize against message-thread writers: forceRender,
+    // renderLUTImmediate, and LaneMixer structural mutators (via the
+    // mutation-guard provider). Cheap when uncontended; brief block (one
+    // render's worth) when a writer wins.
+    std::lock_guard<std::recursive_mutex> lk(renderMutex_);
 
     const uint64_t currentFullVersion = laneMixer.getVersion();
     if (currentFullVersion == lastRenderedFullVersion) {
@@ -603,8 +605,8 @@ void EventDrivenRenderer::doRender() {
     // Notify visualizer dispatcher so automation-driven amplitude changes
     // (which bypass onVersionChanged) still update the UI promptly.
     // triggerAsyncUpdate is cross-thread-safe by JUCE contract.
-    if (visualizerDispatcher_ != nullptr) {
-        visualizerDispatcher_->triggerAsyncUpdate();
+    if (auto* dispatcher = visualizerDispatcher_.load(std::memory_order_acquire)) {
+        dispatcher->triggerAsyncUpdate();
     }
 }
 
@@ -646,8 +648,8 @@ void EventDrivenRenderer::refreshVisualizerSnapshot() {
     // Wake the dispatcher so the visualizer repaints with fresh data.
     // triggerAsyncUpdate is cross-thread-safe by JUCE contract (same as the
     // notify at the end of doRender).
-    if (visualizerDispatcher_ != nullptr) {
-        visualizerDispatcher_->triggerAsyncUpdate();
+    if (auto* dispatcher = visualizerDispatcher_.load(std::memory_order_acquire)) {
+        dispatcher->triggerAsyncUpdate();
     }
 }
 

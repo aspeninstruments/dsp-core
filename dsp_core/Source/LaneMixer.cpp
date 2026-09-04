@@ -40,6 +40,8 @@ Lane& LaneMixer::getMutableLane(int index) {
 // ============================================================================
 
 int LaneMixer::addLane(int insertAfterIndex) {
+    const auto mutationGuard = acquireMutationGuard();
+
     if (activeLaneCount_ >= MAX_LANES) {
         return -1;
     }
@@ -110,6 +112,8 @@ int LaneMixer::duplicateLane(int sourceLaneIndex) {
 }
 
 bool LaneMixer::removeLane(int index) {
+    const auto mutationGuard = acquireMutationGuard();
+
     if (!isValidIndex(index) || activeLaneCount_ <= 1) {
         return false;
     }
@@ -298,6 +302,8 @@ bool LaneMixer::isLaneOddSymmetryEnabled(int index) const {
 }
 
 void LaneMixer::setLaneCurveData(int index, const std::vector<double>& data) {
+    const auto mutationGuard = acquireMutationGuard();
+
     if (!isValidIndex(index)) {
         return;
     }
@@ -308,6 +314,8 @@ void LaneMixer::setLaneCurveData(int index, const std::vector<double>& data) {
 }
 
 void LaneMixer::setLaneCurveData(int index, const double* data, int size) {
+    const auto mutationGuard = acquireMutationGuard();
+
     if (!isValidIndex(index) || data == nullptr) {
         return;
     }
@@ -925,11 +933,15 @@ void LaneMixer::endBatchUpdate() {
 // ============================================================================
 
 void LaneMixer::resetToDefaults() {
+    const auto mutationGuard = acquireMutationGuard();
+
     initializeDefaults();
     incrementVersionIfNotBatching();
 }
 
 void LaneMixer::initializeDefaults() {
+    const auto mutationGuard = acquireMutationGuard();
+
     // Harmonic-foldback factory layout: H1 fully on, odd harmonics H3..H19
     // preloaded with halving blendDepth so amplitude sweeps morph toward foldback.
     for (int laneIdx = 0; laneIdx < kDefaultLaneCount; ++laneIdx) {
@@ -1296,6 +1308,8 @@ void LaneMixer::loadOrRegenerateLaneCurve(Lane& lane, const juce::ValueTree& lan
 }
 
 void LaneMixer::resynthesizeMorphableLanes(double morph) {
+    const auto mutationGuard = acquireMutationGuard();
+
     bool anyChanged = false;
     for (int i = 0; i < activeLaneCount_; ++i) {
         auto& lane = lanes_[static_cast<size_t>(i)];
@@ -1334,6 +1348,8 @@ void LaneMixer::resynthesizeMorphableLanes(double morph) {
 }
 
 void LaneMixer::fromValueTree(const juce::ValueTree& vt) {
+    const auto mutationGuard = acquireMutationGuard();
+
     if (!vt.isValid() || vt.getType().toString() != "LaneMixer") {
         return;
     }

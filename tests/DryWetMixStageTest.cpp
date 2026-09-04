@@ -542,3 +542,85 @@ TEST_F(DryWetMixStageTest, ZeroLatency_NoDelayNeeded) {
         }
     }
 }
+
+// A preset switch can change the oversampling order while audio runs. The wet
+// wrapper (inside the effects pipeline) and the dry-side wrapper must flip in
+// a coordinated way: bounded discontinuity during the flip block and exact
+// dry/wet phase alignment restored immediately after. Pre-fix both wrappers
+// hard-switched with stale IIR state — a pop at 50% mix.
+TEST(DryWetFlipCoherenceTest, DryWetFlipCoherence) {
+    constexpr double sampleRate = 44100.0;
+    constexpr int blockSize = 512;
+    constexpr double sineHz = 440.0;
+    constexpr double amp = 0.5;
+
+    auto wetWrapper = std::make_unique<OversamplingWrapper>(
+        std::make_unique<dsp_core::audio_pipeline::AudioPipeline>(), 0);
+    auto* wetWrapperPtr = wetWrapper.get();
+
+    auto pipeline = std::make_unique<AudioPipeline>();
+    pipeline->addStage(std::move(wetWrapper));
+
+    DryWetMixStage stage(std::move(pipeline));
+    stage.prepareToPlay(sampleRate, blockSize, 2);
+    stage.setMixAmount(0.5);
+
+    juce::AudioBuffer<double> buffer(2, blockSize);
+    long globalSample = 0;
+    auto fillNext = [&] {
+        for (int ch = 0; ch < 2; ++ch) {
+            auto* data = buffer.getWritePointer(ch);
+            for (int i = 0; i < blockSize; ++i) {
+                data[i] = amp * std::sin(2.0 * juce::MathConstants<double>::pi * sineHz *
+                                         static_cast<double>(globalSample + i) / sampleRate);
+            }
+        }
+        globalSample += blockSize;
+    };
+
+    for (int b = 0; b < 6; ++b) { // warmup: mix ramp + filters settle
+        fillNext();
+        stage.process(buffer);
+    }
+
+    double lastSample = buffer.getSample(0, blockSize - 1);
+    double maxDelta = 0.0;
+    auto observe = [&] {
+        const auto* data = buffer.getReadPointer(0);
+        double prev = lastSample;
+        for (int i = 0; i < blockSize; ++i) {
+            ASSERT_TRUE(std::isfinite(data[i]));
+            maxDelta = std::max(maxDelta, std::abs(data[i] - prev));
+            prev = data[i];
+        }
+        lastSample = prev;
+    };
+
+    // Flip both sides the way the processor does: wet wrapper + dry-side order.
+    wetWrapperPtr->setOversamplingOrder(2);
+    stage.setDryOversamplingOrder(2);
+
+    for (int b = 0; b < 4; ++b) { // flip + settle
+        fillNext();
+        stage.process(buffer);
+        observe();
+    }
+
+    // Natural slew ≈ 0.031/sample; 0.1 gives 3x margin. A hard switch or a
+    // dry/wet skew at 50% mix lands well above it.
+    EXPECT_LE(maxDelta, 0.1) << "pop during coordinated dry/wet oversampling flip";
+
+    // Post-settle: identity wet chain at matching order — 50/50 mix must
+    // reconstruct the input (RMS within 1 dB of the steady sine).
+    double acc = 0.0;
+    fillNext();
+    stage.process(buffer);
+    const auto* data = buffer.getReadPointer(0);
+    for (int i = 0; i < blockSize; ++i) {
+        acc += data[i] * data[i];
+    }
+    const double rms = std::sqrt(acc / blockSize);
+    const double steady = amp / std::sqrt(2.0);
+    EXPECT_GE(rms, steady / 1.122) << "dry/wet misalignment after flip (silence/cancellation)";
+    EXPECT_LE(rms, steady * 1.122);
+}

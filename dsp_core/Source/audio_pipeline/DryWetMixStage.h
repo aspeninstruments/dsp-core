@@ -41,6 +41,16 @@ class DryWetMixStage : public AudioProcessingStage {
     void setDryOversamplingOrder(int order);
 
     /**
+     * AUDIO THREAD ONLY. Forward the per-block latched target order to the
+     * dry-side oversampler so its flip lands in the same block as the wet
+     * wrapper's (zero dry/wet skew). See
+     * OversamplingWrapper::setTargetOrderForBlock.
+     */
+    void setDryTargetOrderForBlock(int order) {
+        dryOversampler_->setTargetOrderForBlock(order);
+    }
+
+    /**
      * Re-read the residual latency mismatch (wet-path latency minus the dry
      * oversampler's own latency) and update the dry-path delay. The dry
      * oversampler already imparts the shared up/down latency; this only covers

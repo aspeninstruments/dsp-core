@@ -110,8 +110,11 @@ void DryWetMixStage::captureDrySignal(const juce::AudioBuffer<double>& buffer) {
     // Run the dry signal through the SAME half-band up/down as the wet core so
     // the blend stays phase-coherent (a sample delay can't reproduce the IIR's
     // per-frequency phase). Order 0 is a true passthrough — skip it so the
-    // oversampling-off case is a bit-identical dry copy.
-    if (dryOversampler_->getOversamplingOrder() > 0) {
+    // oversampling-off case is a bit-identical dry copy. A pending flip to a
+    // non-zero order must also run the wrapper: the flip executes INSIDE its
+    // process(), so skipping here would leave the dry side stuck on the old
+    // order while the wet side flips.
+    if (dryOversampler_->getOversamplingOrder() > 0 || dryOversampler_->getTargetOrder() > 0) {
         for (int ch = 0; ch < numChannels; ++ch) {
             dryChannelPtrs_[static_cast<size_t>(ch)] = dryBuffer_.getWritePointer(ch);
         }

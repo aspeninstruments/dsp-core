@@ -78,6 +78,11 @@ class HysteresisStage : public AudioProcessingStage {
     int crossfadePosition_{0};
     int phaseSamples_{480};
     bool previousEnabled_{false};
+
+    // One-time nonlinearity binding guard: prepareToPlay must be
+    // allocation-free after the first call (oversampling flips re-run it on
+    // the audio thread), and std::function assignment may allocate.
+    bool nonlinearityBound_{false};
 };
 
 } // namespace dsp_core::audio_pipeline
